@@ -17,15 +17,21 @@ const dailyItems: CheckItem[] = [
   { id: 'litterNight', label: '晚上挖貓砂', emoji: '🧹' },
   { id: 'pee', label: '今天有尿尿', emoji: '💧' },
   { id: 'poop', label: '今天有大便', emoji: '💩' },
-  { id: 'waterCan', label: '補水罐', emoji: '🥫' },
+  { id: 'waterCan', label: '補水罐 / 飲水確認', emoji: '🥫' },
   { id: 'snack', label: '零食確認', emoji: '🍪' },
   { id: 'brushHair', label: '梳毛確認', emoji: '🪮' },
   { id: 'brushTeeth', label: '刷牙確認', emoji: '🪥' },
+  { id: 'abnormal', label: '今天有異常狀況', emoji: '⚠️' },
 ];
 
 const monthlyItems: CheckItem[] = [
+  { id: 'changeLitter', label: '本月換貓砂', emoji: '🧹' },
+  { id: 'deworming', label: '本月驅蟲', emoji: '💊' },
+  { id: 'vaccine', label: '疫苗 / 預防針確認', emoji: '💉' },
+  { id: 'vetVisit', label: '看診 / 回診確認', emoji: '🏥' },
   { id: 'bath', label: '本月洗澡確認', emoji: '🛁' },
-  { id: 'catFood', label: '本月貓糧確認', emoji: '🍚' },
+  { id: 'nailTrim', label: '剪指甲確認', emoji: '✂️' },
+  { id: 'catFood', label: '本月貓糧 / 貓砂補貨確認', emoji: '🍚' },
 ];
 
 function todayKey() {
@@ -120,11 +126,20 @@ export default function App() {
     }
   };
 
+  const resetMonth = () => {
+    if (confirm('確定要清除本月定期照顧紀錄嗎？')) {
+      setMonthly({});
+    }
+  };
+
   const renderTodayPage = () => (
     <>
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">🐱</div>
-        <h1 className="mt-2 text-2xl font-bold">貓咪每日照護</h1>
+        <h1 className="mt-2 text-2xl font-bold">貓咪日記</h1>
+        <p className="mt-1 text-sm font-medium text-orange-600">
+          Cat Calendar
+        </p>
         <p className="mt-1 text-sm text-stone-500">日期：{today}</p>
 
         <div className="mt-4">
@@ -144,7 +159,13 @@ export default function App() {
       </div>
 
       <section className="mb-5">
-        <h2 className="mb-3 text-lg font-bold">每日確認</h2>
+        <div className="mb-3">
+          <h2 className="text-lg font-bold">每日照顧</h2>
+          <p className="text-sm text-stone-500">
+            適合每天快速確認的照顧項目
+          </p>
+        </div>
+
         <div className="space-y-3">
           {dailyItems.map((item) => (
             <button
@@ -152,7 +173,9 @@ export default function App() {
               onClick={() => toggleDaily(item.id)}
               className={`flex w-full items-center justify-between rounded-2xl border p-4 text-left shadow-sm transition ${
                 daily[item.id]
-                  ? 'border-green-200 bg-green-50'
+                  ? item.id === 'abnormal'
+                    ? 'border-red-200 bg-red-50'
+                    : 'border-green-200 bg-green-50'
                   : 'border-stone-100 bg-white'
               }`}
             >
@@ -169,10 +192,13 @@ export default function App() {
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold">每月確認</h2>
-            <p className="text-sm text-stone-500">月份：{month}</p>
+            <h2 className="text-lg font-bold">本月定期照顧</h2>
+            <p className="text-sm text-stone-500">
+              驅蟲、換貓砂、疫苗、看診這類不是每天做的項目
+            </p>
+            <p className="mt-1 text-sm text-stone-500">月份：{month}</p>
           </div>
-          <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-semibold text-orange-700">
+          <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
             {monthlyDone}/{monthlyItems.length}
           </span>
         </div>
@@ -211,6 +237,13 @@ export default function App() {
             />
           </div>
         </div>
+
+        <button
+          onClick={resetMonth}
+          className="mt-4 w-full rounded-2xl border border-stone-200 bg-white py-3 font-bold text-stone-600"
+        >
+          清除本月紀錄
+        </button>
       </section>
 
       <button
@@ -228,7 +261,7 @@ export default function App() {
         <div className="text-4xl">📅</div>
         <h1 className="mt-2 text-2xl font-bold">歷史紀錄</h1>
         <p className="mt-1 text-sm text-stone-500">
-          查看過去每日照護狀況
+          查看過去每日照顧狀況
         </p>
       </div>
 
@@ -243,7 +276,10 @@ export default function App() {
             const percent = Math.round((done / dailyItems.length) * 100);
 
             return (
-              <div key={record.date} className="rounded-3xl bg-white p-5 shadow-sm">
+              <div
+                key={record.date}
+                className="rounded-3xl bg-white p-5 shadow-sm"
+              >
                 <div className="mb-3 flex items-center justify-between">
                   <div>
                     <h2 className="text-lg font-bold">{record.date}</h2>
@@ -269,7 +305,9 @@ export default function App() {
                       key={item.id}
                       className={`rounded-2xl px-3 py-2 ${
                         record.data[item.id]
-                          ? 'bg-green-50 text-green-700'
+                          ? item.id === 'abnormal'
+                            ? 'bg-red-50 text-red-700'
+                            : 'bg-green-50 text-green-700'
                           : 'bg-stone-50 text-stone-400'
                       }`}
                     >
@@ -301,7 +339,7 @@ export default function App() {
                 : 'text-stone-500'
             }`}
           >
-            今日確認
+            今日照顧
           </button>
           <button
             onClick={() => setPage('history')}
