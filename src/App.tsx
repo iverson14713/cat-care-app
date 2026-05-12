@@ -14,7 +14,7 @@ type CheckItem = {
 
 type DailyRecord = Record<string, boolean | string>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'history' | 'cats';
+type Page = 'today' | 'history' | 'abnormal' | 'cats';
 
 const CATS_KEY = 'cat-calendar-cats';
 const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
@@ -149,6 +149,22 @@ function getAllDailyHistory(catId: string) {
   return records.sort((a, b) => b.date.localeCompare(a.date));
 }
 
+function getAbnormalHistory(catId: string) {
+  return getAllDailyHistory(catId)
+    .map((record) => {
+      const abnormalNote =
+        typeof record.data.abnormalNote === 'string'
+          ? record.data.abnormalNote.trim()
+          : '';
+
+      return {
+        date: record.date,
+        abnormalNote,
+      };
+    })
+    .filter((record) => record.abnormalNote.length > 0);
+}
+
 export default function App() {
   const today = todayKey();
   const month = monthKey();
@@ -204,6 +220,12 @@ export default function App() {
     historyRefreshKey;
     if (!selectedCat) return [];
     return getAllDailyHistory(selectedCat.id);
+  }, [historyRefreshKey, selectedCat]);
+
+  const abnormalHistory = useMemo(() => {
+    historyRefreshKey;
+    if (!selectedCat) return [];
+    return getAbnormalHistory(selectedCat.id);
   }, [historyRefreshKey, selectedCat]);
 
   useEffect(() => {
@@ -272,7 +294,11 @@ export default function App() {
       return;
     }
 
-    if (!confirm(`確定要刪除「${target.name}」嗎？\n已保存的紀錄不會自動刪除，但畫面上不會再顯示這隻貓。`)) {
+    if (
+      !confirm(
+        `確定要刪除「${target.name}」嗎？\n已保存的紀錄不會自動刪除，但畫面上不會再顯示這隻貓。`
+      )
+    ) {
       return;
     }
 
@@ -302,14 +328,48 @@ export default function App() {
   };
 
   const resetToday = () => {
-    if (confirm(`確定要清除「${selectedCat?.name ?? '目前貓咪'}」今天的紀錄嗎？`)) {
+    if (
+      confirm(
+        `確定要清除「${selectedCat?.name ?? '目前貓咪'}」今天的紀錄嗎？`
+      )
+    ) {
       setDaily({});
     }
   };
 
   const resetMonth = () => {
-    if (confirm(`確定要清除「${selectedCat?.name ?? '目前貓咪'}」本月定期照顧紀錄嗎？`)) {
+    if (
+      confirm(
+        `確定要清除「${selectedCat?.name ?? '目前貓咪'}」本月定期照顧紀錄嗎？`
+      )
+    ) {
       setMonthly({});
+    }
+  };
+
+  const copyAbnormalReport = async () => {
+    if (!selectedCat) return;
+
+    if (abnormalHistory.length === 0) {
+      alert('目前沒有異常紀錄可以複製');
+      return;
+    }
+
+    const report = [
+      `貓咪：${selectedCat.name}`,
+      '異常紀錄彙整',
+      `產生日期：${today}`,
+      '',
+      ...abnormalHistory.map(
+        (record) => `【${record.date}】\n${record.abnormalNote}`
+      ),
+    ].join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(report);
+      alert('已複製異常彙整，可以貼給獸醫或傳到 LINE');
+    } catch {
+      alert('複製失敗，請手動選取內容複製');
     }
   };
 
@@ -429,9 +489,7 @@ export default function App() {
             已記錄異常狀況
           </p>
         ) : (
-          <p className="mt-2 text-sm text-stone-400">
-            沒有異常可以留空
-          </p>
+          <p className="mt-2 text-sm text-stone-400">沒有異常可以留空</p>
         )}
       </section>
 
@@ -597,9 +655,7 @@ export default function App() {
                 {recordAbnormalNote.trim() && (
                   <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
                     <div className="mb-1 font-bold">⚠️ 異常狀況</div>
-                    <p className="whitespace-pre-wrap">
-                      {recordAbnormalNote}
-                    </p>
+                    <p className="whitespace-pre-wrap">{recordAbnormalNote}</p>
                   </div>
                 )}
 
@@ -612,6 +668,64 @@ export default function App() {
               </div>
             );
           })}
+        </div>
+      )}
+    </>
+  );
+
+  const renderAbnormalPage = () => (
+    <>
+      {renderCatSwitcher()}
+
+      <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
+        <div className="text-4xl">⚠️</div>
+        <h1 className="mt-2 text-2xl font-bold">異常彙整</h1>
+        <p className="mt-1 text-sm text-stone-500">
+          彙整 {selectedCat?.name ?? '目前貓咪'} 有填寫異常狀況的日期，方便看診時給獸醫參考
+        </p>
+      </div>
+
+      <div className="mb-5 grid grid-cols-2 gap-3">
+        <button
+          onClick={copyAbnormalReport}
+          className="rounded-2xl bg-orange-400 py-4 font-bold text-white shadow-sm"
+        >
+          複製給獸醫
+        </button>
+
+        <button
+          onClick={() => window.print()}
+          className="rounded-2xl bg-stone-800 py-4 font-bold text-white shadow-sm"
+        >
+          列印 / 存 PDF
+        </button>
+      </div>
+
+      {abnormalHistory.length === 0 ? (
+        <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">
+          目前還沒有這隻貓的異常紀錄
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {abnormalHistory.map((record) => (
+            <div
+              key={record.date}
+              className="rounded-3xl border border-red-100 bg-white p-5 shadow-sm"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-red-700">
+                  {record.date}
+                </h2>
+                <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-bold text-red-600">
+                  異常
+                </span>
+              </div>
+
+              <p className="whitespace-pre-wrap text-sm leading-6 text-stone-700">
+                {record.abnormalNote}
+              </p>
+            </div>
+          ))}
         </div>
       )}
     </>
@@ -690,41 +804,55 @@ export default function App() {
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       <div className="mx-auto max-w-md pb-24">
-        <div className="mb-5 grid grid-cols-3 gap-2 rounded-3xl bg-white p-2 shadow-sm">
+        <div className="mb-5 grid grid-cols-4 gap-2 rounded-3xl bg-white p-2 shadow-sm">
           <button
             onClick={() => setPage('today')}
-            className={`rounded-2xl py-3 text-sm font-bold transition ${
+            className={`rounded-2xl py-3 text-xs font-bold transition ${
               page === 'today'
                 ? 'bg-orange-400 text-white'
                 : 'text-stone-500'
             }`}
           >
-            今日照顧
+            今日
           </button>
+
           <button
             onClick={() => setPage('history')}
-            className={`rounded-2xl py-3 text-sm font-bold transition ${
+            className={`rounded-2xl py-3 text-xs font-bold transition ${
               page === 'history'
                 ? 'bg-orange-400 text-white'
                 : 'text-stone-500'
             }`}
           >
-            歷史紀錄
+            歷史
           </button>
+
+          <button
+            onClick={() => setPage('abnormal')}
+            className={`rounded-2xl py-3 text-xs font-bold transition ${
+              page === 'abnormal'
+                ? 'bg-orange-400 text-white'
+                : 'text-stone-500'
+            }`}
+          >
+            異常
+          </button>
+
           <button
             onClick={() => setPage('cats')}
-            className={`rounded-2xl py-3 text-sm font-bold transition ${
+            className={`rounded-2xl py-3 text-xs font-bold transition ${
               page === 'cats'
                 ? 'bg-orange-400 text-white'
                 : 'text-stone-500'
             }`}
           >
-            我的貓咪
+            貓咪
           </button>
         </div>
 
         {page === 'today' && renderTodayPage()}
         {page === 'history' && renderHistoryPage()}
+        {page === 'abnormal' && renderAbnormalPage()}
         {page === 'cats' && renderCatsPage()}
 
         <p className="mt-6 text-center text-xs text-stone-400">
