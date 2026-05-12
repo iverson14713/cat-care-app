@@ -6,7 +6,7 @@ type CheckItem = {
   emoji: string;
 };
 
-type DailyRecord = Record<string, boolean>;
+type DailyRecord = Record<string, boolean | string>;
 type MonthlyRecord = Record<string, boolean>;
 type Page = 'today' | 'history';
 
@@ -21,7 +21,6 @@ const dailyItems: CheckItem[] = [
   { id: 'snack', label: '零食確認', emoji: '🍪' },
   { id: 'brushHair', label: '梳毛確認', emoji: '🪮' },
   { id: 'brushTeeth', label: '刷牙確認', emoji: '🪥' },
-  { id: 'abnormal', label: '今天有異常狀況', emoji: '⚠️' },
 ];
 
 const monthlyItems: CheckItem[] = [
@@ -85,8 +84,11 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   });
 
+  const abnormalNote = typeof daily.abnormalNote === 'string' ? daily.abnormalNote : '';
+  const dailyNote = typeof daily.dailyNote === 'string' ? daily.dailyNote : '';
+
   const dailyDone = useMemo(
-    () => dailyItems.filter((item) => daily[item.id]).length,
+    () => dailyItems.filter((item) => daily[item.id] === true).length,
     [daily]
   );
 
@@ -118,6 +120,10 @@ export default function App() {
 
   const toggleMonthly = (id: string) => {
     setMonthly((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const updateDailyText = (key: string, value: string) => {
+    setDaily((prev) => ({ ...prev, [key]: value }));
   };
 
   const resetToday = () => {
@@ -172,10 +178,8 @@ export default function App() {
               key={item.id}
               onClick={() => toggleDaily(item.id)}
               className={`flex w-full items-center justify-between rounded-2xl border p-4 text-left shadow-sm transition ${
-                daily[item.id]
-                  ? item.id === 'abnormal'
-                    ? 'border-red-200 bg-red-50'
-                    : 'border-green-200 bg-green-50'
+                daily[item.id] === true
+                  ? 'border-green-200 bg-green-50'
                   : 'border-stone-100 bg-white'
               }`}
             >
@@ -183,10 +187,52 @@ export default function App() {
                 <span className="text-2xl">{item.emoji}</span>
                 <span className="font-medium">{item.label}</span>
               </div>
-              <span className="text-2xl">{daily[item.id] ? '✅' : '⬜'}</span>
+              <span className="text-2xl">{daily[item.id] === true ? '✅' : '⬜'}</span>
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+        <div className="mb-3">
+          <h2 className="text-lg font-bold">異常狀況紀錄</h2>
+          <p className="text-sm text-stone-500">
+            有嘔吐、拉肚子、食慾變差、精神不好等狀況時，可以寫在這裡
+          </p>
+        </div>
+
+        <textarea
+          value={abnormalNote}
+          onChange={(e) => updateDailyText('abnormalNote', e.target.value)}
+          placeholder="例如：今天吐了 1 次，便便偏軟，食慾比平常差一點。"
+          className="min-h-28 w-full resize-none rounded-2xl border border-red-100 bg-red-50 p-4 text-sm outline-none focus:border-red-300"
+        />
+
+        {abnormalNote.trim() ? (
+          <p className="mt-2 text-sm font-medium text-red-600">
+            已記錄異常狀況
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-stone-400">
+            沒有異常可以留空
+          </p>
+        )}
+      </section>
+
+      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+        <div className="mb-3">
+          <h2 className="text-lg font-bold">今日備註</h2>
+          <p className="text-sm text-stone-500">
+            可以記錄心情、活動、食量變化或其他小事
+          </p>
+        </div>
+
+        <textarea
+          value={dailyNote}
+          onChange={(e) => updateDailyText('dailyNote', e.target.value)}
+          placeholder="例如：今天很黏人，玩逗貓棒玩很久。"
+          className="min-h-24 w-full resize-none rounded-2xl border border-stone-100 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300"
+        />
       </section>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
@@ -261,7 +307,7 @@ export default function App() {
         <div className="text-4xl">📅</div>
         <h1 className="mt-2 text-2xl font-bold">歷史紀錄</h1>
         <p className="mt-1 text-sm text-stone-500">
-          查看過去每日照顧狀況
+          查看過去每日照顧狀況與異常紀錄
         </p>
       </div>
 
@@ -272,8 +318,16 @@ export default function App() {
       ) : (
         <div className="space-y-4">
           {history.map((record) => {
-            const done = dailyItems.filter((item) => record.data[item.id]).length;
+            const done = dailyItems.filter((item) => record.data[item.id] === true).length;
             const percent = Math.round((done / dailyItems.length) * 100);
+            const recordAbnormalNote =
+              typeof record.data.abnormalNote === 'string'
+                ? record.data.abnormalNote
+                : '';
+            const recordDailyNote =
+              typeof record.data.dailyNote === 'string'
+                ? record.data.dailyNote
+                : '';
 
             return (
               <div
@@ -304,21 +358,33 @@ export default function App() {
                     <div
                       key={item.id}
                       className={`rounded-2xl px-3 py-2 ${
-                        record.data[item.id]
-                          ? item.id === 'abnormal'
-                            ? 'bg-red-50 text-red-700'
-                            : 'bg-green-50 text-green-700'
+                        record.data[item.id] === true
+                          ? 'bg-green-50 text-green-700'
                           : 'bg-stone-50 text-stone-400'
                       }`}
                     >
                       <span className="mr-1">{item.emoji}</span>
                       {item.label}
                       <span className="ml-1">
-                        {record.data[item.id] ? '✅' : '—'}
+                        {record.data[item.id] === true ? '✅' : '—'}
                       </span>
                     </div>
                   ))}
                 </div>
+
+                {recordAbnormalNote.trim() && (
+                  <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
+                    <div className="mb-1 font-bold">⚠️ 異常狀況</div>
+                    <p className="whitespace-pre-wrap">{recordAbnormalNote}</p>
+                  </div>
+                )}
+
+                {recordDailyNote.trim() && (
+                  <div className="mt-3 rounded-2xl bg-stone-50 p-4 text-sm text-stone-700">
+                    <div className="mb-1 font-bold">📝 今日備註</div>
+                    <p className="whitespace-pre-wrap">{recordDailyNote}</p>
+                  </div>
+                )}
               </div>
             );
           })}
