@@ -1122,20 +1122,20 @@ export default function App() {
           <p className="text-sm text-stone-500">{tr.dailyCareDesc}</p>
         </div>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
           {dailyItems.map((item) => (
             <button
               key={item.id}
               onClick={() => toggleDaily(item.id)}
-              className={`flex w-full items-center justify-between rounded-2xl border p-4 text-left shadow-sm transition ${
+              className={`flex min-h-[78px] w-full items-center justify-between rounded-2xl border p-3 text-left shadow-sm transition active:scale-[0.98] ${
                 daily[item.id] === true ? 'border-green-200 bg-green-50' : 'border-stone-100 bg-white'
               }`}
             >
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{item.emoji}</span>
-                <span className="font-medium">{tr[item.labelKey as keyof typeof tr]}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-2xl">{item.emoji}</span>
+                <span className="text-sm font-bold leading-snug text-stone-700">{tr[item.labelKey as keyof typeof tr]}</span>
               </div>
-              <span className="text-2xl">{daily[item.id] === true ? '✅' : '⬜'}</span>
+              <span className="ml-2 shrink-0 text-xl">{daily[item.id] === true ? '✅' : '⬜'}</span>
             </button>
           ))}
         </div>
@@ -1193,20 +1193,20 @@ export default function App() {
           </span>
         </div>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
           {monthlyItems.map((item) => (
             <button
               key={item.id}
               onClick={() => toggleMonthly(item.id)}
-              className={`flex w-full items-center justify-between rounded-2xl border p-4 text-left transition ${
+              className={`flex min-h-[78px] w-full items-center justify-between rounded-2xl border p-3 text-left transition active:scale-[0.98] ${
                 monthly[item.id] ? 'border-blue-200 bg-blue-50' : 'border-stone-100 bg-stone-50'
               }`}
             >
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{item.emoji}</span>
-                <span className="font-medium">{tr[item.labelKey as keyof typeof tr]}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-2xl">{item.emoji}</span>
+                <span className="text-sm font-bold leading-snug text-stone-700">{tr[item.labelKey as keyof typeof tr]}</span>
               </div>
-              <span className="text-2xl">{monthly[item.id] ? '✅' : '⬜'}</span>
+              <span className="ml-2 shrink-0 text-xl">{monthly[item.id] ? '✅' : '⬜'}</span>
             </button>
           ))}
         </div>
