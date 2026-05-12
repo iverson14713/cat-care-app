@@ -129,6 +129,22 @@ const text = {
     tapToSwitch: '點擊切換到這隻貓',
     delete: '刪除',
     savedLocal: '紀錄與照片會保存在這台手機 / 電腦的瀏覽器內',
+    backupTitle: '備份 / 匯出資料',
+    backupDesc: '匯出目前所有貓咪、每日紀錄、體重、照片與設定。資料會下載成 JSON 檔，換手機或清除瀏覽器前建議先備份。',
+    exportBackup: '匯出備份',
+    importBackup: '匯入備份',
+    importBackupDesc: '匯入之前下載的 JSON 備份檔，會覆蓋目前瀏覽器中的貓咪日記資料。',
+    exportDone: '備份檔已下載',
+    importDone: '備份已匯入，頁面將重新整理',
+    importFailed: '匯入失敗，請確認檔案是貓咪日記匯出的 JSON 備份',
+    privacyTitle: '隱私政策',
+    privacyDesc: '目前版本不需要登入，資料主要保存在你的手機 / 電腦瀏覽器內，不會主動上傳到伺服器。',
+    privacyPoint1: '我們不會要求你填寫真實姓名、電話或地址。',
+    privacyPoint2: '貓咪資料、體重、異常紀錄、備註與照片會保存在本機瀏覽器。',
+    privacyPoint3: '如果你清除瀏覽器資料、換手機或更換瀏覽器，紀錄可能會消失，請先使用備份匯出。',
+    privacyPoint4: '列印、截圖、複製獸醫報告或備份檔分享出去後，請自行注意照片與健康紀錄隱私。',
+    copyPrivacy: '複製隱私政策',
+    privacyCopied: '隱私政策已複製',
     langButton: 'EN',
     removePhoto: '刪除',
     close: '關閉',
@@ -251,6 +267,22 @@ const text = {
     tapToSwitch: 'Tap to switch to this cat',
     delete: 'Delete',
     savedLocal: 'Records and photos are saved in this phone / computer browser',
+    backupTitle: 'Backup / Export data',
+    backupDesc: 'Export all cats, daily records, weights, photos, and settings as a JSON file. Please back up before switching phones or clearing browser data.',
+    exportBackup: 'Export backup',
+    importBackup: 'Import backup',
+    importBackupDesc: 'Import a JSON backup file downloaded from Cat Diary. This will overwrite current Cat Diary data in this browser.',
+    exportDone: 'Backup file downloaded',
+    importDone: 'Backup imported. The page will reload.',
+    importFailed: 'Import failed. Please choose a valid Cat Diary JSON backup file.',
+    privacyTitle: 'Privacy policy',
+    privacyDesc: 'This version does not require login. Records are mainly saved in your phone / computer browser and are not actively uploaded to a server.',
+    privacyPoint1: 'We do not ask for your real name, phone number, or address.',
+    privacyPoint2: 'Cat profile, weight, abnormal notes, daily notes, and photos are saved in this local browser.',
+    privacyPoint3: 'If you clear browser data, switch phones, or change browsers, records may be lost. Please export a backup first.',
+    privacyPoint4: 'After you print, screenshot, copy a vet report, or share a backup file, please manage the privacy of photos and health records yourself.',
+    copyPrivacy: 'Copy privacy policy',
+    privacyCopied: 'Privacy policy copied',
     langButton: '中',
     removePhoto: 'Remove',
     close: 'Close',
@@ -917,6 +949,95 @@ export default function App() {
   const deleteWeightRecord = (id: string) => {
     if (!confirm(tr.deleteWeightConfirm)) return;
     setWeightRecords((prev) => prev.filter((record) => record.id !== id));
+  };
+
+  const exportBackup = () => {
+    const backupData: Record<string, string> = {};
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('cat-calendar-')) {
+        backupData[key] = localStorage.getItem(key) ?? '';
+      }
+    }
+
+    const payload = {
+      app: 'cat-calendar',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: backupData,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cat-calendar-backup-${today}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    alert(tr.exportDone);
+  };
+
+  const importBackup = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onerror = () => alert(tr.importFailed);
+
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const data = parsed?.data;
+
+        if (parsed?.app !== 'cat-calendar' || !data || typeof data !== 'object') {
+          throw new Error('invalid backup');
+        }
+
+        const keys = Object.keys(data).filter((key) => key.startsWith('cat-calendar-'));
+        if (keys.length === 0) throw new Error('empty backup');
+
+        keys.forEach((key) => {
+          const value = data[key];
+          localStorage.setItem(
+            key,
+            typeof value === 'string' ? value : JSON.stringify(value)
+          );
+        });
+
+        alert(tr.importDone);
+        window.location.reload();
+      } catch {
+        alert(tr.importFailed);
+      }
+    };
+
+    reader.readAsText(file);
+  };
+
+  const copyPrivacyPolicy = async () => {
+    const policy = [
+      tr.privacyTitle,
+      '',
+      tr.privacyDesc,
+      '',
+      `1. ${tr.privacyPoint1}`,
+      `2. ${tr.privacyPoint2}`,
+      `3. ${tr.privacyPoint3}`,
+      `4. ${tr.privacyPoint4}`,
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(policy);
+      alert(tr.privacyCopied);
+    } catch {
+      alert(tr.copyFailed);
+    }
   };
 
   const resetToday = () => {
@@ -1618,6 +1739,48 @@ export default function App() {
           {renderProfileInput(tr.vetClinic, selectedCat?.vetClinic, 'vetClinic')}
           {renderProfileTextarea(tr.profileNote, selectedCat?.profileNote, 'profileNote')}
         </div>
+      </section>
+
+      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+        <h2 className="mb-2 text-lg font-bold">{tr.backupTitle}</h2>
+        <p className="mb-4 text-sm leading-6 text-stone-500">{tr.backupDesc}</p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={exportBackup} className="rounded-2xl bg-orange-400 py-3 font-bold text-white shadow-sm">
+            {tr.exportBackup}
+          </button>
+
+          <label className="cursor-pointer rounded-2xl bg-stone-800 py-3 text-center font-bold text-white shadow-sm">
+            {tr.importBackup}
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                importBackup(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+
+        <p className="mt-3 text-xs leading-5 text-stone-400">{tr.importBackupDesc}</p>
+      </section>
+
+      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+        <h2 className="mb-2 text-lg font-bold">{tr.privacyTitle}</h2>
+        <p className="mb-4 text-sm leading-6 text-stone-500">{tr.privacyDesc}</p>
+
+        <div className="space-y-2 text-sm leading-6 text-stone-700">
+          <p>1. {tr.privacyPoint1}</p>
+          <p>2. {tr.privacyPoint2}</p>
+          <p>3. {tr.privacyPoint3}</p>
+          <p>4. {tr.privacyPoint4}</p>
+        </div>
+
+        <button onClick={copyPrivacyPolicy} className="mt-4 w-full rounded-2xl border border-stone-200 bg-white py-3 font-bold text-stone-600">
+          {tr.copyPrivacy}
+        </button>
       </section>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
