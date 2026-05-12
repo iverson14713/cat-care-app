@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
+type Lang = 'zh' | 'en';
+
 type Cat = {
   id: string;
   name: string;
@@ -8,39 +10,224 @@ type Cat = {
 
 type CheckItem = {
   id: string;
-  label: string;
+  labelKey: string;
   emoji: string;
 };
 
-type DailyRecord = Record<string, boolean | string>;
+type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
 type Page = 'today' | 'history' | 'abnormal' | 'cats';
 
+type AbnormalRecord = {
+  date: string;
+  abnormalNote: string;
+  abnormalPhotos: string[];
+};
+
 const CATS_KEY = 'cat-calendar-cats';
 const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
+const LANG_KEY = 'cat-calendar-lang';
+const MAX_PHOTOS = 3;
 
 const dailyItems: CheckItem[] = [
-  { id: 'feedMorning', label: '早上餵食', emoji: '🍖' },
-  { id: 'feedNight', label: '晚上餵食', emoji: '🌙' },
-  { id: 'litterMorning', label: '早上挖貓砂', emoji: '🚽' },
-  { id: 'litterNight', label: '晚上挖貓砂', emoji: '🧹' },
-  { id: 'pee', label: '今天有尿尿', emoji: '💧' },
-  { id: 'poop', label: '今天有大便', emoji: '💩' },
-  { id: 'waterCan', label: '補水罐 / 飲水確認', emoji: '🥫' },
-  { id: 'snack', label: '零食確認', emoji: '🍪' },
-  { id: 'brushHair', label: '梳毛確認', emoji: '🪮' },
-  { id: 'brushTeeth', label: '刷牙確認', emoji: '🪥' },
+  { id: 'feedMorning', labelKey: 'feedMorning', emoji: '🍖' },
+  { id: 'feedNight', labelKey: 'feedNight', emoji: '🌙' },
+  { id: 'litterMorning', labelKey: 'litterMorning', emoji: '🚽' },
+  { id: 'litterNight', labelKey: 'litterNight', emoji: '🧹' },
+  { id: 'pee', labelKey: 'pee', emoji: '💧' },
+  { id: 'poop', labelKey: 'poop', emoji: '💩' },
+  { id: 'waterCan', labelKey: 'waterCan', emoji: '🥫' },
+  { id: 'snack', labelKey: 'snack', emoji: '🍪' },
+  { id: 'brushHair', labelKey: 'brushHair', emoji: '🪮' },
+  { id: 'brushTeeth', labelKey: 'brushTeeth', emoji: '🪥' },
 ];
 
 const monthlyItems: CheckItem[] = [
-  { id: 'changeLitter', label: '本月換貓砂', emoji: '🧹' },
-  { id: 'deworming', label: '本月驅蟲', emoji: '💊' },
-  { id: 'vaccine', label: '疫苗 / 預防針確認', emoji: '💉' },
-  { id: 'vetVisit', label: '看診 / 回診確認', emoji: '🏥' },
-  { id: 'bath', label: '本月洗澡確認', emoji: '🛁' },
-  { id: 'nailTrim', label: '剪指甲確認', emoji: '✂️' },
-  { id: 'catFood', label: '本月貓糧 / 貓砂補貨確認', emoji: '🍚' },
+  { id: 'changeLitter', labelKey: 'changeLitter', emoji: '🧹' },
+  { id: 'deworming', labelKey: 'deworming', emoji: '💊' },
+  { id: 'vaccine', labelKey: 'vaccine', emoji: '💉' },
+  { id: 'vetVisit', labelKey: 'vetVisit', emoji: '🏥' },
+  { id: 'bath', labelKey: 'bath', emoji: '🛁' },
+  { id: 'nailTrim', labelKey: 'nailTrim', emoji: '✂️' },
+  { id: 'catFood', labelKey: 'catFood', emoji: '🍚' },
 ];
+
+const text = {
+  zh: {
+    appTitle: '貓咪日記',
+    appSubtitle: 'Cat Calendar',
+    today: '今日',
+    history: '歷史',
+    abnormal: '異常',
+    cats: '貓咪',
+    currentCat: '目前照顧',
+    switchCat: '切換貓咪',
+    date: '日期',
+    month: '月份',
+    todayProgress: '今日完成度',
+    monthlyProgress: '本月完成度',
+    dailyCare: '每日照顧',
+    dailyCareDesc: '適合每天快速確認的照顧項目',
+    abnormalRecord: '異常狀況紀錄',
+    abnormalDesc: '有嘔吐、拉肚子、食慾變差、精神不好等狀況時，可以寫在這裡',
+    abnormalPlaceholder: '例如：今天吐了 1 次，便便偏軟，食慾比平常差一點。',
+    abnormalSaved: '已記錄異常狀況',
+    noAbnormal: '沒有異常可以留空',
+    abnormalPhotos: '異常照片',
+    abnormalPhotosDesc: '可放嘔吐物、便便、傷口、皮膚、眼睛等照片，方便給獸醫看',
+    dailyNote: '今日備註',
+    dailyNoteDesc: '可以記錄心情、活動、食量變化或其他小事',
+    dailyNotePlaceholder: '例如：今天很黏人，玩逗貓棒玩很久。',
+    dailyPhotos: '今日照片',
+    dailyPhotosDesc: '可放可愛日常、睡姿、玩耍或成長紀錄照片',
+    addPhoto: '新增照片',
+    photoLimit: '最多 3 張，照片會自動壓縮並保存在本機瀏覽器',
+    monthlyCare: '本月定期照顧',
+    monthlyCareDesc: '驅蟲、換貓砂、疫苗、看診這類不是每天做的項目',
+    clearMonth: '清除本月紀錄',
+    clearToday: '清除今日紀錄',
+    historyTitle: '歷史紀錄',
+    historyDesc: '查看過去每日照顧狀況、異常紀錄與照片',
+    noHistory: '目前還沒有這隻貓的歷史紀錄',
+    completed: '完成',
+    abnormalSummary: '異常彙整',
+    abnormalSummaryDesc: '彙整有填寫異常狀況或異常照片的日期，方便看診時給獸醫參考',
+    copyForVet: '複製給獸醫',
+    printPdf: '列印 / 存 PDF',
+    noAbnormalHistory: '目前還沒有這隻貓的異常紀錄',
+    photo: '照片',
+    todayNoteTitle: '今日備註',
+    myCats: '我的貓咪',
+    catsDesc: '新增、切換不同貓咪，每隻貓會分開保存紀錄',
+    addCat: '新增貓咪',
+    catNamePlaceholder: '輸入貓咪名字，例如：火火',
+    add: '新增',
+    catList: '貓咪列表',
+    selected: '目前選擇中',
+    tapToSwitch: '點擊切換到這隻貓',
+    delete: '刪除',
+    savedLocal: '紀錄與照片會保存在這台手機 / 電腦的瀏覽器內',
+    langButton: 'EN',
+    removePhoto: '刪除',
+    close: '關閉',
+    copied: '已複製異常彙整，可以貼給獸醫或傳到 LINE',
+    copyFailed: '複製失敗，請手動選取內容複製',
+    noReport: '目前沒有異常紀錄可以複製',
+    photoCannotCopy: '照片無法直接複製到文字訊息，請在異常彙整頁面截圖或列印給獸醫。',
+    needCatName: '請先輸入貓咪名字',
+    keepOneCat: '至少要保留一隻貓咪',
+    confirmDeleteCat: '確定要刪除',
+    deleteCatNote: '已保存的紀錄不會自動刪除，但畫面上不會再顯示這隻貓。',
+    confirmClearToday: '確定要清除今天的紀錄嗎？',
+    confirmClearMonth: '確定要清除本月定期照顧紀錄嗎？',
+    photoTooMany: '照片最多只能放 3 張',
+    photoLoadFail: '照片讀取失敗，請換一張照片試試',
+    feedMorning: '早上餵食',
+    feedNight: '晚上餵食',
+    litterMorning: '早上挖貓砂',
+    litterNight: '晚上挖貓砂',
+    pee: '今天有尿尿',
+    poop: '今天有大便',
+    waterCan: '補水罐 / 飲水確認',
+    snack: '零食確認',
+    brushHair: '梳毛確認',
+    brushTeeth: '刷牙確認',
+    changeLitter: '本月換貓砂',
+    deworming: '本月驅蟲',
+    vaccine: '疫苗 / 預防針確認',
+    vetVisit: '看診 / 回診確認',
+    bath: '本月洗澡確認',
+    nailTrim: '剪指甲確認',
+    catFood: '本月貓糧 / 貓砂補貨確認',
+  },
+  en: {
+    appTitle: 'Cat Diary',
+    appSubtitle: 'Cat Calendar',
+    today: 'Today',
+    history: 'History',
+    abnormal: 'Health',
+    cats: 'Cats',
+    currentCat: 'Current cat',
+    switchCat: 'Switch',
+    date: 'Date',
+    month: 'Month',
+    todayProgress: 'Today progress',
+    monthlyProgress: 'Monthly progress',
+    dailyCare: 'Daily care',
+    dailyCareDesc: 'Quick daily checklist for your cat care routine',
+    abnormalRecord: 'Abnormal condition notes',
+    abnormalDesc: 'Record vomiting, diarrhea, low appetite, low energy, or anything unusual',
+    abnormalPlaceholder: 'Example: Vomited once today. Stool was soft. Appetite was lower than usual.',
+    abnormalSaved: 'Abnormal condition saved',
+    noAbnormal: 'Leave blank if everything looks normal',
+    abnormalPhotos: 'Abnormal photos',
+    abnormalPhotosDesc: 'Add photos of vomit, stool, wounds, skin, eyes, or anything useful for the vet',
+    dailyNote: 'Daily note',
+    dailyNoteDesc: 'Record mood, activity, appetite changes, or small memories',
+    dailyNotePlaceholder: 'Example: Very clingy today and played with the toy for a long time.',
+    dailyPhotos: 'Daily photos',
+    dailyPhotosDesc: 'Add cute moments, sleeping poses, playtime, or growth memories',
+    addPhoto: 'Add photo',
+    photoLimit: 'Up to 3 photos. Photos are compressed and saved in this browser',
+    monthlyCare: 'Monthly care',
+    monthlyCareDesc: 'Deworming, full litter change, vaccines, vet visits, and other periodic tasks',
+    clearMonth: 'Clear month',
+    clearToday: 'Clear today',
+    historyTitle: 'History',
+    historyDesc: 'Review daily care, abnormal notes, and photos',
+    noHistory: 'No history for this cat yet',
+    completed: 'Completed',
+    abnormalSummary: 'Vet summary',
+    abnormalSummaryDesc: 'Shows dates with abnormal notes or photos for vet visits',
+    copyForVet: 'Copy for vet',
+    printPdf: 'Print / PDF',
+    noAbnormalHistory: 'No abnormal records for this cat yet',
+    photo: 'Photos',
+    todayNoteTitle: 'Daily note',
+    myCats: 'My cats',
+    catsDesc: 'Add and switch cats. Each cat has separate records',
+    addCat: 'Add cat',
+    catNamePlaceholder: 'Enter cat name, e.g. Momo',
+    add: 'Add',
+    catList: 'Cat list',
+    selected: 'Selected',
+    tapToSwitch: 'Tap to switch to this cat',
+    delete: 'Delete',
+    savedLocal: 'Records and photos are saved in this phone / computer browser',
+    langButton: '中',
+    removePhoto: 'Remove',
+    close: 'Close',
+    copied: 'Vet summary copied. You can paste it to your vet or LINE.',
+    copyFailed: 'Copy failed. Please select and copy manually.',
+    noReport: 'No abnormal records to copy yet',
+    photoCannotCopy: 'Photos cannot be copied into plain text. Please screenshot or print the Vet summary page.',
+    needCatName: 'Please enter a cat name first',
+    keepOneCat: 'At least one cat is required',
+    confirmDeleteCat: 'Delete',
+    deleteCatNote: 'Saved records will not be removed automatically, but this cat will no longer appear.',
+    confirmClearToday: 'Clear today’s record?',
+    confirmClearMonth: 'Clear this month’s periodic care record?',
+    photoTooMany: 'You can add up to 3 photos',
+    photoLoadFail: 'Photo failed to load. Please try another photo.',
+    feedMorning: 'Morning feeding',
+    feedNight: 'Evening feeding',
+    litterMorning: 'Morning litter scooping',
+    litterNight: 'Evening litter scooping',
+    pee: 'Pee today',
+    poop: 'Poop today',
+    waterCan: 'Water / wet food check',
+    snack: 'Snack check',
+    brushHair: 'Brushing check',
+    brushTeeth: 'Teeth brushing check',
+    changeLitter: 'Full litter change',
+    deworming: 'Deworming',
+    vaccine: 'Vaccine check',
+    vetVisit: 'Vet visit / follow-up',
+    bath: 'Bath check',
+    nailTrim: 'Nail trim check',
+    catFood: 'Food / litter refill check',
+  },
+};
 
 function makeId() {
   return `cat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -73,6 +260,11 @@ function dailyStorageKey(catId: string, date: string) {
 
 function monthlyStorageKey(catId: string, month: string) {
   return `cat-calendar-monthly-${catId}-${month}`;
+}
+
+function loadLang(): Lang {
+  const saved = localStorage.getItem(LANG_KEY);
+  return saved === 'en' ? 'en' : 'zh';
 }
 
 function loadCats(): Cat[] {
@@ -122,6 +314,14 @@ function loadMonthlyRecord(catId: string, month: string): MonthlyRecord {
   }
 }
 
+function getPhotoList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item) => typeof item === 'string');
+  }
+
+  return [];
+}
+
 function getAllDailyHistory(catId: string) {
   const records: { date: string; data: DailyRecord }[] = [];
   const prefix = `cat-calendar-daily-${catId}-`;
@@ -149,27 +349,72 @@ function getAllDailyHistory(catId: string) {
   return records.sort((a, b) => b.date.localeCompare(a.date));
 }
 
-function getAbnormalHistory(catId: string) {
+function getAbnormalHistory(catId: string): AbnormalRecord[] {
   return getAllDailyHistory(catId)
     .map((record) => {
       const abnormalNote =
         typeof record.data.abnormalNote === 'string'
           ? record.data.abnormalNote.trim()
           : '';
+      const abnormalPhotos = getPhotoList(record.data.abnormalPhotos);
 
       return {
         date: record.date,
         abnormalNote,
+        abnormalPhotos,
       };
     })
-    .filter((record) => record.abnormalNote.length > 0);
+    .filter(
+      (record) =>
+        record.abnormalNote.length > 0 || record.abnormalPhotos.length > 0
+    );
+}
+
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onerror = () => reject(new Error('read error'));
+
+    reader.onload = () => {
+      const img = new Image();
+
+      img.onerror = () => reject(new Error('image error'));
+
+      img.onload = () => {
+        const maxSize = 900;
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          reject(new Error('canvas error'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      };
+
+      img.src = String(reader.result);
+    };
+
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function App() {
   const today = todayKey();
   const month = monthKey();
 
+  const [lang, setLang] = useState<Lang>(() => loadLang());
   const [cats, setCats] = useState<Cat[]>(() => loadCats());
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+
+  const tr = text[lang];
 
   const [selectedCatId, setSelectedCatId] = useState<string>(() => {
     const savedCats = loadCats();
@@ -203,6 +448,9 @@ export default function App() {
   const dailyNote =
     typeof daily.dailyNote === 'string' ? daily.dailyNote : '';
 
+  const abnormalPhotos = getPhotoList(daily.abnormalPhotos);
+  const dailyPhotos = getPhotoList(daily.dailyPhotos);
+
   const dailyDone = useMemo(
     () => dailyItems.filter((item) => daily[item.id] === true).length,
     [daily]
@@ -229,6 +477,10 @@ export default function App() {
   }, [historyRefreshKey, selectedCat]);
 
   useEffect(() => {
+    localStorage.setItem(LANG_KEY, lang);
+  }, [lang]);
+
+  useEffect(() => {
     localStorage.setItem(CATS_KEY, JSON.stringify(cats));
   }, [cats]);
 
@@ -253,6 +505,10 @@ export default function App() {
     );
   }, [monthly, selectedCat, month]);
 
+  const toggleLanguage = () => {
+    setLang((prev) => (prev === 'zh' ? 'en' : 'zh'));
+  };
+
   const selectCat = (catId: string) => {
     setSelectedCatId(catId);
     setDaily(loadDailyRecord(catId, today));
@@ -265,7 +521,7 @@ export default function App() {
     const name = newCatName.trim();
 
     if (!name) {
-      alert('請先輸入貓咪名字');
+      alert(tr.needCatName);
       return;
     }
 
@@ -290,13 +546,13 @@ export default function App() {
     if (!target) return;
 
     if (cats.length <= 1) {
-      alert('至少要保留一隻貓咪');
+      alert(tr.keepOneCat);
       return;
     }
 
     if (
       !confirm(
-        `確定要刪除「${target.name}」嗎？\n已保存的紀錄不會自動刪除，但畫面上不會再顯示這隻貓。`
+        `${tr.confirmDeleteCat}「${target.name}」？\n${tr.deleteCatNote}`
       )
     ) {
       return;
@@ -327,22 +583,62 @@ export default function App() {
     setDaily((prev) => ({ ...prev, [key]: value }));
   };
 
+  const addPhotos = async (
+    key: 'abnormalPhotos' | 'dailyPhotos',
+    files: FileList | null
+  ) => {
+    if (!files || files.length === 0) return;
+
+    const currentPhotos = getPhotoList(daily[key]);
+    const availableSlots = MAX_PHOTOS - currentPhotos.length;
+
+    if (availableSlots <= 0) {
+      alert(tr.photoTooMany);
+      return;
+    }
+
+    const selectedFiles = Array.from(files)
+      .filter((file) => file.type.startsWith('image/'))
+      .slice(0, availableSlots);
+
+    try {
+      const compressedPhotos = await Promise.all(
+        selectedFiles.map((file) => compressImage(file))
+      );
+
+      setDaily((prev) => ({
+        ...prev,
+        [key]: [...getPhotoList(prev[key]), ...compressedPhotos].slice(
+          0,
+          MAX_PHOTOS
+        ),
+      }));
+    } catch {
+      alert(tr.photoLoadFail);
+    }
+  };
+
+  const removePhoto = (
+    key: 'abnormalPhotos' | 'dailyPhotos',
+    index: number
+  ) => {
+    setDaily((prev) => {
+      const nextPhotos = getPhotoList(prev[key]).filter((_, i) => i !== index);
+      return {
+        ...prev,
+        [key]: nextPhotos,
+      };
+    });
+  };
+
   const resetToday = () => {
-    if (
-      confirm(
-        `確定要清除「${selectedCat?.name ?? '目前貓咪'}」今天的紀錄嗎？`
-      )
-    ) {
+    if (confirm(tr.confirmClearToday)) {
       setDaily({});
     }
   };
 
   const resetMonth = () => {
-    if (
-      confirm(
-        `確定要清除「${selectedCat?.name ?? '目前貓咪'}」本月定期照顧紀錄嗎？`
-      )
-    ) {
+    if (confirm(tr.confirmClearMonth)) {
       setMonthly({});
     }
   };
@@ -351,43 +647,130 @@ export default function App() {
     if (!selectedCat) return;
 
     if (abnormalHistory.length === 0) {
-      alert('目前沒有異常紀錄可以複製');
+      alert(tr.noReport);
       return;
     }
 
     const report = [
-      `貓咪：${selectedCat.name}`,
-      '異常紀錄彙整',
-      `產生日期：${today}`,
+      `${lang === 'zh' ? '貓咪' : 'Cat'}：${selectedCat.name}`,
+      tr.abnormalSummary,
+      `${lang === 'zh' ? '產生日期' : 'Created'}：${today}`,
       '',
-      ...abnormalHistory.map(
-        (record) => `【${record.date}】\n${record.abnormalNote}`
-      ),
+      ...abnormalHistory.map((record) => {
+        const photoText =
+          record.abnormalPhotos.length > 0
+            ? `\n${tr.photo}：${record.abnormalPhotos.length}`
+            : '';
+
+        return `【${record.date}】\n${record.abnormalNote || '-'}${photoText}`;
+      }),
+      '',
+      tr.photoCannotCopy,
     ].join('\n\n');
 
     try {
       await navigator.clipboard.writeText(report);
-      alert('已複製異常彙整，可以貼給獸醫或傳到 LINE');
+      alert(tr.copied);
     } catch {
-      alert('複製失敗，請手動選取內容複製');
+      alert(tr.copyFailed);
     }
+  };
+
+  const renderPhotoSection = (
+    title: string,
+    desc: string,
+    photos: string[],
+    keyName: 'abnormalPhotos' | 'dailyPhotos',
+    tone: 'red' | 'orange'
+  ) => {
+    const buttonClass =
+      tone === 'red'
+        ? 'border-red-200 bg-red-50 text-red-700'
+        : 'border-orange-200 bg-orange-50 text-orange-700';
+
+    return (
+      <div className="mt-4">
+        <div className="mb-3">
+          <h3 className="font-bold">{title}</h3>
+          <p className="text-sm text-stone-500">{desc}</p>
+          <p className="mt-1 text-xs text-stone-400">{tr.photoLimit}</p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          {photos.map((photo, index) => (
+            <div
+              key={`${keyName}-${index}`}
+              className="overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm"
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedPhoto(photo)}
+                className="block aspect-square w-full overflow-hidden"
+              >
+                <img
+                  src={photo}
+                  alt={`${title} ${index + 1}`}
+                  className="h-full w-full object-cover"
+                />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => removePhoto(keyName, index)}
+                className="w-full bg-white px-2 py-2 text-xs font-bold text-stone-500"
+              >
+                {tr.removePhoto}
+              </button>
+            </div>
+          ))}
+
+          {photos.length < MAX_PHOTOS && (
+            <label
+              className={`flex aspect-square cursor-pointer items-center justify-center rounded-2xl border-2 border-dashed p-3 text-center text-sm font-bold ${buttonClass}`}
+            >
+              + {tr.addPhoto}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addPhotos(keyName, e.target.files);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const renderCatSwitcher = () => (
     <div className="mb-5 rounded-3xl bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-medium text-stone-400">目前照顧</p>
+          <p className="text-xs font-medium text-stone-400">{tr.currentCat}</p>
           <h2 className="text-xl font-bold">
             {selectedCat?.emoji ?? '🐱'} {selectedCat?.name ?? '我的貓咪'}
           </h2>
         </div>
-        <button
-          onClick={() => setPage('cats')}
-          className="rounded-full bg-orange-100 px-4 py-2 text-sm font-bold text-orange-700"
-        >
-          切換貓咪
-        </button>
+
+        <div className="flex shrink-0 gap-2">
+          <button
+            onClick={toggleLanguage}
+            className="rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-700"
+          >
+            {tr.langButton}
+          </button>
+
+          <button
+            onClick={() => setPage('cats')}
+            className="rounded-full bg-orange-100 px-4 py-2 text-sm font-bold text-orange-700"
+          >
+            {tr.switchCat}
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -414,17 +797,17 @@ export default function App() {
 
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">🐾</div>
-        <h1 className="mt-2 text-2xl font-bold">貓咪日記</h1>
+        <h1 className="mt-2 text-2xl font-bold">{tr.appTitle}</h1>
         <p className="mt-1 text-sm font-medium text-orange-600">
-          Cat Calendar
+          {tr.appSubtitle}
         </p>
         <p className="mt-1 text-sm text-stone-500">
-          {selectedCat?.name ?? '我的貓咪'}｜日期：{today}
+          {selectedCat?.name ?? '我的貓咪'}｜{tr.date}：{today}
         </p>
 
         <div className="mt-4">
           <div className="mb-2 flex justify-between text-sm">
-            <span>今日完成度</span>
+            <span>{tr.todayProgress}</span>
             <span>
               {dailyDone}/{dailyItems.length}（{dailyPercent}%）
             </span>
@@ -440,10 +823,8 @@ export default function App() {
 
       <section className="mb-5">
         <div className="mb-3">
-          <h2 className="text-lg font-bold">每日照顧</h2>
-          <p className="text-sm text-stone-500">
-            適合每天快速確認的照顧項目
-          </p>
+          <h2 className="text-lg font-bold">{tr.dailyCare}</h2>
+          <p className="text-sm text-stone-500">{tr.dailyCareDesc}</p>
         </div>
 
         <div className="space-y-3">
@@ -459,7 +840,9 @@ export default function App() {
             >
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{item.emoji}</span>
-                <span className="font-medium">{item.label}</span>
+                <span className="font-medium">
+                  {tr[item.labelKey as keyof typeof tr]}
+                </span>
               </div>
               <span className="text-2xl">
                 {daily[item.id] === true ? '✅' : '⬜'}
@@ -471,53 +854,63 @@ export default function App() {
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
         <div className="mb-3">
-          <h2 className="text-lg font-bold">異常狀況紀錄</h2>
-          <p className="text-sm text-stone-500">
-            有嘔吐、拉肚子、食慾變差、精神不好等狀況時，可以寫在這裡
-          </p>
+          <h2 className="text-lg font-bold">{tr.abnormalRecord}</h2>
+          <p className="text-sm text-stone-500">{tr.abnormalDesc}</p>
         </div>
 
         <textarea
           value={abnormalNote}
           onChange={(e) => updateDailyText('abnormalNote', e.target.value)}
-          placeholder={`例如：${selectedCat?.name ?? '貓咪'}今天吐了 1 次，便便偏軟，食慾比平常差一點。`}
+          placeholder={tr.abnormalPlaceholder}
           className="min-h-28 w-full resize-none rounded-2xl border border-red-100 bg-red-50 p-4 text-sm outline-none focus:border-red-300"
         />
 
         {abnormalNote.trim() ? (
           <p className="mt-2 text-sm font-medium text-red-600">
-            已記錄異常狀況
+            {tr.abnormalSaved}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-stone-400">沒有異常可以留空</p>
+          <p className="mt-2 text-sm text-stone-400">{tr.noAbnormal}</p>
+        )}
+
+        {renderPhotoSection(
+          tr.abnormalPhotos,
+          tr.abnormalPhotosDesc,
+          abnormalPhotos,
+          'abnormalPhotos',
+          'red'
         )}
       </section>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
         <div className="mb-3">
-          <h2 className="text-lg font-bold">今日備註</h2>
-          <p className="text-sm text-stone-500">
-            可以記錄心情、活動、食量變化或其他小事
-          </p>
+          <h2 className="text-lg font-bold">{tr.dailyNote}</h2>
+          <p className="text-sm text-stone-500">{tr.dailyNoteDesc}</p>
         </div>
 
         <textarea
           value={dailyNote}
           onChange={(e) => updateDailyText('dailyNote', e.target.value)}
-          placeholder={`例如：${selectedCat?.name ?? '貓咪'}今天很黏人，玩逗貓棒玩很久。`}
+          placeholder={tr.dailyNotePlaceholder}
           className="min-h-24 w-full resize-none rounded-2xl border border-stone-100 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300"
         />
+
+        {renderPhotoSection(
+          tr.dailyPhotos,
+          tr.dailyPhotosDesc,
+          dailyPhotos,
+          'dailyPhotos',
+          'orange'
+        )}
       </section>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold">本月定期照顧</h2>
-            <p className="text-sm text-stone-500">
-              驅蟲、換貓砂、疫苗、看診這類不是每天做的項目
-            </p>
+            <h2 className="text-lg font-bold">{tr.monthlyCare}</h2>
+            <p className="text-sm text-stone-500">{tr.monthlyCareDesc}</p>
             <p className="mt-1 text-sm text-stone-500">
-              {selectedCat?.name ?? '我的貓咪'}｜月份：{month}
+              {selectedCat?.name ?? '我的貓咪'}｜{tr.month}：{month}
             </p>
           </div>
           <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
@@ -538,7 +931,9 @@ export default function App() {
             >
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{item.emoji}</span>
-                <span className="font-medium">{item.label}</span>
+                <span className="font-medium">
+                  {tr[item.labelKey as keyof typeof tr]}
+                </span>
               </div>
               <span className="text-2xl">
                 {monthly[item.id] ? '✅' : '⬜'}
@@ -549,7 +944,7 @@ export default function App() {
 
         <div className="mt-4">
           <div className="mb-2 flex justify-between text-sm">
-            <span>本月完成度</span>
+            <span>{tr.monthlyProgress}</span>
             <span>{monthlyPercent}%</span>
           </div>
           <div className="h-3 overflow-hidden rounded-full bg-blue-100">
@@ -564,7 +959,7 @@ export default function App() {
           onClick={resetMonth}
           className="mt-4 w-full rounded-2xl border border-stone-200 bg-white py-3 font-bold text-stone-600"
         >
-          清除本月紀錄
+          {tr.clearMonth}
         </button>
       </section>
 
@@ -572,7 +967,7 @@ export default function App() {
         onClick={resetToday}
         className="mb-6 w-full rounded-2xl bg-stone-800 py-4 font-bold text-white shadow-sm"
       >
-        清除今日紀錄
+        {tr.clearToday}
       </button>
     </>
   );
@@ -583,15 +978,13 @@ export default function App() {
 
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">📅</div>
-        <h1 className="mt-2 text-2xl font-bold">歷史紀錄</h1>
-        <p className="mt-1 text-sm text-stone-500">
-          查看 {selectedCat?.name ?? '目前貓咪'} 過去每日照顧狀況與異常紀錄
-        </p>
+        <h1 className="mt-2 text-2xl font-bold">{tr.historyTitle}</h1>
+        <p className="mt-1 text-sm text-stone-500">{tr.historyDesc}</p>
       </div>
 
       {history.length === 0 ? (
         <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">
-          目前還沒有這隻貓的歷史紀錄
+          {tr.noHistory}
         </div>
       ) : (
         <div className="space-y-4">
@@ -608,6 +1001,10 @@ export default function App() {
               typeof record.data.dailyNote === 'string'
                 ? record.data.dailyNote
                 : '';
+            const recordAbnormalPhotos = getPhotoList(
+              record.data.abnormalPhotos
+            );
+            const recordDailyPhotos = getPhotoList(record.data.dailyPhotos);
 
             return (
               <div
@@ -618,7 +1015,7 @@ export default function App() {
                   <div>
                     <h2 className="text-lg font-bold">{record.date}</h2>
                     <p className="text-sm text-stone-500">
-                      完成 {done}/{dailyItems.length} 項（{percent}%）
+                      {tr.completed} {done}/{dailyItems.length}（{percent}%）
                     </p>
                   </div>
                   <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-bold text-orange-700">
@@ -644,7 +1041,7 @@ export default function App() {
                       }`}
                     >
                       <span className="mr-1">{item.emoji}</span>
-                      {item.label}
+                      {tr[item.labelKey as keyof typeof tr]}
                       <span className="ml-1">
                         {record.data[item.id] === true ? '✅' : '—'}
                       </span>
@@ -654,15 +1051,63 @@ export default function App() {
 
                 {recordAbnormalNote.trim() && (
                   <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
-                    <div className="mb-1 font-bold">⚠️ 異常狀況</div>
-                    <p className="whitespace-pre-wrap">{recordAbnormalNote}</p>
+                    <div className="mb-1 font-bold">⚠️ {tr.abnormalRecord}</div>
+                    <p className="whitespace-pre-wrap">
+                      {recordAbnormalNote}
+                    </p>
+                  </div>
+                )}
+
+                {recordAbnormalPhotos.length > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-2 text-sm font-bold text-red-700">
+                      {tr.abnormalPhotos}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {recordAbnormalPhotos.map((photo, index) => (
+                        <button
+                          key={`history-abnormal-${record.date}-${index}`}
+                          onClick={() => setSelectedPhoto(photo)}
+                          className="aspect-square overflow-hidden rounded-2xl bg-red-50"
+                        >
+                          <img
+                            src={photo}
+                            alt={`${tr.abnormalPhotos} ${index + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {recordDailyNote.trim() && (
                   <div className="mt-3 rounded-2xl bg-stone-50 p-4 text-sm text-stone-700">
-                    <div className="mb-1 font-bold">📝 今日備註</div>
+                    <div className="mb-1 font-bold">📝 {tr.todayNoteTitle}</div>
                     <p className="whitespace-pre-wrap">{recordDailyNote}</p>
+                  </div>
+                )}
+
+                {recordDailyPhotos.length > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-2 text-sm font-bold text-stone-700">
+                      {tr.dailyPhotos}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {recordDailyPhotos.map((photo, index) => (
+                        <button
+                          key={`history-daily-${record.date}-${index}`}
+                          onClick={() => setSelectedPhoto(photo)}
+                          className="aspect-square overflow-hidden rounded-2xl bg-stone-50"
+                        >
+                          <img
+                            src={photo}
+                            alt={`${tr.dailyPhotos} ${index + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -679,9 +1124,9 @@ export default function App() {
 
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">⚠️</div>
-        <h1 className="mt-2 text-2xl font-bold">異常彙整</h1>
+        <h1 className="mt-2 text-2xl font-bold">{tr.abnormalSummary}</h1>
         <p className="mt-1 text-sm text-stone-500">
-          彙整 {selectedCat?.name ?? '目前貓咪'} 有填寫異常狀況的日期，方便看診時給獸醫參考
+          {selectedCat?.name ?? '我的貓咪'}｜{tr.abnormalSummaryDesc}
         </p>
       </div>
 
@@ -690,20 +1135,20 @@ export default function App() {
           onClick={copyAbnormalReport}
           className="rounded-2xl bg-orange-400 py-4 font-bold text-white shadow-sm"
         >
-          複製給獸醫
+          {tr.copyForVet}
         </button>
 
         <button
           onClick={() => window.print()}
           className="rounded-2xl bg-stone-800 py-4 font-bold text-white shadow-sm"
         >
-          列印 / 存 PDF
+          {tr.printPdf}
         </button>
       </div>
 
       {abnormalHistory.length === 0 ? (
         <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">
-          目前還沒有這隻貓的異常紀錄
+          {tr.noAbnormalHistory}
         </div>
       ) : (
         <div className="space-y-4">
@@ -717,13 +1162,38 @@ export default function App() {
                   {record.date}
                 </h2>
                 <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-bold text-red-600">
-                  異常
+                  {tr.abnormal}
                 </span>
               </div>
 
-              <p className="whitespace-pre-wrap text-sm leading-6 text-stone-700">
-                {record.abnormalNote}
-              </p>
+              {record.abnormalNote && (
+                <p className="whitespace-pre-wrap text-sm leading-6 text-stone-700">
+                  {record.abnormalNote}
+                </p>
+              )}
+
+              {record.abnormalPhotos.length > 0 && (
+                <div className="mt-4">
+                  <div className="mb-2 text-sm font-bold text-red-700">
+                    {tr.abnormalPhotos}
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {record.abnormalPhotos.map((photo, index) => (
+                      <button
+                        key={`abnormal-${record.date}-${index}`}
+                        onClick={() => setSelectedPhoto(photo)}
+                        className="aspect-square overflow-hidden rounded-2xl bg-red-50"
+                      >
+                        <img
+                          src={photo}
+                          alt={`${tr.abnormalPhotos} ${index + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -735,32 +1205,30 @@ export default function App() {
     <>
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">🐱</div>
-        <h1 className="mt-2 text-2xl font-bold">我的貓咪</h1>
-        <p className="mt-1 text-sm text-stone-500">
-          新增、切換不同貓咪，每隻貓會分開保存紀錄
-        </p>
+        <h1 className="mt-2 text-2xl font-bold">{tr.myCats}</h1>
+        <p className="mt-1 text-sm text-stone-500">{tr.catsDesc}</p>
       </div>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold">新增貓咪</h2>
+        <h2 className="mb-3 text-lg font-bold">{tr.addCat}</h2>
         <div className="flex gap-2">
           <input
             value={newCatName}
             onChange={(e) => setNewCatName(e.target.value)}
-            placeholder="輸入貓咪名字，例如：火火"
+            placeholder={tr.catNamePlaceholder}
             className="min-w-0 flex-1 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none focus:border-orange-300"
           />
           <button
             onClick={addCat}
             className="rounded-2xl bg-orange-400 px-5 py-3 font-bold text-white"
           >
-            新增
+            {tr.add}
           </button>
         </div>
       </section>
 
       <section className="mb-5">
-        <h2 className="mb-3 text-lg font-bold">貓咪列表</h2>
+        <h2 className="mb-3 text-lg font-bold">{tr.catList}</h2>
         <div className="space-y-3">
           {cats.map((cat) => (
             <div
@@ -781,8 +1249,8 @@ export default function App() {
                     <h3 className="truncate text-lg font-bold">{cat.name}</h3>
                     <p className="text-sm text-stone-500">
                       {selectedCat?.id === cat.id
-                        ? '目前選擇中'
-                        : '點擊切換到這隻貓'}
+                        ? tr.selected
+                        : tr.tapToSwitch}
                     </p>
                   </div>
                 </button>
@@ -791,7 +1259,7 @@ export default function App() {
                   onClick={() => deleteCat(cat.id)}
                   className="rounded-full bg-stone-100 px-3 py-2 text-sm font-bold text-stone-500"
                 >
-                  刪除
+                  {tr.delete}
                 </button>
               </div>
             </div>
@@ -813,7 +1281,7 @@ export default function App() {
                 : 'text-stone-500'
             }`}
           >
-            今日
+            {tr.today}
           </button>
 
           <button
@@ -824,7 +1292,7 @@ export default function App() {
                 : 'text-stone-500'
             }`}
           >
-            歷史
+            {tr.history}
           </button>
 
           <button
@@ -835,7 +1303,7 @@ export default function App() {
                 : 'text-stone-500'
             }`}
           >
-            異常
+            {tr.abnormal}
           </button>
 
           <button
@@ -846,7 +1314,7 @@ export default function App() {
                 : 'text-stone-500'
             }`}
           >
-            貓咪
+            {tr.cats}
           </button>
         </div>
 
@@ -856,9 +1324,27 @@ export default function App() {
         {page === 'cats' && renderCatsPage()}
 
         <p className="mt-6 text-center text-xs text-stone-400">
-          紀錄會保存在這台手機 / 電腦的瀏覽器內
+          {tr.savedLocal}
         </p>
       </div>
+
+      {selectedPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="max-h-full max-w-full">
+            <img
+              src={selectedPhoto}
+              alt="preview"
+              className="max-h-[80vh] max-w-full rounded-3xl object-contain"
+            />
+            <button
+              onClick={() => setSelectedPhoto(null)}
+              className="mt-4 w-full rounded-2xl bg-white py-3 font-bold text-stone-800"
+            >
+              {tr.close}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
