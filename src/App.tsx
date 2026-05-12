@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
+type Cat = {
+  id: string;
+  name: string;
+  emoji: string;
+};
+
 type CheckItem = {
   id: string;
   label: string;
@@ -8,7 +14,10 @@ type CheckItem = {
 
 type DailyRecord = Record<string, boolean | string>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'history';
+type Page = 'today' | 'history' | 'cats';
+
+const CATS_KEY = 'cat-calendar-cats';
+const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 
 const dailyItems: CheckItem[] = [
   { id: 'feedMorning', label: '早上餵食', emoji: '🍖' },
@@ -33,22 +42,95 @@ const monthlyItems: CheckItem[] = [
   { id: 'catFood', label: '本月貓糧 / 貓砂補貨確認', emoji: '🍚' },
 ];
 
+function makeId() {
+  return `cat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatDateLocal(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatMonthLocal(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return formatDateLocal(new Date());
 }
 
 function monthKey() {
-  return new Date().toISOString().slice(0, 7);
+  return formatMonthLocal(new Date());
 }
 
-function getAllDailyHistory() {
+function dailyStorageKey(catId: string, date: string) {
+  return `cat-calendar-daily-${catId}-${date}`;
+}
+
+function monthlyStorageKey(catId: string, month: string) {
+  return `cat-calendar-monthly-${catId}-${month}`;
+}
+
+function loadCats(): Cat[] {
+  const saved = localStorage.getItem(CATS_KEY);
+
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch {
+      // ignore broken data
+    }
+  }
+
+  return [
+    {
+      id: 'default-cat',
+      name: '我的貓咪',
+      emoji: '🐱',
+    },
+  ];
+}
+
+function loadDailyRecord(catId: string, date: string): DailyRecord {
+  const saved = localStorage.getItem(dailyStorageKey(catId, date));
+
+  if (!saved) return {};
+
+  try {
+    return JSON.parse(saved);
+  } catch {
+    return {};
+  }
+}
+
+function loadMonthlyRecord(catId: string, month: string): MonthlyRecord {
+  const saved = localStorage.getItem(monthlyStorageKey(catId, month));
+
+  if (!saved) return {};
+
+  try {
+    return JSON.parse(saved);
+  } catch {
+    return {};
+  }
+}
+
+function getAllDailyHistory(catId: string) {
   const records: { date: string; data: DailyRecord }[] = [];
+  const prefix = `cat-calendar-daily-${catId}-`;
 
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
 
-    if (key?.startsWith('cat-care-daily-')) {
-      const date = key.replace('cat-care-daily-', '');
+    if (key?.startsWith(prefix)) {
+      const date = key.replace(prefix, '');
       const raw = localStorage.getItem(key);
 
       if (raw) {
@@ -71,21 +153,39 @@ export default function App() {
   const today = todayKey();
   const month = monthKey();
 
+  const [cats, setCats] = useState<Cat[]>(() => loadCats());
+
+  const [selectedCatId, setSelectedCatId] = useState<string>(() => {
+    const savedCats = loadCats();
+    const savedSelectedId = localStorage.getItem(SELECTED_CAT_KEY);
+
+    if (savedSelectedId && savedCats.some((cat) => cat.id === savedSelectedId)) {
+      return savedSelectedId;
+    }
+
+    return savedCats[0]?.id ?? 'default-cat';
+  });
+
+  const selectedCat =
+    cats.find((cat) => cat.id === selectedCatId) ?? cats[0];
+
   const [page, setPage] = useState<Page>('today');
+  const [newCatName, setNewCatName] = useState('');
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
-  const [daily, setDaily] = useState<DailyRecord>(() => {
-    const saved = localStorage.getItem(`cat-care-daily-${today}`);
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [daily, setDaily] = useState<DailyRecord>(() =>
+    loadDailyRecord(selectedCatId, today)
+  );
 
-  const [monthly, setMonthly] = useState<MonthlyRecord>(() => {
-    const saved = localStorage.getItem(`cat-care-monthly-${month}`);
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [monthly, setMonthly] = useState<MonthlyRecord>(() =>
+    loadMonthlyRecord(selectedCatId, month)
+  );
 
-  const abnormalNote = typeof daily.abnormalNote === 'string' ? daily.abnormalNote : '';
-  const dailyNote = typeof daily.dailyNote === 'string' ? daily.dailyNote : '';
+  const abnormalNote =
+    typeof daily.abnormalNote === 'string' ? daily.abnormalNote : '';
+
+  const dailyNote =
+    typeof daily.dailyNote === 'string' ? daily.dailyNote : '';
 
   const dailyDone = useMemo(
     () => dailyItems.filter((item) => daily[item.id] === true).length,
@@ -102,17 +202,92 @@ export default function App() {
 
   const history = useMemo(() => {
     historyRefreshKey;
-    return getAllDailyHistory();
-  }, [historyRefreshKey]);
+    if (!selectedCat) return [];
+    return getAllDailyHistory(selectedCat.id);
+  }, [historyRefreshKey, selectedCat]);
 
   useEffect(() => {
-    localStorage.setItem(`cat-care-daily-${today}`, JSON.stringify(daily));
+    localStorage.setItem(CATS_KEY, JSON.stringify(cats));
+  }, [cats]);
+
+  useEffect(() => {
+    localStorage.setItem(SELECTED_CAT_KEY, selectedCatId);
+  }, [selectedCatId]);
+
+  useEffect(() => {
+    if (!selectedCat) return;
+    localStorage.setItem(
+      dailyStorageKey(selectedCat.id, today),
+      JSON.stringify(daily)
+    );
     setHistoryRefreshKey((v) => v + 1);
-  }, [daily, today]);
+  }, [daily, selectedCat, today]);
 
   useEffect(() => {
-    localStorage.setItem(`cat-care-monthly-${month}`, JSON.stringify(monthly));
-  }, [monthly, month]);
+    if (!selectedCat) return;
+    localStorage.setItem(
+      monthlyStorageKey(selectedCat.id, month),
+      JSON.stringify(monthly)
+    );
+  }, [monthly, selectedCat, month]);
+
+  const selectCat = (catId: string) => {
+    setSelectedCatId(catId);
+    setDaily(loadDailyRecord(catId, today));
+    setMonthly(loadMonthlyRecord(catId, month));
+    setHistoryRefreshKey((v) => v + 1);
+    setPage('today');
+  };
+
+  const addCat = () => {
+    const name = newCatName.trim();
+
+    if (!name) {
+      alert('請先輸入貓咪名字');
+      return;
+    }
+
+    const newCat: Cat = {
+      id: makeId(),
+      name,
+      emoji: '🐱',
+    };
+
+    setCats((prev) => [...prev, newCat]);
+    setNewCatName('');
+    setSelectedCatId(newCat.id);
+    setDaily({});
+    setMonthly({});
+    setHistoryRefreshKey((v) => v + 1);
+    setPage('today');
+  };
+
+  const deleteCat = (catId: string) => {
+    const target = cats.find((cat) => cat.id === catId);
+
+    if (!target) return;
+
+    if (cats.length <= 1) {
+      alert('至少要保留一隻貓咪');
+      return;
+    }
+
+    if (!confirm(`確定要刪除「${target.name}」嗎？\n已保存的紀錄不會自動刪除，但畫面上不會再顯示這隻貓。`)) {
+      return;
+    }
+
+    const nextCats = cats.filter((cat) => cat.id !== catId);
+    const nextSelected = selectedCatId === catId ? nextCats[0] : selectedCat;
+
+    setCats(nextCats);
+
+    if (nextSelected) {
+      setSelectedCatId(nextSelected.id);
+      setDaily(loadDailyRecord(nextSelected.id, today));
+      setMonthly(loadMonthlyRecord(nextSelected.id, month));
+      setHistoryRefreshKey((v) => v + 1);
+    }
+  };
 
   const toggleDaily = (id: string) => {
     setDaily((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -127,26 +302,65 @@ export default function App() {
   };
 
   const resetToday = () => {
-    if (confirm('確定要清除今天的紀錄嗎？')) {
+    if (confirm(`確定要清除「${selectedCat?.name ?? '目前貓咪'}」今天的紀錄嗎？`)) {
       setDaily({});
     }
   };
 
   const resetMonth = () => {
-    if (confirm('確定要清除本月定期照顧紀錄嗎？')) {
+    if (confirm(`確定要清除「${selectedCat?.name ?? '目前貓咪'}」本月定期照顧紀錄嗎？`)) {
       setMonthly({});
     }
   };
 
+  const renderCatSwitcher = () => (
+    <div className="mb-5 rounded-3xl bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-medium text-stone-400">目前照顧</p>
+          <h2 className="text-xl font-bold">
+            {selectedCat?.emoji ?? '🐱'} {selectedCat?.name ?? '我的貓咪'}
+          </h2>
+        </div>
+        <button
+          onClick={() => setPage('cats')}
+          className="rounded-full bg-orange-100 px-4 py-2 text-sm font-bold text-orange-700"
+        >
+          切換貓咪
+        </button>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {cats.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => selectCat(cat.id)}
+            className={`shrink-0 rounded-full px-4 py-2 text-sm font-bold transition ${
+              selectedCat?.id === cat.id
+                ? 'bg-orange-400 text-white'
+                : 'bg-stone-100 text-stone-600'
+            }`}
+          >
+            {cat.emoji} {cat.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   const renderTodayPage = () => (
     <>
+      {renderCatSwitcher()}
+
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="text-4xl">🐱</div>
+        <div className="text-4xl">🐾</div>
         <h1 className="mt-2 text-2xl font-bold">貓咪日記</h1>
         <p className="mt-1 text-sm font-medium text-orange-600">
           Cat Calendar
         </p>
-        <p className="mt-1 text-sm text-stone-500">日期：{today}</p>
+        <p className="mt-1 text-sm text-stone-500">
+          {selectedCat?.name ?? '我的貓咪'}｜日期：{today}
+        </p>
 
         <div className="mt-4">
           <div className="mb-2 flex justify-between text-sm">
@@ -187,7 +401,9 @@ export default function App() {
                 <span className="text-2xl">{item.emoji}</span>
                 <span className="font-medium">{item.label}</span>
               </div>
-              <span className="text-2xl">{daily[item.id] === true ? '✅' : '⬜'}</span>
+              <span className="text-2xl">
+                {daily[item.id] === true ? '✅' : '⬜'}
+              </span>
             </button>
           ))}
         </div>
@@ -204,7 +420,7 @@ export default function App() {
         <textarea
           value={abnormalNote}
           onChange={(e) => updateDailyText('abnormalNote', e.target.value)}
-          placeholder="例如：今天吐了 1 次，便便偏軟，食慾比平常差一點。"
+          placeholder={`例如：${selectedCat?.name ?? '貓咪'}今天吐了 1 次，便便偏軟，食慾比平常差一點。`}
           className="min-h-28 w-full resize-none rounded-2xl border border-red-100 bg-red-50 p-4 text-sm outline-none focus:border-red-300"
         />
 
@@ -230,7 +446,7 @@ export default function App() {
         <textarea
           value={dailyNote}
           onChange={(e) => updateDailyText('dailyNote', e.target.value)}
-          placeholder="例如：今天很黏人，玩逗貓棒玩很久。"
+          placeholder={`例如：${selectedCat?.name ?? '貓咪'}今天很黏人，玩逗貓棒玩很久。`}
           className="min-h-24 w-full resize-none rounded-2xl border border-stone-100 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300"
         />
       </section>
@@ -242,7 +458,9 @@ export default function App() {
             <p className="text-sm text-stone-500">
               驅蟲、換貓砂、疫苗、看診這類不是每天做的項目
             </p>
-            <p className="mt-1 text-sm text-stone-500">月份：{month}</p>
+            <p className="mt-1 text-sm text-stone-500">
+              {selectedCat?.name ?? '我的貓咪'}｜月份：{month}
+            </p>
           </div>
           <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
             {monthlyDone}/{monthlyItems.length}
@@ -303,22 +521,26 @@ export default function App() {
 
   const renderHistoryPage = () => (
     <>
+      {renderCatSwitcher()}
+
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">📅</div>
         <h1 className="mt-2 text-2xl font-bold">歷史紀錄</h1>
         <p className="mt-1 text-sm text-stone-500">
-          查看過去每日照顧狀況與異常紀錄
+          查看 {selectedCat?.name ?? '目前貓咪'} 過去每日照顧狀況與異常紀錄
         </p>
       </div>
 
       {history.length === 0 ? (
         <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">
-          目前還沒有歷史紀錄
+          目前還沒有這隻貓的歷史紀錄
         </div>
       ) : (
         <div className="space-y-4">
           {history.map((record) => {
-            const done = dailyItems.filter((item) => record.data[item.id] === true).length;
+            const done = dailyItems.filter(
+              (item) => record.data[item.id] === true
+            ).length;
             const percent = Math.round((done / dailyItems.length) * 100);
             const recordAbnormalNote =
               typeof record.data.abnormalNote === 'string'
@@ -375,7 +597,9 @@ export default function App() {
                 {recordAbnormalNote.trim() && (
                   <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
                     <div className="mb-1 font-bold">⚠️ 異常狀況</div>
-                    <p className="whitespace-pre-wrap">{recordAbnormalNote}</p>
+                    <p className="whitespace-pre-wrap">
+                      {recordAbnormalNote}
+                    </p>
                   </div>
                 )}
 
@@ -393,13 +617,83 @@ export default function App() {
     </>
   );
 
+  const renderCatsPage = () => (
+    <>
+      <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
+        <div className="text-4xl">🐱</div>
+        <h1 className="mt-2 text-2xl font-bold">我的貓咪</h1>
+        <p className="mt-1 text-sm text-stone-500">
+          新增、切換不同貓咪，每隻貓會分開保存紀錄
+        </p>
+      </div>
+
+      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+        <h2 className="mb-3 text-lg font-bold">新增貓咪</h2>
+        <div className="flex gap-2">
+          <input
+            value={newCatName}
+            onChange={(e) => setNewCatName(e.target.value)}
+            placeholder="輸入貓咪名字，例如：火火"
+            className="min-w-0 flex-1 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none focus:border-orange-300"
+          />
+          <button
+            onClick={addCat}
+            className="rounded-2xl bg-orange-400 px-5 py-3 font-bold text-white"
+          >
+            新增
+          </button>
+        </div>
+      </section>
+
+      <section className="mb-5">
+        <h2 className="mb-3 text-lg font-bold">貓咪列表</h2>
+        <div className="space-y-3">
+          {cats.map((cat) => (
+            <div
+              key={cat.id}
+              className={`rounded-3xl border p-4 shadow-sm ${
+                selectedCat?.id === cat.id
+                  ? 'border-orange-200 bg-orange-50'
+                  : 'border-stone-100 bg-white'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={() => selectCat(cat.id)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  <span className="text-3xl">{cat.emoji}</span>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-lg font-bold">{cat.name}</h3>
+                    <p className="text-sm text-stone-500">
+                      {selectedCat?.id === cat.id
+                        ? '目前選擇中'
+                        : '點擊切換到這隻貓'}
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => deleteCat(cat.id)}
+                  className="rounded-full bg-stone-100 px-3 py-2 text-sm font-bold text-stone-500"
+                >
+                  刪除
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
-      <div className="mx-auto max-w-md pb-20">
-        <div className="mb-5 grid grid-cols-2 gap-3 rounded-3xl bg-white p-2 shadow-sm">
+      <div className="mx-auto max-w-md pb-24">
+        <div className="mb-5 grid grid-cols-3 gap-2 rounded-3xl bg-white p-2 shadow-sm">
           <button
             onClick={() => setPage('today')}
-            className={`rounded-2xl py-3 font-bold transition ${
+            className={`rounded-2xl py-3 text-sm font-bold transition ${
               page === 'today'
                 ? 'bg-orange-400 text-white'
                 : 'text-stone-500'
@@ -409,7 +703,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setPage('history')}
-            className={`rounded-2xl py-3 font-bold transition ${
+            className={`rounded-2xl py-3 text-sm font-bold transition ${
               page === 'history'
                 ? 'bg-orange-400 text-white'
                 : 'text-stone-500'
@@ -417,9 +711,21 @@ export default function App() {
           >
             歷史紀錄
           </button>
+          <button
+            onClick={() => setPage('cats')}
+            className={`rounded-2xl py-3 text-sm font-bold transition ${
+              page === 'cats'
+                ? 'bg-orange-400 text-white'
+                : 'text-stone-500'
+            }`}
+          >
+            我的貓咪
+          </button>
         </div>
 
-        {page === 'today' ? renderTodayPage() : renderHistoryPage()}
+        {page === 'today' && renderTodayPage()}
+        {page === 'history' && renderHistoryPage()}
+        {page === 'cats' && renderCatsPage()}
 
         <p className="mt-6 text-center text-xs text-stone-400">
           紀錄會保存在這台手機 / 電腦的瀏覽器內
