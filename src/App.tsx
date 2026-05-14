@@ -1,4 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type AssistantContext,
+  type AssistantCareBundleJson,
+  buildSevenDayAnalysis,
+  withDisclaimer,
+} from './aiCareAssistant';
+import { getOrCreateClientId, getAiPlan } from './aiClient';
+import {
+  AssistantApiError,
+  type AssistantHealthPayload,
+  fetchAssistantHealth,
+  generateAssistantCareBundleOpenAi,
+  generateAssistantQaOpenAi,
+  getCareBundleContextHash,
+  peekCareBundleCache,
+} from './openaiAssistant';
 
 type Lang = 'zh' | 'en';
 
@@ -26,7 +42,7 @@ type CheckItem = {
 
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats';
+type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant';
 
 type AbnormalRecord = {
   date: string;
@@ -108,6 +124,13 @@ const text = {
     clearToday: '清除今日紀錄',
     historyTitle: '歷史紀錄',
     historyDesc: '查看過去每日照顧狀況、異常紀錄與照片',
+    historyOrderNote: '排序：最新日期在最上方；可用下方快速跳轉，不必一直往下滑。',
+    historyJumpLabel: '快速跳轉到日期',
+    historyJumpGo: '前往',
+    historyPickDateFirst: '請先選擇日期',
+    historyJumpNoMatch: '找不到此日期的紀錄',
+    historyBackLatest: '回到最新',
+    historyRoadmap: '之後預計：異常紀錄篩選、關鍵字搜尋（尚未開放）',
     noHistory: '目前還沒有這隻貓的歷史紀錄',
     completed: '完成',
     vetReport: '獸醫報告',
@@ -209,6 +232,42 @@ const text = {
     bath: '本月洗澡確認',
     nailTrim: '剪指甲確認',
     catFood: '本月貓糧 / 貓砂補貨確認',
+    assistantNav: 'AI助理',
+    assistantTitle: 'AI 照護助理',
+    assistantLead:
+      '進入本頁不會自動呼叫 OpenAI。點「生成本週 AI 照護分析」後才會向後端請求；內容僅限照護觀察、趨勢整理與提醒，以及給獸醫參考的紀錄摘要。不提供診斷與醫療建議。',
+    assistantToday: 'AI 健康摘要',
+    assistantSeven: '最近照護分析（AI 以約 14 天內紀錄為準）',
+    assistantVetAi: '獸醫報告（紀錄摘要）',
+    assistantAsk: 'AI 問答',
+    assistantAskHint: '僅透過 OpenAI 依你的紀錄回答；不診斷、不提供醫療建議。',
+    assistantAskPlaceholder: '例如：這週喝水紀錄多嗎？體重趨勢怎麼看？',
+    assistantSend: '送出問題',
+    assistantReplyLabel: '助理回覆',
+    aiChecking: '正在連線助理伺服器…',
+    assistantLocalSevenTitle: '最近 7 天照護資料摘要',
+    assistantLocalSevenNote: '（本段由 App 依你的紀錄在本機整理，未呼叫 OpenAI。）',
+    aiGenerateWeek: '生成本週 AI 照護分析',
+    aiWeekHint:
+      '若今日曾成功產生且紀錄未變，會直接使用快取、不扣次數。若你剛更新了紀錄，請再按一次按鈕以取得最新分析。',
+    aiDataStaleHint: '資料已更新，可重新生成分析。',
+    aiModelHint:
+      '助理伺服器已連線且已設定 OpenAI。預設模型為 gpt-5.4-mini（在伺服器 `.env` 以 OPENAI_MODEL 調整）。僅在按下「生成本週 AI 照護分析」並需要新產出時，後端才會呼叫 OpenAI。',
+    aiNeedServerEnv:
+      '無法使用 AI：請確認已執行 npm run dev（會同時啟動助理 API）、專案根目錄 `.env` 內有 OPENAI_API_KEY，且終端機出現 [assistant-api] http://127.0.0.1:8788。',
+    aiEmptyHint: '尚無本週 AI 照護分析；點上方按鈕產生（會計入今日配額，快取命中除外）。',
+    aiAskEmpty: '請先輸入想問的內容。',
+    aiOpenAiRisk:
+      '請勿將含 OPENAI_API_KEY 的 .env 提交到公開儲存庫；正式環境請限制僅後端可讀取金鑰。',
+    aiOpenAiBusy: 'OpenAI 生成中…',
+    aiOpenAiFail: 'OpenAI 錯誤：',
+    assistantSendBusy: '處理中…',
+    aiQuotaLine:
+      '今日尚可請求 {{remaining}} / {{limit}} 次（此裝置 AI 配額；成功呼叫才計入；快取命中不扣次）。',
+    aiErrQuota:
+      '今日 AI 次數已用完。免費版每日 3 次、Pro 每日 30 次。若已購 Pro，請由管理員將你的裝置 ID 加入伺服器環境變數 AI_PRO_CLIENT_IDS；否則請明天再試。',
+    aiErrRate: '操作過於頻繁：同一裝置每分鐘最多 3 次 AI 請求，請稍候再試。',
+    aiErrOpenAi: 'AI 服務暫時無法完成請求，請稍後再試。（不會自動重試）',
   },
   en: {
     appTitle: 'Cat Diary',
@@ -246,6 +305,13 @@ const text = {
     clearToday: 'Clear today',
     historyTitle: 'History',
     historyDesc: 'Review daily care, abnormal notes, and photos',
+    historyOrderNote: 'Newest dates appear first. Use jump-to-date below to avoid endless scrolling.',
+    historyJumpLabel: 'Jump to date',
+    historyJumpGo: 'Go',
+    historyPickDateFirst: 'Pick a date first',
+    historyJumpNoMatch: 'No saved record for that date',
+    historyBackLatest: 'Back to latest',
+    historyRoadmap: 'Coming later: abnormal-only filter and keyword search (not available yet).',
     noHistory: 'No history for this cat yet',
     completed: 'Completed',
     vetReport: 'Vet report',
@@ -347,6 +413,42 @@ const text = {
     bath: 'Bath check',
     nailTrim: 'Nail trim check',
     catFood: 'Food / litter refill check',
+    assistantNav: 'AI Care',
+    assistantTitle: 'AI care assistant',
+    assistantLead:
+      'This page does not auto-call OpenAI. Tap “Generate this week’s AI care analysis” to request the backend; content covers care observations, trends, reminders, and a factual vet handoff. No diagnosis and no medical advice.',
+    assistantToday: 'AI health summary',
+    assistantSeven: 'Recent care analysis (AI uses up to ~14 days of logs)',
+    assistantVetAi: 'Vet report (log summary)',
+    assistantAsk: 'Q&A',
+    assistantAskHint: 'OpenAI answers from your records only — no diagnosis and no medical advice.',
+    assistantAskPlaceholder: 'Example: How consistent were hydration checks this week?',
+    assistantSend: 'Ask',
+    assistantReplyLabel: 'Assistant reply',
+    aiChecking: 'Contacting assistant server…',
+    assistantLocalSevenTitle: 'Last 7 days — care data summary',
+    assistantLocalSevenNote: '(Compiled on this device from your logs — OpenAI is not called for this section.)',
+    aiGenerateWeek: 'Generate this week’s AI care analysis',
+    aiWeekHint:
+      'If you already generated today and your logs did not change, we reuse the cache without using a quota slot. After edits, tap again for an up-to-date analysis.',
+    aiDataStaleHint: 'Your records changed — you can regenerate the analysis.',
+    aiModelHint:
+      'Assistant server is up and OpenAI is configured. Default model is gpt-5.4-mini (set OPENAI_MODEL in server `.env`). OpenAI is called only after you tap the button and a fresh generation is needed.',
+    aiNeedServerEnv:
+      'AI unavailable: run npm run dev (starts the API server), add OPENAI_API_KEY to project-root `.env`, and confirm you see [assistant-api] http://127.0.0.1:8788 in the terminal.',
+    aiEmptyHint: 'No AI care analysis for this week yet — tap the button above (counts toward daily quota unless served from cache).',
+    aiAskEmpty: 'Please enter a question first.',
+    aiOpenAiRisk:
+      'Never commit `.env` with secrets. In production, restrict key access to your backend only.',
+    aiOpenAiBusy: 'Contacting OpenAI…',
+    aiOpenAiFail: 'OpenAI error: ',
+    assistantSendBusy: 'Working…',
+    aiQuotaLine:
+      '{{remaining}} / {{limit}} AI requests left today (per device; counts successful calls only; cache hits are free).',
+    aiErrQuota:
+      'Daily AI limit reached. Free: 3/day, Pro: 30/day. For Pro, ask your admin to add this device ID to server env AI_PRO_CLIENT_IDS; otherwise try again tomorrow.',
+    aiErrRate: 'Too many requests: up to 3 AI calls per minute per device. Please wait a moment.',
+    aiErrOpenAi: 'The AI service could not complete this request. Please try again later. (No auto-retry)',
   },
 };
 
@@ -365,6 +467,16 @@ function formatMonthLocal(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+}
+
+/** monthKey: YYYY-MM → section title for history page */
+function formatHistoryMonthHeading(lang: Lang, monthKey: string): string {
+  const [ys, ms] = monthKey.split('-');
+  const y = Number(ys);
+  const m = Number(ms);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return monthKey;
+  if (lang === 'zh') return `${y}年${m}月`;
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function todayKey() {
@@ -681,6 +793,10 @@ export default function App() {
   const [page, setPage] = useState<Page>('today');
   const [newCatName, setNewCatName] = useState('');
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [historyJumpDate, setHistoryJumpDate] = useState('');
+  const [historyJumpHint, setHistoryJumpHint] = useState<string | null>(null);
+  const [historyFabVisible, setHistoryFabVisible] = useState(false);
+  const [aiClientId] = useState(() => getOrCreateClientId());
   const [weightDate, setWeightDate] = useState(today);
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
@@ -736,6 +852,234 @@ export default function App() {
     [reportHistory]
   );
 
+  const historyMonthGroups = useMemo(() => {
+    const groups: { monthKey: string; records: { date: string; data: DailyRecord }[] }[] = [];
+    for (const record of history) {
+      const mk = record.date.slice(0, 7);
+      const last = groups[groups.length - 1];
+      if (last && last.monthKey === mk) last.records.push(record);
+      else groups.push({ monthKey: mk, records: [record] });
+    }
+    return groups;
+  }, [history]);
+
+  const historyDateBounds = useMemo(() => {
+    if (!history.length) return { min: '', max: '' };
+    return { min: history[history.length - 1].date, max: history[0].date };
+  }, [history]);
+
+  const assistantLast14 = useMemo(() => {
+    if (!selectedCat) return [];
+    const out: { date: string; data: DailyRecord }[] = [];
+    for (let i = 0; i < 14; i += 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const ds = formatDateLocal(d);
+      const data = ds === today ? daily : loadDailyRecord(selectedCat.id, ds);
+      out.push({ date: ds, data });
+    }
+    return out;
+  }, [selectedCat, today, daily, historyRefreshKey]);
+
+  const assistantContext = useMemo((): AssistantContext | null => {
+    if (!selectedCat) return null;
+    const last7Days = assistantLast14.slice(0, 7);
+    return {
+      lang,
+      today,
+      monthKey: month,
+      catId: selectedCat.id,
+      cat: {
+        name: selectedCat.name,
+        emoji: selectedCat.emoji,
+        chronicNote: selectedCat.chronicNote,
+        allergyNote: selectedCat.allergyNote,
+        vetClinic: selectedCat.vetClinic,
+        profileNote: selectedCat.profileNote,
+      },
+      catsCount: cats.length,
+      todayDaily: daily,
+      last7Days,
+      recentDaysForAi: assistantLast14,
+      weightRecords: weightRecords.map((w) => ({
+        id: w.id,
+        date: w.date,
+        weight: w.weight,
+        note: w.note,
+      })),
+      monthlyCare: monthly,
+    };
+  }, [lang, today, month, selectedCat, cats.length, daily, assistantLast14, weightRecords, monthly]);
+
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiReply, setAiReply] = useState('');
+  const [aiCareBundle, setAiCareBundle] = useState<AssistantCareBundleJson | null>(null);
+  const [aiBundleSavedHash, setAiBundleSavedHash] = useState<string | null>(null);
+  const [aiBundleLoading, setAiBundleLoading] = useState(false);
+  const [aiQaLoading, setAiQaLoading] = useState(false);
+  const [openAiErr, setOpenAiErr] = useState<string | null>(null);
+  const [assistantApiReady, setAssistantApiReady] = useState<boolean | null>(null);
+  const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(null);
+  const summariesAbortRef = useRef<AbortController | null>(null);
+  const qaAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (page !== 'assistant') return;
+    let cancelled = false;
+    setAssistantApiReady(null);
+    setAssistantQuota(null);
+    fetchAssistantHealth(aiClientId, today).then((h) => {
+      if (cancelled) return;
+      if (!h) {
+        setAssistantApiReady(false);
+        setAssistantQuota(null);
+        return;
+      }
+      setAssistantQuota(h);
+      setAssistantApiReady(h.openaiReady);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, lang, aiClientId, today]);
+
+  useEffect(() => {
+    setAiQuestion('');
+    setAiReply('');
+    setOpenAiErr(null);
+  }, [selectedCatId]);
+
+  useEffect(() => {
+    setAiCareBundle(null);
+    setAiBundleSavedHash(null);
+  }, [lang, today, selectedCatId]);
+
+  useEffect(() => {
+    if (page !== 'assistant') return;
+    const ctx = assistantContext;
+    if (!ctx) return;
+    const meta = {
+      clientId: aiClientId,
+      catId: ctx.catId,
+      usageDate: ctx.today,
+      plan: getAiPlan(),
+    };
+    const cached = peekCareBundleCache(ctx, meta);
+    if (cached) {
+      setAiCareBundle(cached);
+      setAiBundleSavedHash(getCareBundleContextHash(ctx));
+    }
+  }, [page, assistantContext?.catId, assistantContext?.today, assistantContext?.lang, aiClientId]);
+
+  useEffect(
+    () => () => {
+      summariesAbortRef.current?.abort();
+      qaAbortRef.current?.abort();
+    },
+    []
+  );
+
+  const runOpenAiCareBundle = useCallback(async () => {
+    const ctx = assistantContext;
+    if (!ctx) return;
+    if (assistantApiReady !== true) {
+      setOpenAiErr(text[lang].aiNeedServerEnv);
+      return;
+    }
+    summariesAbortRef.current?.abort();
+    const ac = new AbortController();
+    summariesAbortRef.current = ac;
+    setAiBundleLoading(true);
+    setOpenAiErr(null);
+    const meta = {
+      clientId: aiClientId,
+      catId: ctx.catId,
+      usageDate: ctx.today,
+      plan: getAiPlan(),
+    };
+    const hasCache = peekCareBundleCache(ctx, meta) != null;
+    if (!hasCache && assistantQuota != null && assistantQuota.dailyRemaining <= 0) {
+      setOpenAiErr(text[lang].aiErrQuota);
+      setAiBundleLoading(false);
+      return;
+    }
+    try {
+      const data = await generateAssistantCareBundleOpenAi(
+        ctx,
+        meta,
+        ac.signal
+      );
+      setAiCareBundle(data);
+      setAiBundleSavedHash(getCareBundleContextHash(ctx));
+      const h = await fetchAssistantHealth(aiClientId, ctx.today);
+      if (h) setAssistantQuota(h);
+    } catch (e) {
+      if ((e as { name?: string }).name === 'AbortError') return;
+      if (e instanceof AssistantApiError) {
+        if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
+        else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
+        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiErrOpenAi);
+        else if (e.code === 'NO_API_KEY') setOpenAiErr(text[lang].aiNeedServerEnv);
+        else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
+      } else {
+        setOpenAiErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
+      }
+    } finally {
+      setAiBundleLoading(false);
+    }
+  }, [assistantContext, lang, assistantApiReady, aiClientId, assistantQuota]);
+
+  const runOpenAiQa = useCallback(async () => {
+    const ctx = assistantContext;
+    if (!ctx) return;
+    const q = aiQuestion.trim();
+    if (!q) {
+      setOpenAiErr(text[lang].aiAskEmpty);
+      setAiReply('');
+      return;
+    }
+    if (assistantApiReady !== true) {
+      setOpenAiErr(text[lang].aiNeedServerEnv);
+      setAiReply('');
+      return;
+    }
+    qaAbortRef.current?.abort();
+    const ac = new AbortController();
+    qaAbortRef.current = ac;
+    setAiQaLoading(true);
+    setOpenAiErr(null);
+    try {
+      const raw = await generateAssistantQaOpenAi(
+        ctx,
+        q,
+        {
+          clientId: aiClientId,
+          catId: ctx.catId,
+          usageDate: ctx.today,
+          plan: getAiPlan(),
+        },
+        ac.signal
+      );
+      setAiReply(withDisclaimer(raw, ctx.lang));
+      const h = await fetchAssistantHealth(aiClientId, ctx.today);
+      if (h) setAssistantQuota(h);
+    } catch (e) {
+      if ((e as { name?: string }).name === 'AbortError') return;
+      if (e instanceof AssistantApiError) {
+        if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
+        else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
+        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiErrOpenAi);
+        else if (e.code === 'NO_API_KEY') setOpenAiErr(text[lang].aiNeedServerEnv);
+        else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
+      } else {
+        setOpenAiErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
+      }
+      setAiReply('');
+    } finally {
+      setAiQaLoading(false);
+    }
+  }, [assistantContext, aiQuestion, lang, assistantApiReady, aiClientId]);
+
   const latestWeight = weightRecords[0];
   const oldestRecentWeight = weightRecords[Math.min(weightRecords.length - 1, 4)];
   const recentWeightChange =
@@ -787,7 +1131,7 @@ export default function App() {
     setMonthly(loadMonthlyRecord(catId, month));
     setWeightRecords(loadWeightRecords(catId));
     setHistoryRefreshKey((v) => v + 1);
-    setPage('today');
+    setPage((p) => (p === 'assistant' ? 'assistant' : 'today'));
   };
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
@@ -1166,6 +1510,44 @@ export default function App() {
     );
   };
 
+  useEffect(() => {
+    setHistoryJumpHint(null);
+    setHistoryJumpDate('');
+  }, [selectedCatId, historyRefreshKey]);
+
+  useEffect(() => {
+    if (page !== 'history') {
+      setHistoryFabVisible(false);
+      return;
+    }
+    const threshold = 280;
+    const onScroll = () => {
+      setHistoryFabVisible(window.scrollY > threshold);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [page, history.length]);
+
+  const scrollHistoryToLatest = useCallback(() => {
+    document.getElementById('history-latest-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const scrollHistoryToPickedDate = useCallback(() => {
+    const d = historyJumpDate.trim();
+    if (!d) {
+      setHistoryJumpHint(text[lang].historyPickDateFirst);
+      return;
+    }
+    const el = document.getElementById(`history-day-${d}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setHistoryJumpHint(null);
+    } else {
+      setHistoryJumpHint(text[lang].historyJumpNoMatch);
+    }
+  }, [historyJumpDate, lang]);
+
   const renderCatSwitcher = () => (
     <div className="mb-5 rounded-3xl bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1435,100 +1817,168 @@ export default function App() {
     </>
   );
 
-  const renderHistoryPage = () => (
-    <>
-      {renderCatSwitcher()}
+  const renderHistoryPage = () => {
+    const renderHistoryDayCard = (record: { date: string; data: DailyRecord }) => {
+      const done = dailyItems.filter((item) => record.data[item.id] === true).length;
+      const percent = Math.round((done / dailyItems.length) * 100);
+      const recordAbnormalNote = typeof record.data.abnormalNote === 'string' ? record.data.abnormalNote : '';
+      const recordDailyNote = typeof record.data.dailyNote === 'string' ? record.data.dailyNote : '';
+      const recordAbnormalPhotos = getPhotoList(record.data.abnormalPhotos);
+      const recordDailyPhotos = getPhotoList(record.data.dailyPhotos);
 
-      <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="text-4xl">📅</div>
-        <h1 className="mt-2 text-2xl font-bold">{tr.historyTitle}</h1>
-        <p className="mt-1 text-sm text-stone-500">{tr.historyDesc}</p>
-      </div>
+      return (
+        <div
+          key={record.date}
+          id={`history-day-${record.date}`}
+          className="scroll-mt-32 rounded-3xl bg-white p-5 shadow-sm"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold">{record.date}</h2>
+              <p className="text-sm text-stone-500">
+                {tr.completed} {done}/{dailyItems.length}（{percent}%）
+              </p>
+            </div>
+            <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-bold text-orange-700">{percent}%</span>
+          </div>
 
-      {history.length === 0 ? (
-        <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.noHistory}</div>
-      ) : (
-        <div className="space-y-4">
-          {history.map((record) => {
-            const done = dailyItems.filter((item) => record.data[item.id] === true).length;
-            const percent = Math.round((done / dailyItems.length) * 100);
-            const recordAbnormalNote = typeof record.data.abnormalNote === 'string' ? record.data.abnormalNote : '';
-            const recordDailyNote = typeof record.data.dailyNote === 'string' ? record.data.dailyNote : '';
-            const recordAbnormalPhotos = getPhotoList(record.data.abnormalPhotos);
-            const recordDailyPhotos = getPhotoList(record.data.dailyPhotos);
+          <div className="mb-4 h-3 overflow-hidden rounded-full bg-orange-100">
+            <div className="h-full rounded-full bg-orange-400" style={{ width: `${percent}%` }} />
+          </div>
 
-            return (
-              <div key={record.date} className="rounded-3xl bg-white p-5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold">{record.date}</h2>
-                    <p className="text-sm text-stone-500">
-                      {tr.completed} {done}/{dailyItems.length}（{percent}%）
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-bold text-orange-700">{percent}%</span>
-                </div>
-
-                <div className="mb-4 h-3 overflow-hidden rounded-full bg-orange-100">
-                  <div className="h-full rounded-full bg-orange-400" style={{ width: `${percent}%` }} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {dailyItems.map((item) => (
-                    <div key={item.id} className={`rounded-2xl px-3 py-2 ${record.data[item.id] === true ? 'bg-green-50 text-green-700' : 'bg-stone-50 text-stone-400'}`}>
-                      <span className="mr-1">{item.emoji}</span>
-                      {tr[item.labelKey as keyof typeof tr]}
-                      <span className="ml-1">{record.data[item.id] === true ? '✅' : '—'}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {recordAbnormalNote.trim() && (
-                  <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
-                    <div className="mb-1 font-bold">⚠️ {tr.abnormalRecord}</div>
-                    <p className="whitespace-pre-wrap">{recordAbnormalNote}</p>
-                  </div>
-                )}
-
-                {recordAbnormalPhotos.length > 0 && (
-                  <div className="mt-3">
-                    <div className="mb-2 text-sm font-bold text-red-700">{tr.abnormalPhotos}</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      {recordAbnormalPhotos.map((photo, index) => (
-                        <button key={`history-abnormal-${record.date}-${index}`} onClick={() => setSelectedPhoto(photo)} className="aspect-square overflow-hidden rounded-2xl bg-red-50">
-                          <img src={photo} alt={`${tr.abnormalPhotos} ${index + 1}`} className="h-full w-full object-cover" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {recordDailyNote.trim() && (
-                  <div className="mt-3 rounded-2xl bg-stone-50 p-4 text-sm text-stone-700">
-                    <div className="mb-1 font-bold">📝 {tr.todayNoteTitle}</div>
-                    <p className="whitespace-pre-wrap">{recordDailyNote}</p>
-                  </div>
-                )}
-
-                {recordDailyPhotos.length > 0 && (
-                  <div className="mt-3">
-                    <div className="mb-2 text-sm font-bold text-stone-700">{tr.dailyPhotos}</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      {recordDailyPhotos.map((photo, index) => (
-                        <button key={`history-daily-${record.date}-${index}`} onClick={() => setSelectedPhoto(photo)} className="aspect-square overflow-hidden rounded-2xl bg-stone-50">
-                          <img src={photo} alt={`${tr.dailyPhotos} ${index + 1}`} className="h-full w-full object-cover" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            {dailyItems.map((item) => (
+              <div key={item.id} className={`rounded-2xl px-3 py-2 ${record.data[item.id] === true ? 'bg-green-50 text-green-700' : 'bg-stone-50 text-stone-400'}`}>
+                <span className="mr-1">{item.emoji}</span>
+                {tr[item.labelKey as keyof typeof tr]}
+                <span className="ml-1">{record.data[item.id] === true ? '✅' : '—'}</span>
               </div>
-            );
-          })}
+            ))}
+          </div>
+
+          {recordAbnormalNote.trim() && (
+            <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
+              <div className="mb-1 font-bold">⚠️ {tr.abnormalRecord}</div>
+              <p className="whitespace-pre-wrap">{recordAbnormalNote}</p>
+            </div>
+          )}
+
+          {recordAbnormalPhotos.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-2 text-sm font-bold text-red-700">{tr.abnormalPhotos}</div>
+              <div className="grid grid-cols-3 gap-3">
+                {recordAbnormalPhotos.map((photo, index) => (
+                  <button key={`history-abnormal-${record.date}-${index}`} onClick={() => setSelectedPhoto(photo)} className="aspect-square overflow-hidden rounded-2xl bg-red-50">
+                    <img src={photo} alt={`${tr.abnormalPhotos} ${index + 1}`} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {recordDailyNote.trim() && (
+            <div className="mt-3 rounded-2xl bg-stone-50 p-4 text-sm text-stone-700">
+              <div className="mb-1 font-bold">📝 {tr.todayNoteTitle}</div>
+              <p className="whitespace-pre-wrap">{recordDailyNote}</p>
+            </div>
+          )}
+
+          {recordDailyPhotos.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-2 text-sm font-bold text-stone-700">{tr.dailyPhotos}</div>
+              <div className="grid grid-cols-3 gap-3">
+                {recordDailyPhotos.map((photo, index) => (
+                  <button key={`history-daily-${record.date}-${index}`} onClick={() => setSelectedPhoto(photo)} className="aspect-square overflow-hidden rounded-2xl bg-stone-50">
+                    <img src={photo} alt={`${tr.dailyPhotos} ${index + 1}`} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </>
-  );
+      );
+    };
+
+    return (
+      <>
+        {renderCatSwitcher()}
+
+        <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
+          <div className="text-4xl">📅</div>
+          <h1 className="mt-2 text-2xl font-bold">{tr.historyTitle}</h1>
+          <p className="mt-1 text-sm text-stone-500">{tr.historyDesc}</p>
+          <p className="mt-2 text-xs leading-5 text-stone-400">{tr.historyOrderNote}</p>
+        </div>
+
+        {history.length === 0 ? (
+          <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.noHistory}</div>
+        ) : (
+          <>
+            <div className="sticky top-0 z-30 mb-4 space-y-2 rounded-2xl border border-stone-200 bg-orange-50/95 p-4 shadow-md backdrop-blur-sm">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <label htmlFor="history-jump-date" className="mb-1 block text-xs font-bold text-stone-600">
+                    {tr.historyJumpLabel}
+                  </label>
+                  <input
+                    id="history-jump-date"
+                    type="date"
+                    className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-300"
+                    min={historyDateBounds.min}
+                    max={historyDateBounds.max}
+                    value={historyJumpDate}
+                    onChange={(e) => {
+                      setHistoryJumpDate(e.target.value);
+                      setHistoryJumpHint(null);
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={scrollHistoryToPickedDate}
+                  className="shrink-0 rounded-2xl bg-stone-800 px-5 py-2.5 text-sm font-bold text-white shadow-sm"
+                >
+                  {tr.historyJumpGo}
+                </button>
+              </div>
+              {historyJumpHint ? <p className="text-xs font-medium text-amber-800">{historyJumpHint}</p> : null}
+              <div className="rounded-xl border border-dashed border-stone-300 bg-white/60 px-3 py-2 text-xs leading-5 text-stone-500">
+                {tr.historyRoadmap}
+              </div>
+            </div>
+
+            <div id="history-latest-anchor" className="h-0 w-full scroll-mt-28" aria-hidden />
+
+            {historyMonthGroups.map((group) => (
+              <div key={group.monthKey} className="mb-8">
+                <h3 className="mb-3 flex items-center gap-2 text-stone-800">
+                  <span className="h-px min-w-[1rem] flex-1 bg-stone-300" />
+                  <span className="shrink-0 rounded-full bg-stone-800 px-4 py-1.5 text-xs font-bold tracking-wide text-white">
+                    {formatHistoryMonthHeading(lang, group.monthKey)}
+                  </span>
+                  <span className="h-px min-w-[1rem] flex-1 bg-stone-300" />
+                </h3>
+                <div className="space-y-4">{group.records.map((record) => renderHistoryDayCard(record))}</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {historyFabVisible && history.length > 0 ? (
+          <button
+            type="button"
+            onClick={scrollHistoryToLatest}
+            className="fixed bottom-28 right-5 z-40 flex items-center gap-2 rounded-full border border-orange-200 bg-white px-4 py-3 text-sm font-bold text-orange-700 shadow-lg transition hover:bg-orange-50"
+          >
+            <span className="text-base" aria-hidden>
+              ↑
+            </span>
+            {tr.historyBackLatest}
+          </button>
+        ) : null}
+      </>
+    );
+  };
 
   const renderVetPage = () => (
     <>
@@ -1681,6 +2131,127 @@ export default function App() {
     </div>
   );
 
+  const renderAssistantPage = () => {
+    if (!assistantContext) return null;
+
+    const apiReady = assistantApiReady === true;
+    const apiChecking = assistantApiReady === null;
+    const qaBusy = aiQaLoading || aiBundleLoading;
+    const currentCtxHash = getCareBundleContextHash(assistantContext);
+    const dataStale =
+      Boolean(aiCareBundle) && aiBundleSavedHash != null && currentCtxHash !== aiBundleSavedHash;
+    const quotaLine =
+      assistantQuota && assistantQuota.dailyLimit > 0
+        ? tr.aiQuotaLine
+            .replace('{{remaining}}', String(assistantQuota.dailyRemaining))
+            .replace('{{limit}}', String(assistantQuota.dailyLimit))
+        : null;
+
+    const renderAiBlock = (title: string, body: string) => (
+      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+        <h2 className="mb-2 text-lg font-bold">{title}</h2>
+        <div className="whitespace-pre-wrap text-sm leading-7 text-stone-700">{body}</div>
+      </section>
+    );
+
+    return (
+      <>
+        {renderCatSwitcher()}
+
+        <div className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+          <div className="text-4xl">🤖</div>
+          <h1 className="mt-2 text-2xl font-bold">{tr.assistantTitle}</h1>
+          <p className="mt-2 text-sm leading-6 text-stone-600">{tr.assistantLead}</p>
+        </div>
+
+        <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="mb-2 text-lg font-bold">{tr.assistantLocalSevenTitle}</h2>
+          <p className="mb-2 text-xs text-stone-500">{tr.assistantLocalSevenNote}</p>
+          <div className="whitespace-pre-wrap text-sm leading-7 text-stone-700">
+            {buildSevenDayAnalysis(assistantContext)}
+          </div>
+        </section>
+
+        <div className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+          <p
+            className={`text-xs leading-5 ${
+              apiReady ? 'text-emerald-800' : apiChecking ? 'text-stone-500' : 'text-stone-500'
+            }`}
+          >
+            {apiChecking ? tr.aiChecking : apiReady ? tr.aiModelHint : tr.aiNeedServerEnv}
+          </p>
+          {quotaLine ? <p className="mt-2 text-xs leading-5 text-stone-600">{quotaLine}</p> : null}
+          {apiReady ? <p className="mt-2 text-xs leading-5 text-amber-900/90">{tr.aiOpenAiRisk}</p> : null}
+          {dataStale ? (
+            <p className="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+              {tr.aiDataStaleHint}
+            </p>
+          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!apiReady || aiBundleLoading}
+              onClick={runOpenAiCareBundle}
+              className="rounded-2xl bg-stone-800 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
+            </button>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-stone-600">{tr.aiWeekHint}</p>
+          {openAiErr ? (
+            <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-xs leading-5 text-red-800">{openAiErr}</p>
+          ) : null}
+        </div>
+
+        {apiReady && aiBundleLoading ? (
+          <section className="mb-5 rounded-3xl border border-dashed border-orange-200 bg-orange-50/50 p-5 text-sm text-stone-600">
+            {tr.aiOpenAiBusy}
+          </section>
+        ) : null}
+
+        {apiReady && !aiCareBundle && !aiBundleLoading ? (
+          <section className="mb-5 rounded-3xl border border-dashed border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600">
+            {tr.aiEmptyHint}
+          </section>
+        ) : null}
+
+        {aiCareBundle ? (
+          <>
+            {renderAiBlock(tr.assistantToday, withDisclaimer(aiCareBundle.healthSummary, assistantContext.lang))}
+            {renderAiBlock(tr.assistantSeven, withDisclaimer(aiCareBundle.sevenDayAnalysis, assistantContext.lang))}
+            {renderAiBlock(tr.assistantVetAi, withDisclaimer(aiCareBundle.vetReport, assistantContext.lang))}
+          </>
+        ) : null}
+
+        <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="mb-2 text-lg font-bold">{tr.assistantAsk}</h2>
+          <p className="mb-3 text-sm text-stone-500">{tr.assistantAskHint}</p>
+          <textarea
+            value={aiQuestion}
+            onChange={(e) => setAiQuestion(e.target.value)}
+            placeholder={tr.assistantAskPlaceholder}
+            disabled={qaBusy || !apiReady}
+            className="min-h-24 w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300 disabled:opacity-60"
+          />
+          <button
+            type="button"
+            disabled={qaBusy || !apiReady}
+            onClick={runOpenAiQa}
+            className="mt-3 w-full rounded-2xl bg-orange-400 py-3 font-bold text-white shadow-sm disabled:opacity-60"
+          >
+            {aiQaLoading ? tr.assistantSendBusy : tr.assistantSend}
+          </button>
+          {aiReply ? (
+            <div className="mt-4 rounded-2xl border border-orange-100 bg-orange-50/80 p-4">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-orange-800">{tr.assistantReplyLabel}</p>
+              <div className="whitespace-pre-wrap text-sm leading-7 text-stone-800">{aiReply}</div>
+            </div>
+          ) : null}
+        </section>
+      </>
+    );
+  };
+
   const renderCatsPage = () => (
     <>
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
@@ -1827,22 +2398,29 @@ export default function App() {
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       <div className="mx-auto max-w-md pb-24">
-        <div className="mb-5 grid grid-cols-5 gap-2 rounded-3xl bg-white p-2 shadow-sm">
-          <button onClick={() => setPage('today')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'today' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-            {tr.today}
-          </button>
-          <button onClick={() => setPage('weight')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'weight' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-            {tr.weight}
-          </button>
-          <button onClick={() => setPage('vet')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'vet' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-            {tr.vet}
-          </button>
-          <button onClick={() => setPage('history')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'history' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-            {tr.history}
-          </button>
-          <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-            {tr.cats}
-          </button>
+        <div className="mb-5 flex flex-col gap-2 rounded-3xl bg-white p-2 shadow-sm">
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => setPage('today')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'today' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+              {tr.today}
+            </button>
+            <button onClick={() => setPage('weight')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'weight' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+              {tr.weight}
+            </button>
+            <button onClick={() => setPage('vet')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'vet' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+              {tr.vet}
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => setPage('history')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'history' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+              {tr.history}
+            </button>
+            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+              {tr.cats}
+            </button>
+            <button onClick={() => setPage('assistant')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'assistant' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+              {tr.assistantNav}
+            </button>
+          </div>
         </div>
 
         {page === 'today' && renderTodayPage()}
@@ -1850,6 +2428,7 @@ export default function App() {
         {page === 'vet' && renderVetPage()}
         {page === 'history' && renderHistoryPage()}
         {page === 'cats' && renderCatsPage()}
+        {page === 'assistant' && renderAssistantPage()}
 
         <p className="mt-6 text-center text-xs text-stone-400">{tr.savedLocal}</p>
       </div>
