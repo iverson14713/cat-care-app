@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import { fileURLToPath, URL } from 'node:url';
 import dotenv from 'dotenv';
 import http from 'node:http';
-import { URL } from 'node:url';
 import { systemBase, careBundleUserPrompt, qaUserPrompt } from './prompts.mjs';
 import { openAiChatCompletion } from './openai.mjs';
 import {
@@ -15,8 +15,11 @@ import {
 import { appendUsageLog } from './usage-log.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
-dotenv.config({ path: path.join(__dirname, '..', '.env.local'), override: true });
+const ROOT_DIR = path.join(__dirname, '..');
+const ENV_FILE = path.join(ROOT_DIR, '.env');
+const ENV_LOCAL_FILE = path.join(ROOT_DIR, '.env.local');
+dotenv.config({ path: ENV_FILE });
+dotenv.config({ path: ENV_LOCAL_FILE, override: true });
 
 const PORT = Number(process.env.ASSISTANT_SERVER_PORT || 8788);
 const MAX_CONTEXT_CHARS = 48_000;
@@ -436,6 +439,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[assistant-api] http://127.0.0.1:${PORT}`);
+  console.log(`[assistant-api] Project root (where .env should live): ${ROOT_DIR}`);
+  console.log(
+    `[assistant-api] .env: ${fs.existsSync(ENV_FILE) ? 'file found' : 'file missing'} → ${ENV_FILE}`
+  );
+  console.log(
+    `[assistant-api] .env.local: ${fs.existsSync(ENV_LOCAL_FILE) ? 'file found' : 'not present'} → ${ENV_LOCAL_FILE}`
+  );
   console.log(`[assistant-api] OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? 'set' : 'missing'}`);
   console.log(`[assistant-api] OPENAI_MODEL: ${MODEL}`);
   console.log(`[assistant-api] Usage log: server/logs/usage.jsonl`);
