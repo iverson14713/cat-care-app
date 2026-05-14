@@ -34,3 +34,14 @@
 - 改過 `.env` 後請**重啟** `npm run dev`（或至少重啟 `dev:server`）。  
 - 若只執行 `vite` 或只跑 `dev:client`，代理沒有後端目標，AI 會失敗。  
 - 埠號需與 `vite.config.ts` 的 `ASSISTANT_SERVER_URL`（預設 `http://127.0.0.1:8788`）及 `.env` 的 `ASSISTANT_SERVER_PORT` 一致。
+
+### 部署到 Vercel（線上 AI）
+
+靜態前端**不會**讀到你在 Vercel 設的變數，也**沒有**本機的 `127.0.0.1:8788`。專案已在根目錄提供 **Serverless API**（`api/assistant/*`），與 `server/` 共用同一套邏輯。
+
+1. 在 Vercel → **Settings → Environment Variables** 新增 **`OPENAI_API_KEY`**（名稱須完全一致，**不要**加 `VITE_`），並勾選 **Production**（Preview 若要測也請一併勾選）。
+2. 儲存後到 **Deployments → Redeploy**（加變數後一定要重新部署，舊 build 不會帶入新變數）。
+3. 部署完成後用瀏覽器開：`https://你的網域/api/assistant/health` 應回 JSON，且含 `"openaiReady": true`（金鑰有進函式時）。
+4. 可選：`OPENAI_MODEL`、`AI_PRO_CLIENT_IDS` 等（與 `.env.example` 相同語意）。
+
+**說明：** 每日配額／分鐘頻率在 Vercel 上為無狀態程序，僅能作為參考；若需嚴格計次，之後可改接 KV／資料庫。

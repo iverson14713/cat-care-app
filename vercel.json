@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/assistant/care-bundle.js": {
+      "maxDuration": 120
+    },
+    "api/assistant/qa.js": {
+      "maxDuration": 120
+    }
+  }
+}

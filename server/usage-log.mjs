@@ -23,6 +23,10 @@ const logFile = path.join(logDir, 'usage.jsonl');
  * }} entry
  */
 export function appendUsageLog(entry) {
+  if (process.env.VERCEL) {
+    console.log('[usage-log]', JSON.stringify(entry));
+    return;
+  }
   try {
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
     fs.appendFileSync(logFile, `${JSON.stringify(entry)}\n`, 'utf8');

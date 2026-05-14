@@ -253,8 +253,14 @@ const text = {
     aiDataStaleHint: '資料已更新，可重新生成分析。',
     aiModelHint:
       '助理伺服器已連線且已設定 OpenAI。預設模型為 gpt-5.4-mini（在伺服器 `.env` 以 OPENAI_MODEL 調整）。僅在按下「生成本週 AI 照護分析」並需要新產出時，後端才會呼叫 OpenAI。',
-    aiNeedServerEnv:
-      '無法使用 AI：請確認已執行 npm run dev（會同時啟動助理 API）、專案根目錄 `.env` 內有 OPENAI_API_KEY，且終端機出現 [assistant-api] http://127.0.0.1:8788。',
+    aiNeedServerEnvDev:
+      '無法使用 AI（本機）：請執行 npm run dev（會同時啟動助理 API）、專案根目錄 `.env` 內有 OPENAI_API_KEY，且終端機出現 [assistant-api] http://127.0.0.1:8788。',
+    aiNeedServerEnvProd:
+      '無法使用 AI（線上）：請在 Vercel → Project → Settings → Environment Variables 新增 OPENAI_API_KEY（勿用 VITE_ 前綴），勾選 Production 後執行 Redeploy。可選 OPENAI_MODEL。',
+    aiAssistantUnreachableDev:
+      '無法連到助理 API（本機）。請確認已執行 npm run dev，且瀏覽器可連到 http://127.0.0.1:8788（防火牆／代理未阻擋）。',
+    aiAssistantUnreachableProd:
+      '無法連到 /api/assistant/health。請確認已重新部署含 api 目錄的版本；若自訂網域，請檢查 DNS 與 Vercel 專案綁定。',
     aiEmptyHint: '尚無本週 AI 照護分析；點上方按鈕產生（會計入今日配額，快取命中除外）。',
     aiAskEmpty: '請先輸入想問的內容。',
     aiOpenAiRisk:
@@ -434,8 +440,14 @@ const text = {
     aiDataStaleHint: 'Your records changed — you can regenerate the analysis.',
     aiModelHint:
       'Assistant server is up and OpenAI is configured. Default model is gpt-5.4-mini (set OPENAI_MODEL in server `.env`). OpenAI is called only after you tap the button and a fresh generation is needed.',
-    aiNeedServerEnv:
-      'AI unavailable: run npm run dev (starts the API server), add OPENAI_API_KEY to project-root `.env`, and confirm you see [assistant-api] http://127.0.0.1:8788 in the terminal.',
+    aiNeedServerEnvDev:
+      'AI unavailable (local): run npm run dev (starts the API), add OPENAI_API_KEY to project-root `.env`, and confirm you see [assistant-api] http://127.0.0.1:8788 in the terminal.',
+    aiNeedServerEnvProd:
+      'AI unavailable (production): in Vercel → Settings → Environment Variables add OPENAI_API_KEY (do not use the VITE_ prefix), enable it for Production, then Redeploy. OPENAI_MODEL is optional.',
+    aiAssistantUnreachableDev:
+      'Cannot reach the assistant API locally. Make sure npm run dev is running and nothing blocks http://127.0.0.1:8788.',
+    aiAssistantUnreachableProd:
+      'Cannot reach /api/assistant/health. Redeploy after adding the api folder; if you use a custom domain, verify DNS and the Vercel project link.',
     aiEmptyHint: 'No AI care analysis for this week yet — tap the button above (counts toward daily quota unless served from cache).',
     aiAskEmpty: 'Please enter a question first.',
     aiOpenAiRisk:
@@ -451,6 +463,13 @@ const text = {
     aiErrOpenAi: 'The AI service could not complete this request. Please try again later. (No auto-retry)',
   },
 };
+
+function aiStatusHint(lang: Lang, kind: 'off' | 'key'): string {
+  const tr = text[lang];
+  const dev = import.meta.env.DEV;
+  if (kind === 'off') return dev ? tr.aiAssistantUnreachableDev : tr.aiAssistantUnreachableProd;
+  return dev ? tr.aiNeedServerEnvDev : tr.aiNeedServerEnvProd;
+}
 
 function makeId() {
   return `cat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -919,6 +938,8 @@ export default function App() {
   const [aiQaLoading, setAiQaLoading] = useState(false);
   const [openAiErr, setOpenAiErr] = useState<string | null>(null);
   const [assistantApiReady, setAssistantApiReady] = useState<boolean | null>(null);
+  /** false = health fetch failed; true = got JSON (openaiReady may still be false). */
+  const [assistantHealthReachable, setAssistantHealthReachable] = useState<boolean | null>(null);
   const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(null);
   const summariesAbortRef = useRef<AbortController | null>(null);
   const qaAbortRef = useRef<AbortController | null>(null);
@@ -927,14 +948,17 @@ export default function App() {
     if (page !== 'assistant') return;
     let cancelled = false;
     setAssistantApiReady(null);
+    setAssistantHealthReachable(null);
     setAssistantQuota(null);
     fetchAssistantHealth(aiClientId, today).then((h) => {
       if (cancelled) return;
       if (!h) {
+        setAssistantHealthReachable(false);
         setAssistantApiReady(false);
         setAssistantQuota(null);
         return;
       }
+      setAssistantHealthReachable(true);
       setAssistantQuota(h);
       setAssistantApiReady(h.openaiReady);
     });
@@ -983,7 +1007,9 @@ export default function App() {
     const ctx = assistantContext;
     if (!ctx) return;
     if (assistantApiReady !== true) {
-      setOpenAiErr(text[lang].aiNeedServerEnv);
+      setOpenAiErr(
+        assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
+      );
       return;
     }
     summariesAbortRef.current?.abort();
@@ -1019,7 +1045,7 @@ export default function App() {
         if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
         else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
         else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiErrOpenAi);
-        else if (e.code === 'NO_API_KEY') setOpenAiErr(text[lang].aiNeedServerEnv);
+        else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
         else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
       } else {
         setOpenAiErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
@@ -1027,7 +1053,7 @@ export default function App() {
     } finally {
       setAiBundleLoading(false);
     }
-  }, [assistantContext, lang, assistantApiReady, aiClientId, assistantQuota]);
+  }, [assistantContext, lang, assistantApiReady, assistantHealthReachable, aiClientId, assistantQuota]);
 
   const runOpenAiQa = useCallback(async () => {
     const ctx = assistantContext;
@@ -1039,7 +1065,9 @@ export default function App() {
       return;
     }
     if (assistantApiReady !== true) {
-      setOpenAiErr(text[lang].aiNeedServerEnv);
+      setOpenAiErr(
+        assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
+      );
       setAiReply('');
       return;
     }
@@ -1069,7 +1097,7 @@ export default function App() {
         if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
         else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
         else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiErrOpenAi);
-        else if (e.code === 'NO_API_KEY') setOpenAiErr(text[lang].aiNeedServerEnv);
+        else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
         else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
       } else {
         setOpenAiErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
@@ -1078,7 +1106,7 @@ export default function App() {
     } finally {
       setAiQaLoading(false);
     }
-  }, [assistantContext, aiQuestion, lang, assistantApiReady, aiClientId]);
+  }, [assistantContext, aiQuestion, lang, assistantApiReady, assistantHealthReachable, aiClientId]);
 
   const latestWeight = weightRecords[0];
   const oldestRecentWeight = weightRecords[Math.min(weightRecords.length - 1, 4)];
@@ -2178,7 +2206,13 @@ export default function App() {
               apiReady ? 'text-emerald-800' : apiChecking ? 'text-stone-500' : 'text-stone-500'
             }`}
           >
-            {apiChecking ? tr.aiChecking : apiReady ? tr.aiModelHint : tr.aiNeedServerEnv}
+            {apiChecking
+              ? tr.aiChecking
+              : apiReady
+                ? tr.aiModelHint
+                : assistantHealthReachable === false
+                  ? aiStatusHint(lang, 'off')
+                  : aiStatusHint(lang, 'key')}
           </p>
           {quotaLine ? <p className="mt-2 text-xs leading-5 text-stone-600">{quotaLine}</p> : null}
           {apiReady ? <p className="mt-2 text-xs leading-5 text-amber-900/90">{tr.aiOpenAiRisk}</p> : null}
