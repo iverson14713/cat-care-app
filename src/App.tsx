@@ -3,7 +3,6 @@ import {
   type AssistantContext,
   type AssistantCareBundleJson,
   buildSevenDayAnalysis,
-  withDisclaimer,
 } from './aiCareAssistant';
 import { getOrCreateClientId, getAiPlan } from './aiClient';
 import {
@@ -232,48 +231,40 @@ const text = {
     bath: '本月洗澡確認',
     nailTrim: '剪指甲確認',
     catFood: '本月貓糧 / 貓砂補貨確認',
-    assistantNav: 'AI助理',
+    assistantNav: '照護',
     assistantTitle: 'AI 照護助理',
     assistantLead:
-      '進入本頁不會自動呼叫 OpenAI。點「生成本週 AI 照護分析」後才會向後端請求；內容僅限照護觀察、趨勢整理與提醒，以及給獸醫參考的紀錄摘要。不提供診斷與醫療建議。',
-    assistantToday: 'AI 健康摘要',
-    assistantSeven: '最近照護分析（AI 以約 14 天內紀錄為準）',
-    assistantVetAi: '獸醫報告（紀錄摘要）',
-    assistantAsk: 'AI 問答',
-    assistantAskHint: '僅透過 OpenAI 依你的紀錄回答；不診斷、不提供醫療建議。',
-    assistantAskPlaceholder: '例如：這週喝水紀錄多嗎？體重趨勢怎麼看？',
-    assistantSend: '送出問題',
-    assistantReplyLabel: '助理回覆',
-    aiChecking: '正在連線助理伺服器…',
-    assistantLocalSevenTitle: '最近 7 天照護資料摘要',
-    assistantLocalSevenNote: '（本段由 App 依你的紀錄在本機整理，未呼叫 OpenAI。）',
-    aiGenerateWeek: '生成本週 AI 照護分析',
-    aiWeekHint:
-      '若今日曾成功產生且紀錄未變，會直接使用快取、不扣次數。若你剛更新了紀錄，請再按一次按鈕以取得最新分析。',
-    aiDataStaleHint: '資料已更新，可重新生成分析。',
-    aiModelHint:
-      '助理伺服器已連線且已設定 OpenAI。預設模型為 gpt-5.4-mini（在伺服器 `.env` 以 OPENAI_MODEL 調整）。僅在按下「生成本週 AI 照護分析」並需要新產出時，後端才會呼叫 OpenAI。',
-    aiNeedServerEnvDev:
-      '無法使用 AI（本機）：請執行 npm run dev（會同時啟動助理 API）、專案根目錄 `.env` 內有 OPENAI_API_KEY，且終端機出現 [assistant-api] http://127.0.0.1:8788。',
-    aiNeedServerEnvProd:
-      '無法使用 AI（線上）：請在 Vercel → Project → Settings → Environment Variables 新增 OPENAI_API_KEY（勿用 VITE_ 前綴），勾選 Production 後執行 Redeploy。可選 OPENAI_MODEL。',
-    aiAssistantUnreachableDev:
-      '無法連到助理 API（本機）。請確認已執行 npm run dev，且瀏覽器可連到 http://127.0.0.1:8788（防火牆／代理未阻擋）。',
-    aiAssistantUnreachableProd:
-      '無法連到 /api/assistant/health。請確認已重新部署含 api 目錄的版本；若自訂網域，請檢查 DNS 與 Vercel 專案綁定。',
-    aiEmptyHint: '尚無本週 AI 照護分析；點上方按鈕產生（會計入今日配額，快取命中除外）。',
-    aiAskEmpty: '請先輸入想問的內容。',
-    aiOpenAiRisk:
-      '請勿將含 OPENAI_API_KEY 的 .env 提交到公開儲存庫；正式環境請限制僅後端可讀取金鑰。',
-    aiOpenAiBusy: 'OpenAI 生成中…',
-    aiOpenAiFail: 'OpenAI 錯誤：',
+      '根據最近的照護紀錄，\n\n整理日常趨勢與觀察提醒。\n\n此功能僅提供照護參考，\n不能取代獸醫診斷。',
+    assistantToday: '健康小結',
+    assistantSeven: '照護感想',
+    assistantVetAi: '給獸醫的重點',
+    assistantAsk: '隨口問問',
+    assistantAskHint: '我會依你存的紀錄陪聊力所能及的小問題，無法代替看診。',
+    assistantAskPlaceholder: '例如：這週喝水感覺怎樣？體重需要多留意嗎？',
+    assistantSend: '送出',
+    assistantReplyLabel: '回覆',
+    aiChecking: '稍等一下…',
+    assistantLocalSevenTitle: '最近 7 天摘要',
+    assistantAnalysisCardTitle: '照護分析',
+    aiGenerateWeek: '生成 AI 照護分析',
+    aiAnalysisCardSubtitle: '分析最近 7 天照護紀錄，\n並產生照護觀察與提醒。',
+    aiBundleCurrentHint: '已使用今日分析，可直接查看結果',
+    aiDataStaleHint: '資料已更新，可重新生成分析',
+    aiNeedServerEnvDev: '小幫手暫時醒不過來，請確認本機環境已依說明啟動後重新整理。',
+    aiNeedServerEnvProd: '小幫手暫時無法使用，請稍後再試；若剛完成設定，請稍待部署完成。',
+    aiAssistantUnreachableDev: '目前連不上服務，請確認開發環境已啟動後重新整理。',
+    aiAssistantUnreachableProd: '目前連不上服務，請稍後再試或重新整理頁面。',
+    aiEmptyHint: '尚未生成分析，點下方按鈕即可開始。',
+    aiAskEmpty: '先寫下想問的內容好嗎？',
+    aiOpenAiBusy: '正在整理…',
+    aiOpenAiFail: '這次沒成功：',
     assistantSendBusy: '處理中…',
-    aiQuotaLine:
-      '今日尚可請求 {{remaining}} / {{limit}} 次（此裝置 AI 配額；成功呼叫才計入；快取命中不扣次）。',
-    aiErrQuota:
-      '今日 AI 次數已用完。免費版每日 3 次、Pro 每日 30 次。若已購 Pro，請由管理員將你的裝置 ID 加入伺服器環境變數 AI_PRO_CLIENT_IDS；否則請明天再試。',
-    aiErrRate: '操作過於頻繁：同一裝置每分鐘最多 3 次 AI 請求，請稍候再試。',
-    aiErrOpenAi: 'AI 服務暫時無法完成請求，請稍後再試。（不會自動重試）',
+    aiQuotaLine: '今天還能用 {{remaining}} 次（每日共 {{limit}} 次）',
+    aiErrQuota: '今天次數用完了，明天再來好嗎？若你已升級仍遇到問題，請聯絡我們。',
+    aiErrRate: '問得太快啦，休息一下再試。',
+    aiErrOpenAi: '小幫手這次沒說成功，請稍後再試一次。',
+    aiDisclaimerFoot:
+      'AI 僅提供照護觀察與提醒，\n不能作為診斷或治療依據。\n如症狀持續或惡化，請諮詢獸醫。',
   },
   en: {
     appTitle: 'Cat Diary',
@@ -419,48 +410,41 @@ const text = {
     bath: 'Bath check',
     nailTrim: 'Nail trim check',
     catFood: 'Food / litter refill check',
-    assistantNav: 'AI Care',
-    assistantTitle: 'AI care assistant',
+    assistantNav: 'Care',
+    assistantTitle: 'AI Care Assistant',
     assistantLead:
-      'This page does not auto-call OpenAI. Tap “Generate this week’s AI care analysis” to request the backend; content covers care observations, trends, reminders, and a factual vet handoff. No diagnosis and no medical advice.',
-    assistantToday: 'AI health summary',
-    assistantSeven: 'Recent care analysis (AI uses up to ~14 days of logs)',
-    assistantVetAi: 'Vet report (log summary)',
-    assistantAsk: 'Q&A',
-    assistantAskHint: 'OpenAI answers from your records only — no diagnosis and no medical advice.',
-    assistantAskPlaceholder: 'Example: How consistent were hydration checks this week?',
-    assistantSend: 'Ask',
-    assistantReplyLabel: 'Assistant reply',
-    aiChecking: 'Contacting assistant server…',
-    assistantLocalSevenTitle: 'Last 7 days — care data summary',
-    assistantLocalSevenNote: '(Compiled on this device from your logs — OpenAI is not called for this section.)',
-    aiGenerateWeek: 'Generate this week’s AI care analysis',
-    aiWeekHint:
-      'If you already generated today and your logs did not change, we reuse the cache without using a quota slot. After edits, tap again for an up-to-date analysis.',
-    aiDataStaleHint: 'Your records changed — you can regenerate the analysis.',
-    aiModelHint:
-      'Assistant server is up and OpenAI is configured. Default model is gpt-5.4-mini (set OPENAI_MODEL in server `.env`). OpenAI is called only after you tap the button and a fresh generation is needed.',
-    aiNeedServerEnvDev:
-      'AI unavailable (local): run npm run dev (starts the API), add OPENAI_API_KEY to project-root `.env`, and confirm you see [assistant-api] http://127.0.0.1:8788 in the terminal.',
-    aiNeedServerEnvProd:
-      'AI unavailable (production): in Vercel → Settings → Environment Variables add OPENAI_API_KEY (do not use the VITE_ prefix), enable it for Production, then Redeploy. OPENAI_MODEL is optional.',
-    aiAssistantUnreachableDev:
-      'Cannot reach the assistant API locally. Make sure npm run dev is running and nothing blocks http://127.0.0.1:8788.',
-    aiAssistantUnreachableProd:
-      'Cannot reach /api/assistant/health. Redeploy after adding the api folder; if you use a custom domain, verify DNS and the Vercel project link.',
-    aiEmptyHint: 'No AI care analysis for this week yet — tap the button above (counts toward daily quota unless served from cache).',
-    aiAskEmpty: 'Please enter a question first.',
-    aiOpenAiRisk:
-      'Never commit `.env` with secrets. In production, restrict key access to your backend only.',
-    aiOpenAiBusy: 'Contacting OpenAI…',
-    aiOpenAiFail: 'OpenAI error: ',
+      'From your recent care logs,\n\nwe summarize everyday patterns and gentle reminders.\n\nThis is for care reference only —\nit cannot replace a veterinarian.',
+    assistantToday: 'Health snapshot',
+    assistantSeven: 'Care notes',
+    assistantVetAi: 'For your vet',
+    assistantAsk: 'Ask a small question',
+    assistantAskHint: 'I answer from what you have saved — not a substitute for an exam.',
+    assistantAskPlaceholder: 'Example: How did hydration feel this week?',
+    assistantSend: 'Send',
+    assistantReplyLabel: 'Reply',
+    aiChecking: 'One moment…',
+    assistantLocalSevenTitle: 'Last 7 days summary',
+    assistantAnalysisCardTitle: 'Care analysis',
+    aiGenerateWeek: 'Generate AI care analysis',
+    aiAnalysisCardSubtitle:
+      'Looks at the last week of care logs\nand turns them into observations and reminders.',
+    aiBundleCurrentHint: 'You already have today’s analysis — scroll down to read it.',
+    aiDataStaleHint: 'Your logs changed — you can generate a fresh analysis.',
+    aiNeedServerEnvDev: 'The companion is waking up — please start your local setup, then refresh.',
+    aiNeedServerEnvProd: 'The companion is unavailable right now — try again shortly after setup finishes.',
+    aiAssistantUnreachableDev: 'We could not reach the service — start your local environment and refresh.',
+    aiAssistantUnreachableProd: 'We could not reach the service — please try again in a little while.',
+    aiEmptyHint: 'No analysis yet — tap the button below to begin.',
+    aiAskEmpty: 'Write a little question first.',
+    aiOpenAiBusy: 'Putting it together…',
+    aiOpenAiFail: 'Something went wrong: ',
     assistantSendBusy: 'Working…',
-    aiQuotaLine:
-      '{{remaining}} / {{limit}} AI requests left today (per device; counts successful calls only; cache hits are free).',
-    aiErrQuota:
-      'Daily AI limit reached. Free: 3/day, Pro: 30/day. For Pro, ask your admin to add this device ID to server env AI_PRO_CLIENT_IDS; otherwise try again tomorrow.',
-    aiErrRate: 'Too many requests: up to 3 AI calls per minute per device. Please wait a moment.',
-    aiErrOpenAi: 'The AI service could not complete this request. Please try again later. (No auto-retry)',
+    aiQuotaLine: '{{remaining}} of {{limit}} summaries left today',
+    aiErrQuota: 'That is all for today — come back tomorrow. If you upgraded and still see this, please contact support.',
+    aiErrRate: 'A little too fast — take a short break and try again.',
+    aiErrOpenAi: 'This one did not go through — please try again later.',
+    aiDisclaimerFoot:
+      'The assistant shares care observations and reminders only —\nnot diagnosis or treatment.\nIf symptoms persist or worsen, please see a veterinarian.',
   },
 };
 
@@ -1088,7 +1072,7 @@ export default function App() {
         },
         ac.signal
       );
-      setAiReply(withDisclaimer(raw, ctx.lang));
+      setAiReply(`${raw.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
       const h = await fetchAssistantHealth(aiClientId, ctx.today);
       if (h) setAssistantQuota(h);
     } catch (e) {
@@ -2175,10 +2159,12 @@ export default function App() {
             .replace('{{limit}}', String(assistantQuota.dailyLimit))
         : null;
 
+    const dataFreshBundle = Boolean(aiCareBundle && !dataStale);
+
     const renderAiBlock = (title: string, body: string) => (
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-2 text-lg font-bold">{title}</h2>
-        <div className="whitespace-pre-wrap text-sm leading-7 text-stone-700">{body}</div>
+      <section className="mb-5 rounded-[1.75rem] border border-stone-100 border-l-4 border-l-orange-300 bg-white py-6 pl-5 pr-6 shadow-sm">
+        <h3 className="mb-4 text-base font-semibold tracking-tight text-stone-900">{title}</h3>
+        <div className="whitespace-pre-wrap text-[15px] leading-loose text-stone-700">{body}</div>
       </section>
     );
 
@@ -2186,99 +2172,139 @@ export default function App() {
       <>
         {renderCatSwitcher()}
 
-        <div className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="text-4xl">🤖</div>
-          <h1 className="mt-2 text-2xl font-bold">{tr.assistantTitle}</h1>
-          <p className="mt-2 text-sm leading-6 text-stone-600">{tr.assistantLead}</p>
-        </div>
+        <section className="mb-6 rounded-[1.75rem] border border-orange-100/50 bg-white px-6 py-8 shadow-sm">
+          <div className="flex gap-5">
+            <div
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-100 to-amber-50 text-2xl shadow-inner"
+              aria-hidden
+            >
+              {assistantContext.cat.emoji?.trim() || '🐾'}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-[1.35rem] font-semibold tracking-tight text-stone-900">{tr.assistantTitle}</h1>
+              <p className="mt-5 whitespace-pre-line text-[15px] leading-[1.75] text-stone-600">
+                {tr.assistantLead}
+              </p>
+            </div>
+          </div>
+        </section>
 
-        <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-          <h2 className="mb-2 text-lg font-bold">{tr.assistantLocalSevenTitle}</h2>
-          <p className="mb-2 text-xs text-stone-500">{tr.assistantLocalSevenNote}</p>
-          <div className="whitespace-pre-wrap text-sm leading-7 text-stone-700">
+        <section className="mb-6 rounded-[1.75rem] border border-stone-100 bg-white px-6 py-8 shadow-sm">
+          <div className="mb-6 flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-100 text-lg" aria-hidden>
+              📋
+            </span>
+            <h2 className="text-lg font-semibold text-stone-900">{tr.assistantLocalSevenTitle}</h2>
+          </div>
+          <div className="whitespace-pre-line text-[15px] leading-[1.75] text-stone-700">
             {buildSevenDayAnalysis(assistantContext)}
           </div>
         </section>
 
-        <div className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-          <p
-            className={`text-xs leading-5 ${
-              apiReady ? 'text-emerald-800' : apiChecking ? 'text-stone-500' : 'text-stone-500'
-            }`}
+        <section className="mb-6 rounded-[1.75rem] border border-orange-100/60 bg-gradient-to-b from-white via-white to-orange-50/40 px-6 py-8 shadow-sm">
+          <div className="mb-5 flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 text-lg" aria-hidden>
+              ✨
+            </span>
+            <h2 className="text-lg font-semibold text-stone-900">{tr.assistantAnalysisCardTitle}</h2>
+          </div>
+
+          {apiChecking || !apiReady ? (
+            <p className="mb-5 text-sm leading-relaxed text-stone-500">
+              {apiChecking ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400" aria-hidden />
+                  {tr.aiChecking}
+                </span>
+              ) : (
+                <span>{assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')}</span>
+              )}
+            </p>
+          ) : null}
+
+          <button
+            type="button"
+            disabled={!apiReady || aiBundleLoading}
+            onClick={runOpenAiCareBundle}
+            className="w-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 py-3.5 text-[15px] font-semibold text-white shadow-md shadow-orange-200/50 transition hover:from-orange-500 hover:to-orange-600 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[220px] sm:px-10"
           >
-            {apiChecking
-              ? tr.aiChecking
-              : apiReady
-                ? tr.aiModelHint
-                : assistantHealthReachable === false
-                  ? aiStatusHint(lang, 'off')
-                  : aiStatusHint(lang, 'key')}
-          </p>
-          {quotaLine ? <p className="mt-2 text-xs leading-5 text-stone-600">{quotaLine}</p> : null}
-          {apiReady ? <p className="mt-2 text-xs leading-5 text-amber-900/90">{tr.aiOpenAiRisk}</p> : null}
-          {dataStale ? (
-            <p className="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+            {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
+          </button>
+
+          <p className="mt-5 whitespace-pre-line text-sm leading-relaxed text-stone-500">{tr.aiAnalysisCardSubtitle}</p>
+
+          {dataStale && !aiBundleLoading ? (
+            <p className="mt-5 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm leading-relaxed text-amber-950">
               {tr.aiDataStaleHint}
             </p>
           ) : null}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={!apiReady || aiBundleLoading}
-              onClick={runOpenAiCareBundle}
-              className="rounded-2xl bg-stone-800 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-            >
-              {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
-            </button>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-stone-600">{tr.aiWeekHint}</p>
-          {openAiErr ? (
-            <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-xs leading-5 text-red-800">{openAiErr}</p>
+
+          {!dataStale && dataFreshBundle && !aiBundleLoading ? (
+            <p className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm leading-relaxed text-emerald-900">
+              {tr.aiBundleCurrentHint}
+            </p>
           ) : null}
-        </div>
+
+          {apiReady && !aiCareBundle && !aiBundleLoading && !dataStale ? (
+            <p className="mt-5 text-sm leading-relaxed text-stone-500">{tr.aiEmptyHint}</p>
+          ) : null}
+
+          {quotaLine ? (
+            <p className="mt-5 text-[11px] leading-relaxed text-stone-400">{quotaLine}</p>
+          ) : null}
+
+          {openAiErr ? (
+            <p className="mt-4 rounded-2xl border border-red-100 bg-red-50/90 px-4 py-3 text-sm leading-relaxed text-red-900">
+              {openAiErr}
+            </p>
+          ) : null}
+        </section>
 
         {apiReady && aiBundleLoading ? (
-          <section className="mb-5 rounded-3xl border border-dashed border-orange-200 bg-orange-50/50 p-5 text-sm text-stone-600">
+          <section className="mb-6 flex items-center gap-3 rounded-[1.75rem] border border-orange-100 bg-orange-50/50 px-6 py-4 text-sm text-stone-700">
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" aria-hidden />
             {tr.aiOpenAiBusy}
           </section>
         ) : null}
 
-        {apiReady && !aiCareBundle && !aiBundleLoading ? (
-          <section className="mb-5 rounded-3xl border border-dashed border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600">
-            {tr.aiEmptyHint}
-          </section>
-        ) : null}
-
         {aiCareBundle ? (
-          <>
-            {renderAiBlock(tr.assistantToday, withDisclaimer(aiCareBundle.healthSummary, assistantContext.lang))}
-            {renderAiBlock(tr.assistantSeven, withDisclaimer(aiCareBundle.sevenDayAnalysis, assistantContext.lang))}
-            {renderAiBlock(tr.assistantVetAi, withDisclaimer(aiCareBundle.vetReport, assistantContext.lang))}
-          </>
+          <div className="mb-6">
+            {renderAiBlock(tr.assistantToday, aiCareBundle.healthSummary.trim())}
+            {renderAiBlock(tr.assistantSeven, aiCareBundle.sevenDayAnalysis.trim())}
+            {renderAiBlock(tr.assistantVetAi, aiCareBundle.vetReport.trim())}
+            <p className="mx-auto max-w-md whitespace-pre-line px-2 text-center text-[12px] leading-relaxed text-stone-400">
+              {tr.aiDisclaimerFoot}
+            </p>
+          </div>
         ) : null}
 
-        <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-          <h2 className="mb-2 text-lg font-bold">{tr.assistantAsk}</h2>
-          <p className="mb-3 text-sm text-stone-500">{tr.assistantAskHint}</p>
+        <section className="mb-6 rounded-[1.75rem] border border-stone-100 bg-white px-6 py-8 shadow-sm">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-100 text-lg" aria-hidden>
+              💬
+            </span>
+            <h2 className="text-lg font-semibold text-stone-900">{tr.assistantAsk}</h2>
+          </div>
+          <p className="mb-5 text-sm leading-relaxed text-stone-500">{tr.assistantAskHint}</p>
           <textarea
             value={aiQuestion}
             onChange={(e) => setAiQuestion(e.target.value)}
             placeholder={tr.assistantAskPlaceholder}
             disabled={qaBusy || !apiReady}
-            className="min-h-24 w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300 disabled:opacity-60"
+            className="min-h-[6.5rem] w-full resize-none rounded-2xl border border-stone-200 bg-stone-50/50 p-4 text-[15px] leading-relaxed text-stone-800 outline-none transition focus:border-orange-300 focus:bg-white disabled:opacity-60"
           />
           <button
             type="button"
             disabled={qaBusy || !apiReady}
             onClick={runOpenAiQa}
-            className="mt-3 w-full rounded-2xl bg-orange-400 py-3 font-bold text-white shadow-sm disabled:opacity-60"
+            className="mt-4 w-full rounded-full border border-orange-200 bg-white py-3.5 text-[15px] font-semibold text-orange-600 shadow-sm transition hover:bg-orange-50 disabled:opacity-60"
           >
             {aiQaLoading ? tr.assistantSendBusy : tr.assistantSend}
           </button>
           {aiReply ? (
-            <div className="mt-4 rounded-2xl border border-orange-100 bg-orange-50/80 p-4">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-orange-800">{tr.assistantReplyLabel}</p>
-              <div className="whitespace-pre-wrap text-sm leading-7 text-stone-800">{aiReply}</div>
+            <div className="mt-6 rounded-2xl border border-stone-100 bg-stone-50/80 p-5">
+              <p className="mb-3 text-xs font-medium text-stone-500">{tr.assistantReplyLabel}</p>
+              <div className="whitespace-pre-line text-[15px] leading-loose text-stone-800">{aiReply}</div>
             </div>
           ) : null}
         </section>

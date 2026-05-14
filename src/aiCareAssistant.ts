@@ -37,15 +37,18 @@ export type AssistantContext = {
   monthlyCare: Record<string, boolean>;
 };
 
-export const AI_DISCLAIMER_ZH =
-  '以下內容僅根據你的紀錄提供照護觀察與提醒，不能作為診斷或治療依據。如症狀持續或惡化，請諮詢獸醫。';
+/** 簡短免責（單語，避免重複堆疊）。 */
+export const AI_DISCLAIMER_SHORT_ZH =
+  'AI 僅提供照護觀察與提醒，\n不能作為診斷或治療依據。\n如症狀持續或惡化，請諮詢獸醫。';
 
-export const AI_DISCLAIMER_EN =
-  'The following is based only on your records for care observations and reminders. It is not a substitute for diagnosis or treatment. If symptoms persist or worsen, please consult a veterinarian.';
+export const AI_DISCLAIMER_SHORT_EN =
+  'The assistant shares care observations and reminders only —\nnot diagnosis or treatment.\nIf symptoms persist or worsen, please see a veterinarian.';
 
-/** 固定雙語結尾：先中文聲明，再英文聲明（不依介面語言擇一）。 */
-export function withDisclaimer(body: string, _lang?: Lang): string {
-  return `${body.trim()}\n\n${AI_DISCLAIMER_ZH}\n\n${AI_DISCLAIMER_EN}`;
+/** 在內文後附上一句免責（依介面語言擇一）。 */
+export function withDisclaimer(body: string, lang: Lang): string {
+  const d = lang === 'zh' ? AI_DISCLAIMER_SHORT_ZH : AI_DISCLAIMER_SHORT_EN;
+  const t = body.trim();
+  return t ? `${t}\n\n${d}` : d;
 }
 
 const DAILY_IDS = {
@@ -106,7 +109,7 @@ export function buildTodayHealthSummary(ctx: AssistantContext): string {
   const lines: string[] = [];
 
   if (lang === 'zh') {
-    lines.push(`【${cat.name}】${today} 照護觀察`);
+    lines.push(`${cat.name}，${today}：照護小結`);
     if (catsCount > 1) {
       lines.push(`你有多隻貓咪；以下僅根據目前選取的「${cat.name}」今日紀錄整理。`);
     }
@@ -161,7 +164,7 @@ export function buildTodayHealthSummary(ctx: AssistantContext): string {
       lines.push('慢性病／用藥欄有資料：建議對照常規服藥與今日活動、食慾紀錄一起看。');
     }
   } else {
-    lines.push(`【${cat.name}】Care notes for ${today}`);
+    lines.push(`${cat.name} — care notes for ${today}`);
     if (catsCount > 1) {
       lines.push(`You have multiple cats; this summary uses the currently selected cat: ${cat.name}.`);
     }
@@ -219,6 +222,60 @@ function countTrueDays(last7: DayRecord[], id: string): number {
   return last7.filter(({ data }) => checked(data, id)).length;
 }
 
+/** 依天數比例回傳語氣：多／還可以／偏少（不顯示分數）。 */
+function toneManySomeFew(count: number, n: number, _lang: Lang): 'many' | 'some' | 'few' | 'none' {
+  if (n <= 0) return 'none';
+  const r = count / n;
+  if (r >= 0.57) return 'many';
+  if (r >= 0.29) return 'some';
+  if (count > 0) return 'few';
+  return 'none';
+}
+
+function careWindowScore(
+  tm: ReturnType<typeof toneManySomeFew>,
+  tn: ReturnType<typeof toneManySomeFew>,
+  tw: ReturnType<typeof toneManySomeFew>,
+  tp: ReturnType<typeof toneManySomeFew>,
+  tpo: ReturnType<typeof toneManySomeFew>
+): number {
+  const s = (t: ReturnType<typeof toneManySomeFew>) =>
+    t === 'many' ? 2 : t === 'some' ? 1 : t === 'few' ? 0.4 : 0;
+  return s(tm) + s(tn) + s(tw) + s(tp) + s(tpo);
+}
+
+function buildSparseSevenDayZh(_cat: { name: string }): string {
+  return [
+    '最近 7 天飲食與飲水紀錄較少，',
+    '目前資料仍不足以建立完整趨勢。',
+    '',
+    '建議持續記錄：',
+    '• 飲食',
+    '• 飲水',
+    '• 排尿',
+    '• 體重',
+    '',
+    '當資料更完整時，',
+    'AI 將能提供更有參考價值的照護觀察。',
+  ].join('\n');
+}
+
+function buildSparseSevenDayEn(cat: { name: string }): string {
+  return [
+    `In the last week, ${cat.name}'s food and hydration notes are still light,`,
+    'so we do not yet have enough detail for a full trend.',
+    '',
+    'When you can, keep logging:',
+    '• Meals',
+    '• Water / hydration',
+    '• Pee / litter box',
+    '• Weight',
+    '',
+    'As your records grow,',
+    'the assistant can offer richer, kinder care observations.',
+  ].join('\n');
+}
+
 export function buildSevenDayAnalysis(ctx: AssistantContext): string {
   const { lang, cat, catsCount, last7Days } = ctx;
   const lines: string[] = [];
@@ -227,75 +284,210 @@ export function buildSevenDayAnalysis(ctx: AssistantContext): string {
   const weights7 = ctx.weightRecords.filter((w) => dates.has(w.date));
 
   if (lang === 'zh') {
-    lines.push(`【${cat.name}】最近 7 天照護觀察`);
-    if (catsCount > 1) lines.push('多貓家庭：分析以目前選取的貓咪為準，切換貓咪後可查看另一隻的趨勢。');
+    if (n === 0) {
+      return buildSparseSevenDayZh(cat);
+    }
+
+    const cm = countTrueDays(last7Days, DAILY_IDS.feedMorning);
+    const cn = countTrueDays(last7Days, DAILY_IDS.feedNight);
+    const cw = countTrueDays(last7Days, DAILY_IDS.waterCan);
+    const cp = countTrueDays(last7Days, DAILY_IDS.pee);
+    const cpo = countTrueDays(last7Days, DAILY_IDS.poop);
+    const tm = toneManySomeFew(cm, n, lang);
+    const tn = toneManySomeFew(cn, n, lang);
+    const tw = toneManySomeFew(cw, n, lang);
+    const tp = toneManySomeFew(cp, n, lang);
+    const tpo = toneManySomeFew(cpo, n, lang);
+    const score = careWindowScore(tm, tn, tw, tp, tpo);
+    if ((n >= 3 && score < 2.4) || (n > 0 && n < 3 && score < 1.2)) {
+      return buildSparseSevenDayZh(cat);
+    }
 
     lines.push(
-      `早晚餵食有紀錄的天數：早上 ${countTrueDays(last7Days, DAILY_IDS.feedMorning)}／${n} 天，晚上 ${countTrueDays(last7Days, DAILY_IDS.feedNight)}／${n} 天。`
+      `${cat.name} 最近這幾天，從紀錄裡感受到你陪牠吃飯的節奏：${
+        tm === 'many' && tn === 'many'
+          ? '早、晚都有常常留下小勾勾，看起來很穩定。'
+          : tm === 'few' && tn === 'few'
+            ? '早餐跟晚餐的紀錄偏少，若其實都有餵，隨手勾一下之後比較看得出習慣。'
+            : tm === 'many' || tn === 'many'
+              ? '有幾天有好好記到餵食，其餘可以再慢慢補齊，不用有壓力。'
+              : '有時會記、有時還沒記，慢慢養成習慣就很好。'
+      }`
     );
-    lines.push(`補水／飲水確認：${countTrueDays(last7Days, DAILY_IDS.waterCan)}／${n} 天。`);
-    lines.push(`有紀錄「有尿尿」：${countTrueDays(last7Days, DAILY_IDS.pee)}／${n} 天；「有大便」：${countTrueDays(last7Days, DAILY_IDS.poop)}／${n} 天。`);
+
+    lines.push(
+      tw === 'many'
+        ? '喝水的確認也寫得蠻勤的，對觀察牠喝多喝少很有幫助。'
+        : tw === 'none'
+          ? '這段時間幾乎還沒有補水／飲水的小確認；若你本來就會看水碗，偶爾記一筆也很棒。'
+          : '有時會記到喝水相關的確認，再密集一點點，之後比較容易感覺到變化。'
+    );
+
+    lines.push(
+      tp === 'many' && tpo === 'many'
+        ? '尿尿跟便便也都有常常留下紀錄，對照日常節奏會很安心。'
+        : tp === 'few' && tpo === 'few'
+          ? '尿尿、便便的勾選還不多；若其實都有上廁所，隨手記一下之後回顧會更清楚。'
+          : '排尿或排便其中一項記得比較多，另一項也可以慢慢補上，畫面會更完整。'
+    );
 
     const daysWithNote = last7Days.filter(({ data }) => strField(data, 'dailyNote').length > 0).length;
     const daysWithAb = last7Days.filter(
       ({ data }) => strField(data, 'abnormalNote').length > 0 || photoCount(data, 'abnormalPhotos') > 0
     ).length;
-    lines.push(`這段期間有寫「今日備註」的天數：${daysWithNote}／${n}；有異常文字或照片的天數：${daysWithAb}／${n}。`);
+    const noteTone = toneManySomeFew(daysWithNote, n, lang);
+    const abTone = toneManySomeFew(daysWithAb, n, lang);
+    lines.push(
+      noteTone === 'many'
+        ? '「今天發生的小事」也寫得蠻多的，之後看精神跟活動會很有畫面。'
+        : noteTone === 'some'
+          ? '有幾天有寫下日常小事，若願意多寫一點點心情或玩耍，之後會更溫暖。'
+          : '日常小筆記還不多，順手寫一句「今天很黏人」之類的，之後會很珍貴。'
+    );
+    lines.push(
+      abTone === 'many'
+        ? '這段時間也有幾天留下異常或照片，辛苦了；看診時這些都很有用。'
+        : abTone === 'none'
+          ? '這幾天沒有特別留下異常紀錄，若牠其實一直都穩定，也是很好的消息。'
+          : '偶爾會記到需要多留意的小狀況，記得照顧好自己的心情。'
+    );
 
     if (weights7.length >= 2) {
       const sorted = [...weights7].sort((a, b) => a.date.localeCompare(b.date));
       const first = sorted[0]!.weight;
       const last = sorted[sorted.length - 1]!.weight;
       const delta = Math.round((last - first) * 100) / 100;
-      lines.push(`這 7 天內有 ${weights7.length} 筆體重紀錄，期間變化約 ${delta >= 0 ? '+' : ''}${delta} kg（僅供趨勢參考，解讀請與獸醫討論）。`);
+      const up = delta > 0.05;
+      const down = delta < -0.05;
+      lines.push(
+        up
+          ? `體重在這段時間有緩緩往上走一點點，只是家裡量的參考，要不要多留意，還是交給獸醫一起聊比較安心。`
+          : down
+            ? `體重看起來輕了一點點，也可能是水分或測量時間差，別自己嚇自己，有疑慮就問獸醫。`
+            : `體重在這段時間大致持平，當作日常小參考就好。`
+      );
     } else if (weights7.length === 1) {
-      lines.push(`這 7 天內有 1 筆體重紀錄，建議持續固定時間測量，趨勢會更清楚。`);
+      lines.push('有量到一次體重，若之後固定時間再量幾次，趨勢會更可愛地浮現出來。');
     } else {
-      lines.push('這 7 天內沒有體重紀錄；若方便，建議每週或每兩週量一次並記下。');
+      lines.push('這段時間還沒有體重紀錄，若方便的話，偶爾抱去秤一下也會多一個照護角度。');
+    }
+
+    if (catsCount > 1) {
+      lines.push(`家裡還有其他貓咪的話，記得切換一下畫面，每一隻都有自己的小故事。`);
     }
 
     const vet = ctx.monthlyCare.vetVisit === true;
     lines.push(
       vet
-        ? `本月「看診／回診」已在定期項目勾選，若近日要回診，可把這週紀錄一併整理給獸醫。`
-        : `若這週有異常紀錄較多，可考慮安排諮詢獸醫，並把 App 內備註與照片帶去參考（非緊急醫療建議，僅為就醫準備提醒）。`
+        ? '這個月有把看診或回診記在定期清單裡，若快要赴約，可以把這幾天的小紀錄一起帶去。'
+        : '若這幾天心裡有點不放心，把備註與照片整理好，找信任的獸醫聊一聊，會比較踏實。'
     );
+
+    lines.push('以上依你儲存的紀錄整理，每位貓主習慣不同，當作生活裡的小提醒就好。');
   } else {
-    lines.push(`【${cat.name}】Last 7 days — care patterns`);
-    if (catsCount > 1) lines.push('Multiple cats: this view follows the selected cat; switch cats to compare.');
+    if (n === 0) {
+      return buildSparseSevenDayEn(cat);
+    }
+
+    const cm = countTrueDays(last7Days, DAILY_IDS.feedMorning);
+    const cn = countTrueDays(last7Days, DAILY_IDS.feedNight);
+    const cw = countTrueDays(last7Days, DAILY_IDS.waterCan);
+    const cp = countTrueDays(last7Days, DAILY_IDS.pee);
+    const cpo = countTrueDays(last7Days, DAILY_IDS.poop);
+    const tm = toneManySomeFew(cm, n, lang);
+    const tn = toneManySomeFew(cn, n, lang);
+    const tw = toneManySomeFew(cw, n, lang);
+    const tp = toneManySomeFew(cp, n, lang);
+    const tpo = toneManySomeFew(cpo, n, lang);
+    const score = careWindowScore(tm, tn, tw, tp, tpo);
+    if ((n >= 3 && score < 2.4) || (n > 0 && n < 3 && score < 1.2)) {
+      return buildSparseSevenDayEn(cat);
+    }
+
     lines.push(
-      `Feeding checks — morning: ${countTrueDays(last7Days, DAILY_IDS.feedMorning)}/${n}, evening: ${countTrueDays(last7Days, DAILY_IDS.feedNight)}/${n}.`
+      `For ${cat.name} these last few days, feeding check-ins feel ${
+        tm === 'many' && tn === 'many'
+          ? 'steady — mornings and evenings show up often, which is lovely.'
+          : tm === 'few' && tn === 'few'
+            ? 'light — if meals still happened, quick taps later will make patterns easier to sense.'
+            : tm === 'many' || tn === 'many'
+              ? 'mixed — a few strong days, and room to grow without pressure.'
+              : 'gentle and human — logging can grow at your pace.'
+      }`
     );
-    lines.push(`Hydration checks: ${countTrueDays(last7Days, DAILY_IDS.waterCan)}/${n}.`);
-    lines.push(`Pee logged: ${countTrueDays(last7Days, DAILY_IDS.pee)}/${n}; poop logged: ${countTrueDays(last7Days, DAILY_IDS.poop)}/${n}.`);
+
+    lines.push(
+      tw === 'many'
+        ? 'Hydration checks show up often — great for noticing small shifts.'
+        : tw === 'none'
+          ? 'Hydration checks are rare in this window — even occasional notes help over time.'
+          : 'Hydration shows up sometimes — a few more notes can make trends easier to feel.'
+    );
+
+    lines.push(
+      tp === 'many' && tpo === 'many'
+        ? 'Litter notes for pee and poop both look consistent — comforting for daily rhythm.'
+        : tp === 'few' && tpo === 'few'
+          ? 'Pee/poop check-ins are still sparse — if everything is normal, quick logs still help later.'
+          : 'One side of litter logging shows up more than the other — filling in both sides paints a fuller picture.'
+    );
 
     const daysWithNote = last7Days.filter(({ data }) => strField(data, 'dailyNote').length > 0).length;
     const daysWithAb = last7Days.filter(
       ({ data }) => strField(data, 'abnormalNote').length > 0 || photoCount(data, 'abnormalPhotos') > 0
     ).length;
-    lines.push(`Days with a daily note: ${daysWithNote}/${n}. Days with abnormal text/photos: ${daysWithAb}/${n}.`);
+    const noteTone = toneManySomeFew(daysWithNote, n, lang);
+    const abTone = toneManySomeFew(daysWithAb, n, lang);
+    lines.push(
+      noteTone === 'many'
+        ? 'Daily notes show up often — they add warmth when you look back at mood and play.'
+        : noteTone === 'some'
+          ? 'A few daily notes are here — tiny sentences about mood go a long way.'
+          : 'Daily notes are still quiet — a single line like “extra cuddly today” becomes a treasure later.'
+    );
+    lines.push(
+      abTone === 'many'
+        ? 'Some days include abnormal notes or photos — those details matter for vet visits.'
+        : abTone === 'none'
+          ? 'No abnormal notes in this window — if life felt calm, that is good news too.'
+          : 'A handful of days mention something unusual — be kind to yourself as you observe.'
+    );
 
     if (weights7.length >= 2) {
       const sorted = [...weights7].sort((a, b) => a.date.localeCompare(b.date));
       const first = sorted[0]!.weight;
       const last = sorted[sorted.length - 1]!.weight;
       const delta = Math.round((last - first) * 100) / 100;
+      const up = delta > 0.05;
+      const down = delta < -0.05;
       lines.push(
-        `${weights7.length} weight entries fall in this window; rough change ≈ ${delta >= 0 ? '+' : ''}${delta} kg (trend only — discuss interpretation with your vet).`
+        up
+          ? 'Weight drifts a little upward in this window — home scales vary, so chat with your vet if you are unsure.'
+          : down
+            ? 'Weight looks a touch lower — hydration and timing can sway readings; ask your vet if worried.'
+            : 'Weight looks fairly steady in this window — a soft reference, not a verdict.'
       );
     } else if (weights7.length === 1) {
-      lines.push('One weight entry in this window — more regular weights make trends clearer.');
-    } else lines.push('No weights in this 7-day window — consider weekly weigh-ins if practical.');
+      lines.push('One weight entry is here — a few more regular weigh-ins make trends easier to sense.');
+    } else {
+      lines.push('No weights in this window yet — occasional weigh-ins add another caring angle.');
+    }
+
+    if (catsCount > 1) {
+      lines.push('If you have more cats, switch profiles — each one has their own little story.');
+    }
 
     const vet = ctx.monthlyCare.vetVisit === true;
     lines.push(
       vet
-        ? 'Monthly “vet visit” is checked — bring this week’s notes/photos to your appointment if helpful.'
-        : 'If abnormal days cluster this week, consider contacting your vet for guidance and bring your notes (not an emergency directive).'
+        ? 'A vet visit is marked for this month — bringing this week’s notes can make conversations smoother.'
+        : 'If something feels off, bundling notes and photos for your veterinarian is the calmest next step.'
     );
+
+    lines.push('This is generated from your saved logs; every household is different — treat it as a gentle nudge.');
   }
 
-  return withDisclaimer(lines.join('\n'), lang);
+  return lines.join('\n\n');
 }
 
 export function buildAbnormalAlerts(ctx: AssistantContext): string {
@@ -306,7 +498,7 @@ export function buildAbnormalAlerts(ctx: AssistantContext): string {
 
   const lines: string[] = [];
   if (lang === 'zh') {
-    lines.push(`【${cat.name}】異常紀錄觀察（最近 7 天）`);
+    lines.push(`${cat.name}：最近幾天的異常紀錄`);
     if (hits.length === 0) {
       lines.push('這 7 天沒有留下異常文字或異常照片；若貓咪其實一切穩定，這是很好的狀態。');
       lines.push('若只是忘記填寫，之後有狀況仍建議簡短記下時間與情境，方便回顧。');
@@ -322,7 +514,7 @@ export function buildAbnormalAlerts(ctx: AssistantContext): string {
       lines.push('提醒：這裡只做紀錄整理與就醫準備提醒，不判斷是否「生病」或嚴重程度。');
     }
   } else {
-    lines.push(`【${cat.name}】Abnormal notes (last 7 days)`);
+    lines.push(`${cat.name}: abnormal notes in recent days`);
     if (hits.length === 0) {
       lines.push('No abnormal text/photos in the last 7 days — if that matches reality, great.');
       lines.push('If something happened but wasn’t logged, short notes with timing help later review.');
@@ -361,7 +553,7 @@ export function buildVetReportAiSummary(ctx: AssistantContext): string {
   );
 
   if (lang === 'zh') {
-    lines.push(`【${cat.name}】獸醫報告摘要（依你目前的紀錄自動整理，方便就診前快速複習）`);
+    lines.push(`${cat.name}：就診前可帶著看的紀錄重點`);
     lines.push(
       `基本背景：${cat.chronicNote?.trim() ? '有填慢性病／用藥。' : '尚未填慢性病／用藥。'}${cat.allergyNote?.trim() ? '有過敏／禁忌備註。' : ''}${cat.vetClinic?.trim() ? `常用獸醫院：${cat.vetClinic}。` : ''}`
     );
@@ -375,9 +567,9 @@ export function buildVetReportAiSummary(ctx: AssistantContext): string {
         ? `最近 7 天內有 ${allHist.length} 天含備註、異常或照片紀錄，建議看診時搭配「獸醫」頁面完整內容與照片。`
         : '最近 7 天幾乎沒有備註或照片；若即將看診，可補記最近食慾、排尿排便與精神變化。'
     );
-    lines.push(`匯出日期參考：${today}（實際內容以 App 內「獸醫」分頁為準）。`);
+    lines.push(`以上整理到今天為止；完整內容仍以 App 內「獸醫」分頁為準。`);
   } else {
-    lines.push(`【${cat.name}】Vet visit summary (from your saved records)`);
+    lines.push(`${cat.name}: highlights for your vet visit`);
     lines.push(
       `Background: ${cat.chronicNote?.trim() ? 'Chronic/meds filled in.' : 'No chronic/meds filled in.'} ${cat.allergyNote?.trim() ? 'Allergies noted.' : ''} ${cat.vetClinic?.trim() ? `Clinic: ${cat.vetClinic}.` : ''}`
     );
@@ -391,7 +583,7 @@ export function buildVetReportAiSummary(ctx: AssistantContext): string {
         ? `${allHist.length} day(s) in the last week include notes/abnormal/photos — bring the Vet tab details to the visit.`
         : 'Few notes/photos in the last week — consider adding appetite, litter, and energy notes before the visit.'
     );
-    lines.push(`Reference date: ${today} (source of truth: Vet tab).`);
+    lines.push(`Snapshot as of ${today} — your Vet tab remains the full source.`);
   }
 
   return withDisclaimer(lines.join('\n'), lang);
@@ -470,7 +662,8 @@ export function answerAssistantQuestion(raw: string, ctx: AssistantContext): str
     } else if (has(['藥', '診斷', '生病', 'med', 'diagnosis', 'disease', 'sick'])) {
       body = '我無法提供用藥、診斷或是否生病的判斷。若你擔心健康狀況，請把症狀與時間記錄下來並諮詢獸醫。';
     } else {
-      body = `我依你的紀錄，幫你抓幾個方向：這週補水確認 ${countTrueDays(ctx.last7Days, DAILY_IDS.waterCan)}／7 天、排尿紀錄 ${countTrueDays(ctx.last7Days, DAILY_IDS.pee)}／7 天、排便紀錄 ${countTrueDays(ctx.last7Days, DAILY_IDS.poop)}／7 天。若想更準，可把「今日備註」與照片補齊；需要醫療決策時一定要問獸醫。`;
+      body =
+        '從最近的紀錄來看，喝水、排尿與排便的小勾勾有時多、有時少，都很正常；若想更立體，可把今天的小故事與照片慢慢補上。需要醫療決策時，還是要交給獸醫。';
     }
   } else {
     const has = (keys: string[]) => keys.some((k) => q.includes(k));
@@ -526,7 +719,8 @@ export function answerAssistantQuestion(raw: string, ctx: AssistantContext): str
     } else if (has(['med', 'medicine', 'diagnosis', 'disease', 'drug', 'rx'])) {
       body = 'I can’t prescribe, diagnose, or judge illness. Please record symptoms with timing and consult your veterinarian.';
     } else {
-      body = `Quick snapshot from your logs: hydration checks ${countTrueDays(ctx.last7Days, DAILY_IDS.waterCan)}/7 days, pee ${countTrueDays(ctx.last7Days, DAILY_IDS.pee)}/7, poop ${countTrueDays(ctx.last7Days, DAILY_IDS.poop)}/7. Add notes/photos for richer context — medical decisions belong to your vet.`;
+      body =
+        'From your recent logs, hydration and litter check-ins come and go — that is human. Add a few daily notes or photos when you can for richer context. Medical decisions still belong to your veterinarian.';
     }
   }
 
