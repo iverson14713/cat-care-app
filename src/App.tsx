@@ -28,6 +28,14 @@ import {
   type SharedCareCatState,
 } from './sharedCareMock';
 import { useSupabaseAuth } from './useSupabaseAuth';
+import {
+  deleteCatForOwner,
+  fetchCatsForUser,
+  insertCatForOwner,
+  isCloudCatId,
+  mergeCloudCatsWithLocal,
+  updateCatForOwner,
+} from './supabaseCats';
 
 type Lang = 'zh' | 'en';
 
@@ -307,6 +315,10 @@ const text = {
     authSignedInOk: '登入成功。',
     authSignedOutOk: '已登出。',
     authLocalDataHint: '貓咪與每日紀錄仍儲存在本機，尚未上傳至雲端（下一階段開放）。',
+    catsCloudLoading: '正在同步雲端貓咪…',
+    catsCloudLoadErr: '雲端貓咪載入失敗：',
+    catsCloudSaveErr: '無法寫入雲端：',
+    catsCloudDeleteErr: '無法從雲端刪除：',
     settingsPlanSection: '訂閱方案（測試）',
     settingsPlanCurrent: '目前方案',
     settingsPlanFree: '免費版',
@@ -570,6 +582,10 @@ const text = {
     authSignedInOk: 'Signed in successfully.',
     authSignedOutOk: 'Signed out.',
     authLocalDataHint: 'Cats and daily logs still stay on this device; cloud sync comes in a later phase.',
+    catsCloudLoading: 'Syncing cats from the cloud…',
+    catsCloudLoadErr: 'Could not load cats from the cloud: ',
+    catsCloudSaveErr: 'Could not save to the cloud: ',
+    catsCloudDeleteErr: 'Could not delete from the cloud: ',
     settingsPlanSection: 'Plan (test mode)',
     settingsPlanCurrent: 'Current plan',
     settingsPlanFree: 'Free',
@@ -1108,6 +1124,8 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authFormError, setAuthFormError] = useState<string | null>(null);
+  const [catsCloudBusy, setCatsCloudBusy] = useState(false);
+  const [catsCloudErr, setCatsCloudErr] = useState<string | null>(null);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -1442,6 +1460,56 @@ export default function App() {
   }, [cats]);
 
   useEffect(() => {
+    if (!supabaseAuth.authReady) return;
+    if (!supabaseAuth.user || !supabaseAuth.supabase) {
+      setCatsCloudBusy(false);
+      setCatsCloudErr(null);
+      setCats(loadCats());
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const sb = supabaseAuth.supabase;
+      if (!sb) {
+        setCatsCloudBusy(false);
+        return;
+      }
+      setCatsCloudBusy(true);
+      setCatsCloudErr(null);
+      const { data: cloudList, error } = await fetchCatsForUser(sb);
+      if (cancelled) return;
+      if (error) {
+        setCatsCloudErr(error.message);
+        setCatsCloudBusy(false);
+        return;
+      }
+      const merged = mergeCloudCatsWithLocal(cloudList, loadCats());
+      setCats(merged);
+      setSelectedCatId((prev) => {
+        const next = merged.some((c) => c.id === prev) ? prev : merged[0]?.id ?? prev;
+        if (next !== prev) {
+          queueMicrotask(() => {
+            if (cancelled) return;
+            const d = todayKey();
+            const mk = monthKey();
+            setDaily(loadDailyRecord(next, d));
+            setMonthly(loadMonthlyRecord(next, mk));
+            setWeightRecords(loadWeightRecords(next));
+            setHistoryRefreshKey((k) => k + 1);
+          });
+        }
+        return next;
+      });
+      setCatsCloudBusy(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabaseAuth.authReady, supabaseAuth.user?.id, supabaseAuth.supabase]);
+
+  useEffect(() => {
     localStorage.setItem(SELECTED_CAT_KEY, selectedCatId);
   }, [selectedCatId]);
 
@@ -1527,12 +1595,16 @@ export default function App() {
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
     if (!selectedCat) return;
-    setCats((prev) =>
-      prev.map((cat) => (cat.id === selectedCat.id ? { ...cat, ...patch } : cat))
-    );
+    const next: Cat = { ...selectedCat, ...patch };
+    setCats((prev) => prev.map((cat) => (cat.id === selectedCat.id ? next : cat)));
+    if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(selectedCat.id)) {
+      void updateCatForOwner(supabaseAuth.supabase, next).then(({ error }) => {
+        if (error) console.warn('[cats cloud update]', error.message);
+      });
+    }
   };
 
-  const addCat = () => {
+  const addCat = async () => {
     const name = newCatName.trim();
 
     if (!name) {
@@ -1546,8 +1618,8 @@ export default function App() {
     }
     setMultiCatHint(null);
 
-    const newCat: Cat = {
-      id: makeId(),
+    const base: Cat = {
+      id: supabaseAuth.user && supabaseAuth.supabase ? crypto.randomUUID() : makeId(),
       name,
       emoji: '🐱',
       profilePhoto: '',
@@ -1562,9 +1634,28 @@ export default function App() {
       profileNote: '',
     };
 
-    setCats((prev) => [...prev, newCat]);
+    if (supabaseAuth.user && supabaseAuth.supabase) {
+      const { data, error } = await insertCatForOwner(supabaseAuth.supabase, supabaseAuth.user.id, base);
+      if (error) {
+        alert(`${tr.catsCloudSaveErr}${error.message}`);
+        return;
+      }
+      if (!data) return;
+      const created = data as Cat;
+      setCats((prev) => [...prev, created]);
+      setNewCatName('');
+      setSelectedCatId(created.id);
+      setDaily({});
+      setMonthly({});
+      setWeightRecords([]);
+      setHistoryRefreshKey((v) => v + 1);
+      setPage('cats');
+      return;
+    }
+
+    setCats((prev) => [...prev, base]);
     setNewCatName('');
-    setSelectedCatId(newCat.id);
+    setSelectedCatId(base.id);
     setDaily({});
     setMonthly({});
     setWeightRecords([]);
@@ -1572,7 +1663,7 @@ export default function App() {
     setPage('cats');
   };
 
-  const deleteCat = (catId: string) => {
+  const deleteCat = async (catId: string) => {
     const target = cats.find((cat) => cat.id === catId);
     if (!target) return;
 
@@ -1583,6 +1674,14 @@ export default function App() {
 
     if (!confirm(`${tr.confirmDeleteCat}「${target.name}」？\n${tr.deleteCatNote}`)) {
       return;
+    }
+
+    if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
+      const { error } = await deleteCatForOwner(supabaseAuth.supabase, catId);
+      if (error) {
+        alert(`${tr.catsCloudDeleteErr}${error.message}`);
+        return;
+      }
     }
 
     const nextCats = cats.filter((cat) => cat.id !== catId);
@@ -3200,6 +3299,19 @@ export default function App() {
         <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950 shadow-sm">
           {tr.planFreeMultiCatBanner}
         </div>
+      ) : null}
+
+      {supabaseAuth.user && supabaseAuth.supabase ? (
+        catsCloudBusy ? (
+          <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 shadow-sm">
+            {tr.catsCloudLoading}
+          </div>
+        ) : catsCloudErr ? (
+          <div className="mb-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] leading-snug text-red-900 shadow-sm">
+            {tr.catsCloudLoadErr}
+            {catsCloudErr}
+          </div>
+        ) : null
       ) : null}
 
       <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
