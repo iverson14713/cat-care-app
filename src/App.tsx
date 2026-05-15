@@ -14,6 +14,19 @@ import {
   getCareBundleContextHash,
   peekCareBundleCache,
 } from './openaiAssistant';
+import {
+  createDefaultSharedCareState,
+  defaultOwnerName,
+  DEMO_MEMBER_NAME,
+  generateInviteCode,
+  getCareDisplayName,
+  loadSharedCareMock,
+  makeActivityId,
+  nowTimeLabel,
+  saveSharedCareMock,
+  setCareDisplayName,
+  type SharedCareCatState,
+} from './sharedCareMock';
 
 type Lang = 'zh' | 'en';
 
@@ -41,7 +54,7 @@ type CheckItem = {
 
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings';
+type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings' | 'sharedCare';
 type AppPlan = 'free' | 'pro';
 
 type AbnormalRecord = {
@@ -281,6 +294,39 @@ const text = {
     planMultiCatUpgrade: '多貓照護是 Pro 功能。升級後可管理多隻貓咪，並獲得更多 AI 分析次數。',
     planFreeMultiCatBanner: '免費版僅支援 1 隻貓。你目前有超過 1 隻貓咪，請刪減貓咪或切換至 Pro 測試版。',
     openSettings: '方案與設定',
+    sharedCareTitle: '共同照護',
+    sharedCareNavHint: '與家人／室友共享同一隻貓的紀錄（示範流程）',
+    sharedCareBack: '返回',
+    sharedCareDemoBanner:
+      '示範模式：尚未連接雲端。邀請碼與成員僅存在此瀏覽器，重新整理後仍會保留（同一分頁工作階段內）。正式版將使用 Supabase 同步。',
+    sharedCareMembersTitle: '共享成員',
+    sharedCareRoleOwner: '主人',
+    sharedCareRoleMember: '成員',
+    sharedCareInviteSection: '邀請',
+    sharedCareGenerateInvite: '產生邀請碼',
+    sharedCareInviteCodeLabel: '邀請碼',
+    sharedCareCopyCode: '複製邀請碼',
+    sharedCareCopyLink: '複製邀請連結',
+    sharedCareCopied: '已複製',
+    sharedCareCopyFail: '無法自動複製，請手動選取邀請碼或連結。',
+    sharedCareJoinSection: '使用邀請碼加入',
+    sharedCareJoinPlaceholder: '輸入邀請碼，例如 ABC123',
+    sharedCareJoinSubmit: '加入',
+    sharedCareJoinOk: '已加入（示範）',
+    sharedCareJoinNeedCode: '請先由主人產生邀請碼。',
+    sharedCareJoinWrong: '邀請碼不正確或已失效（示範）。',
+    sharedCareJoinDuplicate: '你已經在成員列表中。',
+    sharedCareActivityTitle: '最近動態',
+    sharedCareActivityEmpty: '尚無動態。產生邀請碼或加入後會顯示在此。',
+    sharedCareActivityGenerated: '產生了新的邀請碼',
+    sharedCareActivityJoined: '透過邀請碼加入',
+    sharedCareDisplayNameHint: '在共同照護頁顯示的名稱（儲存在本機）',
+    sharedCareDisplayNameLabel: '我的稱呼',
+    sharedCareSaveName: '儲存',
+    sharedCareTodayFeedTitle: '今日照護動態',
+    sharedCareTodayFeedDemo: '以下為示範文案；連接雲端後會顯示真實紀錄。',
+    sharedCareDemoLine1: 'Wayne 於 21:30 記錄了晚餐',
+    sharedCareDemoLine2: 'Amy 上傳了異常照片',
     proTeaserHistorySearch: '歷史篩選與搜尋',
     proTeaserComing: '即將推出',
     proTeaserAdvancedWeekly: '進階 AI 週報',
@@ -487,6 +533,39 @@ const text = {
     planFreeMultiCatBanner:
       'Free supports one cat only. You currently have more than one — delete extras or switch to Pro (test).',
     openSettings: 'Plan & settings',
+    sharedCareTitle: 'Shared care',
+    sharedCareNavHint: 'Share one cat’s log with family or roommates (demo flow).',
+    sharedCareBack: 'Back',
+    sharedCareDemoBanner:
+      'Demo mode: not connected to the cloud yet. Invite codes and members stay in this browser (sessionStorage). A future version will sync via Supabase.',
+    sharedCareMembersTitle: 'Members',
+    sharedCareRoleOwner: 'Owner',
+    sharedCareRoleMember: 'Member',
+    sharedCareInviteSection: 'Invite',
+    sharedCareGenerateInvite: 'Generate invite code',
+    sharedCareInviteCodeLabel: 'Invite code',
+    sharedCareCopyCode: 'Copy code',
+    sharedCareCopyLink: 'Copy invite link',
+    sharedCareCopied: 'Copied',
+    sharedCareCopyFail: 'Could not copy automatically — select the code or link manually.',
+    sharedCareJoinSection: 'Join with a code',
+    sharedCareJoinPlaceholder: 'Enter code, e.g. ABC123',
+    sharedCareJoinSubmit: 'Join',
+    sharedCareJoinOk: 'Joined (demo)',
+    sharedCareJoinNeedCode: 'Ask the owner to generate an invite code first.',
+    sharedCareJoinWrong: 'Code doesn’t match (demo).',
+    sharedCareJoinDuplicate: 'You’re already in the member list.',
+    sharedCareActivityTitle: 'Recent activity',
+    sharedCareActivityEmpty: 'No activity yet. Generate a code or join to see entries here.',
+    sharedCareActivityGenerated: 'generated a new invite code',
+    sharedCareActivityJoined: 'joined with an invite code',
+    sharedCareDisplayNameHint: 'Name shown on shared care (stored locally)',
+    sharedCareDisplayNameLabel: 'My display name',
+    sharedCareSaveName: 'Save',
+    sharedCareTodayFeedTitle: 'Today’s care feed',
+    sharedCareTodayFeedDemo: 'Sample lines below; real entries will appear after cloud sync.',
+    sharedCareDemoLine1: 'Wayne logged dinner at 21:30',
+    sharedCareDemoLine2: 'Amy uploaded an abnormal photo',
     proTeaserHistorySearch: 'History filter & search',
     proTeaserComing: 'Coming soon',
     proTeaserAdvancedWeekly: 'Advanced AI weekly report',
@@ -922,6 +1001,29 @@ export default function App() {
   const [weightDate, setWeightDate] = useState(today);
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
+
+  const [sharedCareMap, setSharedCareMap] = useState<Record<string, SharedCareCatState>>(() => loadSharedCareMock());
+  const [sharedCareJoinInput, setSharedCareJoinInput] = useState('');
+  const [sharedCareFeedback, setSharedCareFeedback] = useState<string | null>(null);
+  const [sharedCareCopied, setSharedCareCopied] = useState(false);
+  const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState(() => getCareDisplayName());
+  const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const patchSharedCare = useCallback((catId: string, updater: (prev: SharedCareCatState) => SharedCareCatState) => {
+    setSharedCareMap((map) => {
+      const prev = map[catId] ?? createDefaultSharedCareState(lang);
+      const next = updater(prev);
+      const merged = { ...map, [catId]: next };
+      saveSharedCareMock(merged);
+      return merged;
+    });
+  }, [lang]);
+
+  const flashSharedCareCopied = useCallback(() => {
+    setSharedCareCopied(true);
+    if (sharedCareCopyTimerRef.current) clearTimeout(sharedCareCopyTimerRef.current);
+    sharedCareCopyTimerRef.current = setTimeout(() => setSharedCareCopied(false), 2000);
+  }, []);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -1765,9 +1867,34 @@ export default function App() {
     </div>
   );
 
-  const renderTodayPage = () => (
+  const renderTodayPage = () => {
+    const sharedCareToday = selectedCat
+      ? sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang)
+      : null;
+
+    return (
     <>
       {renderCatSwitcher()}
+
+      <section className="mb-5 rounded-3xl border border-amber-100 bg-amber-50/60 p-4 shadow-sm">
+        <h2 className="text-base font-bold text-stone-900">{tr.sharedCareTodayFeedTitle}</h2>
+        <p className="mt-1 text-xs text-stone-500">{tr.sharedCareTodayFeedDemo}</p>
+        <ul className="mt-3 space-y-2 text-sm text-stone-700">
+          {(sharedCareToday?.activities ?? []).slice(0, 8).map((a) => (
+            <li key={a.id}>
+              <span className="font-semibold text-stone-900">{a.actor}</span>
+              <span className="text-stone-400"> · {a.timeLabel}</span>
+              <span> — {a.summary}</span>
+            </li>
+          ))}
+          {!sharedCareToday?.activities?.length ? (
+            <>
+              <li>{tr.sharedCareDemoLine1}</li>
+              <li>{tr.sharedCareDemoLine2}</li>
+            </>
+          ) : null}
+        </ul>
+      </section>
 
       <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
         <div className="text-4xl">🐾</div>
@@ -1904,7 +2031,8 @@ export default function App() {
         {tr.clearToday}
       </button>
     </>
-  );
+    );
+  };
 
   const renderWeightPage = () => (
     <>
@@ -2534,6 +2662,240 @@ export default function App() {
   };
 
 
+  const renderSharedCarePage = () => {
+    if (!selectedCat) return null;
+    const t = text[lang];
+    const sc = sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang);
+    const ownerName = sc.members.find((m) => m.role === 'owner')?.name ?? defaultOwnerName(lang);
+
+    const onGenerateInvite = () => {
+      const code = generateInviteCode();
+      const timeLabel = nowTimeLabel();
+      patchSharedCare(selectedCat.id, (prev) => {
+        const on = prev.members.find((m) => m.role === 'owner')?.name ?? defaultOwnerName(lang);
+        return {
+          ...prev,
+          inviteCode: code,
+          activities: [
+            {
+              id: makeActivityId(),
+              actor: on,
+              summary: `${t.sharedCareActivityGenerated} · ${code}`,
+              timeLabel,
+            },
+            ...prev.activities,
+          ].slice(0, 50),
+        };
+      });
+      setSharedCareFeedback(null);
+    };
+
+    const onCopyCode = async () => {
+      if (!sc.inviteCode) return;
+      try {
+        await navigator.clipboard.writeText(sc.inviteCode);
+        flashSharedCareCopied();
+      } catch {
+        setSharedCareFeedback(t.sharedCareCopyFail);
+      }
+    };
+
+    const onCopyLink = async () => {
+      if (!sc.inviteCode) return;
+      try {
+        const u = new URL(typeof window !== 'undefined' ? window.location.href : 'http://localhost');
+        u.searchParams.set('invite', sc.inviteCode);
+        await navigator.clipboard.writeText(u.toString());
+        flashSharedCareCopied();
+      } catch {
+        setSharedCareFeedback(t.sharedCareCopyFail);
+      }
+    };
+
+    const onJoin = () => {
+      const code = sharedCareJoinInput.trim().toUpperCase();
+      const cur = sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang);
+      if (!cur.inviteCode) {
+        setSharedCareFeedback(t.sharedCareJoinNeedCode);
+        return;
+      }
+      if (code !== cur.inviteCode) {
+        setSharedCareFeedback(t.sharedCareJoinWrong);
+        return;
+      }
+      if (cur.members.some((m) => m.id === 'demo-guest-mvp')) {
+        setSharedCareFeedback(t.sharedCareJoinDuplicate);
+        return;
+      }
+      const timeLabel = nowTimeLabel();
+      patchSharedCare(selectedCat.id, (prev) => ({
+        ...prev,
+        members: [
+          ...prev.members,
+          { id: 'demo-guest-mvp', name: DEMO_MEMBER_NAME, role: 'member' },
+        ],
+        activities: [
+          {
+            id: makeActivityId(),
+            actor: DEMO_MEMBER_NAME,
+            summary: t.sharedCareActivityJoined,
+            timeLabel,
+          },
+          ...prev.activities,
+        ].slice(0, 50),
+      }));
+      setSharedCareFeedback(t.sharedCareJoinOk);
+      setSharedCareJoinInput('');
+    };
+
+    const onSaveDisplayName = () => {
+      const raw = sharedCareDisplayNameInput.trim();
+      setCareDisplayName(raw);
+      const display = raw || defaultOwnerName(lang);
+      patchSharedCare(selectedCat.id, (prev) => ({
+        ...prev,
+        members: prev.members.map((m) => (m.id === 'local-owner' ? { ...m, name: display } : m)),
+      }));
+    };
+
+    return (
+      <>
+        {renderCatSwitcher()}
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setPage('cats')}
+            className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
+          >
+            ← {t.sharedCareBack}
+          </button>
+          <h1 className="text-xl font-bold text-stone-900">{t.sharedCareTitle}</h1>
+          <p className="mt-1 text-sm text-stone-500">{selectedCat.name}</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-amber-800">{t.sharedCareNavHint}</p>
+        </section>
+
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950">
+          {t.sharedCareDemoBanner}
+        </div>
+
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <label className="mb-1 block text-[11px] font-bold text-stone-500">{t.sharedCareDisplayNameLabel}</label>
+          <p className="mb-2 text-[11px] text-stone-400">{t.sharedCareDisplayNameHint}</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={sharedCareDisplayNameInput}
+              onChange={(e) => setSharedCareDisplayNameInput(e.target.value)}
+              className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
+              placeholder={defaultOwnerName(lang)}
+            />
+            <button
+              type="button"
+              onClick={onSaveDisplayName}
+              className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white"
+            >
+              {t.sharedCareSaveName}
+            </button>
+          </div>
+        </section>
+
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-base font-bold text-stone-900">{t.sharedCareMembersTitle}</h2>
+          <ul className="space-y-2">
+            {sc.members.map((m) => (
+              <li
+                key={m.id}
+                className="flex items-center justify-between rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2"
+              >
+                <span className="font-semibold text-stone-900">{m.name}</span>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                    m.role === 'owner' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'
+                  }`}
+                >
+                  {m.role === 'owner' ? t.sharedCareRoleOwner : t.sharedCareRoleMember}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[11px] text-stone-400">
+            {t.sharedCareRoleOwner}：{ownerName}
+          </p>
+        </section>
+
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-base font-bold text-stone-900">{t.sharedCareInviteSection}</h2>
+          <button
+            type="button"
+            onClick={onGenerateInvite}
+            className="mb-3 w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm"
+          >
+            {t.sharedCareGenerateInvite}
+          </button>
+          <div className="mb-2">
+            <span className="text-[11px] font-bold text-stone-500">{t.sharedCareInviteCodeLabel}</span>
+            <p className="mt-1 font-mono text-lg font-bold tracking-widest text-stone-900">{sc.inviteCode ?? '—'}</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              disabled={!sc.inviteCode}
+              onClick={onCopyCode}
+              className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-700 disabled:opacity-45"
+            >
+              {sharedCareCopied ? t.sharedCareCopied : t.sharedCareCopyCode}
+            </button>
+            <button
+              type="button"
+              disabled={!sc.inviteCode}
+              onClick={onCopyLink}
+              className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-700 disabled:opacity-45"
+            >
+              {sharedCareCopied ? t.sharedCareCopied : t.sharedCareCopyLink}
+            </button>
+          </div>
+        </section>
+
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <h2 className="mb-2 text-base font-bold text-stone-900">{t.sharedCareJoinSection}</h2>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={sharedCareJoinInput}
+              onChange={(e) => setSharedCareJoinInput(e.target.value.toUpperCase())}
+              placeholder={t.sharedCareJoinPlaceholder}
+              className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-[13px] uppercase outline-none focus:border-orange-300"
+            />
+            <button
+              type="button"
+              onClick={onJoin}
+              className="shrink-0 rounded-xl bg-stone-800 px-4 py-2 text-sm font-bold text-white"
+            >
+              {t.sharedCareJoinSubmit}
+            </button>
+          </div>
+          {sharedCareFeedback ? <p className="mt-2 text-[13px] font-medium text-orange-700">{sharedCareFeedback}</p> : null}
+        </section>
+
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <h2 className="mb-2 text-base font-bold text-stone-900">{t.sharedCareActivityTitle}</h2>
+          {sc.activities.length === 0 ? (
+            <p className="text-sm text-stone-500">{t.sharedCareActivityEmpty}</p>
+          ) : (
+            <ul className="space-y-2">
+              {sc.activities.map((a) => (
+                <li key={a.id} className="text-[13px] leading-snug text-stone-700">
+                  <span className="font-semibold text-stone-900">{a.actor}</span>
+                  <span className="text-stone-400"> · {a.timeLabel}</span>
+                  <span> — {a.summary}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </>
+    );
+  };
+
+
   const renderSettingsPage = () => (
     <>
       <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
@@ -2582,6 +2944,18 @@ export default function App() {
         <p className="mt-2 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
         <p className="mt-1 break-all rounded-lg bg-stone-50 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
       </section>
+
+      <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.sharedCareTitle}</h2>
+        <p className="mb-3 text-xs leading-relaxed text-stone-500">{tr.sharedCareNavHint}</p>
+        <button
+          type="button"
+          onClick={() => setPage('sharedCare')}
+          className="w-full rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
+        >
+          {tr.sharedCareTitle}
+        </button>
+      </section>
     </>
   );
 
@@ -2624,6 +2998,17 @@ export default function App() {
                     <h3 className="truncate text-base font-bold">{cat.name}</h3>
                     <p className="text-xs text-stone-500">{selectedCat?.id === cat.id ? tr.selected : tr.tapToSwitch}</p>
                   </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    selectCat(cat.id);
+                    setPage('sharedCare');
+                  }}
+                  className="shrink-0 rounded-full bg-orange-100 px-2 py-1.5 text-[11px] font-bold leading-tight text-orange-800"
+                >
+                  {tr.sharedCareTitle}
                 </button>
 
                 <button
@@ -2730,6 +3115,14 @@ export default function App() {
           {renderProfileInput(tr.vetClinic, selectedCat?.vetClinic, 'vetClinic')}
           {renderProfileTextarea(tr.profileNote, selectedCat?.profileNote, 'profileNote')}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setPage('sharedCare')}
+          className="mt-4 w-full rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-sm font-bold text-orange-800 shadow-sm"
+        >
+          {tr.sharedCareTitle}
+        </button>
       </section>
 
       <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
@@ -2798,7 +3191,7 @@ export default function App() {
             <button onClick={() => setPage('history')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'history' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
               {tr.history}
             </button>
-            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' || page === 'settings' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' || page === 'settings' || page === 'sharedCare' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
               {tr.cats}
             </button>
             <button onClick={() => setPage('assistant')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'assistant' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
@@ -2813,6 +3206,7 @@ export default function App() {
         {page === 'history' && renderHistoryPage()}
         {page === 'cats' && renderCatsPage()}
         {page === 'settings' && renderSettingsPage()}
+        {page === 'sharedCare' && renderSharedCarePage()}
         {page === 'assistant' && renderAssistantPage()}
 
         <p className="mt-6 text-center text-xs text-stone-400">{tr.savedLocal}</p>
