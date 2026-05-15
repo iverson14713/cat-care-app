@@ -23,10 +23,27 @@ function proClientSet() {
   );
 }
 
-/** Pro quota only if client UUID is listed in AI_PRO_CLIENT_IDS (server-side). */
-export function getDailyLimit(clientId) {
+export function trustClientPlan() {
+  const v = (process.env.AI_TRUST_CLIENT_PLAN || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+/**
+ * @param {string} clientId
+ * @param {'free' | 'pro'} [planFromRequest='free'] — from client body/query when testing (see AI_TRUST_CLIENT_PLAN).
+ */
+export function getDailyLimit(clientId, planFromRequest = 'free') {
   if (typeof clientId !== 'string' || !clientId.trim()) return freeLimit();
-  return proClientSet().has(clientId.trim()) ? proLimit() : freeLimit();
+  if (proClientSet().has(clientId.trim())) return proLimit();
+  if (trustClientPlan() && planFromRequest === 'pro') return proLimit();
+  return freeLimit();
+}
+
+/** For health JSON: whether this client+hint is treated as Pro tier (quota / UI). */
+export function effectivePlanForResponse(clientId, planFromRequest = 'free') {
+  if (typeof clientId === 'string' && proClientSet().has(clientId.trim())) return 'pro';
+  if (trustClientPlan() && planFromRequest === 'pro') return 'pro';
+  return 'free';
 }
 
 const dailyUsage = new Map();
@@ -46,8 +63,8 @@ export function incrementDailyUsed(clientId, usageDate) {
 }
 
 /** @returns {{ ok: true, used: number, limit: number, remaining: number } | { ok: false, code: 'QUOTA', used: number, limit: number, remaining: number }} */
-export function assertDailyQuota(clientId, usageDate) {
-  const limit = getDailyLimit(clientId);
+export function assertDailyQuota(clientId, usageDate, planFromRequest = 'free') {
+  const limit = getDailyLimit(clientId, planFromRequest);
   const used = peekDailyUsed(clientId, usageDate);
   const remaining = Math.max(0, limit - used);
   if (used >= limit) {

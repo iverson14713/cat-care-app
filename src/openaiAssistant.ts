@@ -137,6 +137,21 @@ export type AssistantHealthPayload = {
   planEffective: 'free' | 'pro';
 };
 
+export type AssistantQuotaSnapshot = Pick<
+  AssistantHealthPayload,
+  'dailyLimit' | 'dailyUsed' | 'dailyRemaining'
+>;
+
+function parseQuotaSnapshot(d: Record<string, unknown>): AssistantQuotaSnapshot | null {
+  const dailyLimit = Number(d.dailyLimit);
+  const dailyUsed = Number(d.dailyUsed);
+  const dailyRemaining = Number(d.dailyRemaining);
+  if (!Number.isFinite(dailyLimit) || !Number.isFinite(dailyUsed) || !Number.isFinite(dailyRemaining)) {
+    return null;
+  }
+  return { dailyLimit, dailyUsed, dailyRemaining };
+}
+
 async function readAssistantApiError(res: Response): Promise<{ message: string; code?: string }> {
   const t = await res.text();
   try {
@@ -218,10 +233,11 @@ export function buildRecordContextForLlm(ctx: AssistantContext): string {
 export async function fetchAssistantHealth(
   clientId: string,
   usageDate: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  plan: 'free' | 'pro' = 'free'
 ): Promise<AssistantHealthPayload | null> {
   try {
-    const qs = new URLSearchParams({ clientId, usageDate });
+    const qs = new URLSearchParams({ clientId, usageDate, plan });
     const res = await fetch(`${API_PREFIX}/health?${qs}`, { signal });
     if (!res.ok) return null;
     const d = (await res.json()) as Record<string, unknown>;
@@ -265,11 +281,11 @@ export async function generateAssistantCareBundleOpenAi(
   ctx: AssistantContext,
   meta: AssistantRequestMeta,
   signal?: AbortSignal
-): Promise<AssistantCareBundleJson> {
+): Promise<{ bundle: AssistantCareBundleJson; quota: AssistantQuotaSnapshot | null }> {
   const recordContext = buildRecordContextForLlm(ctx);
   const ck = careBundleCacheKey(meta.catId, meta.usageDate, djb2Hash(recordContext));
   const fromCache = peekCareBundleCache(ctx, meta);
-  if (fromCache) return fromCache;
+  if (fromCache) return { bundle: fromCache, quota: null };
 
   const res = await fetch(`${API_PREFIX}/care-bundle`, {
     method: 'POST',
@@ -289,9 +305,10 @@ export async function generateAssistantCareBundleOpenAi(
     throw new AssistantApiError(message, code, res.status);
   }
   const data = (await res.json()) as Record<string, unknown>;
+  const quota = parseQuotaSnapshot(data);
   const bundle = normalizeCareBundlePayload(data, ctx.lang);
   writeCareBundleCacheJson(ck, JSON.stringify(bundle));
-  return bundle;
+  return { bundle, quota };
 }
 
 export async function generateAssistantQaOpenAi(
@@ -299,7 +316,7 @@ export async function generateAssistantQaOpenAi(
   question: string,
   meta: AssistantRequestMeta,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<{ answer: string; quota: AssistantQuotaSnapshot | null }> {
   const recordContext = buildRecordContextForLlm(ctx);
   const res = await fetch(`${API_PREFIX}/qa`, {
     method: 'POST',
@@ -319,9 +336,10 @@ export async function generateAssistantQaOpenAi(
     const { message, code } = await readAssistantApiError(res);
     throw new AssistantApiError(message, code, res.status);
   }
-  const data = (await res.json()) as { answer?: unknown };
-  if (typeof data?.answer !== 'string') {
+  const data = (await res.json()) as Record<string, unknown>;
+  if (typeof data.answer !== 'string') {
     throw new Error('Invalid response: missing answer');
   }
-  return data.answer.trim();
+  const quota = parseQuotaSnapshot(data);
+  return { answer: data.answer.trim(), quota };
 }

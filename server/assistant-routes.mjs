@@ -3,6 +3,7 @@ import { openAiChatCompletion } from './openai.mjs';
 import {
   assertDailyQuota,
   assertMinuteRate,
+  effectivePlanForResponse,
   getDailyLimit,
   incrementDailyUsed,
   peekDailyUsed,
@@ -15,6 +16,22 @@ export const CARE_MAX_TOKENS = 1200;
 export const QA_MAX_TOKENS = 600;
 
 const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+
+/** After incrementDailyUsed — attach to JSON so clients are not dependent on GET /health query parsing. */
+function dailyQuotaFields(clientId, usageDate, planHint) {
+  const limit = getDailyLimit(clientId, planHint);
+  const used = peekDailyUsed(clientId, usageDate);
+  return {
+    dailyLimit: limit,
+    dailyUsed: used,
+    dailyRemaining: Math.max(0, limit - used),
+  };
+}
+
+/** @param {unknown} planField */
+function planHintFromBody(planField) {
+  return planField === 'pro' ? 'pro' : 'free';
+}
 
 function estUsdFromUsage(usage) {
   const inPer1m = Number(process.env.AI_EST_INPUT_PER_1M_USD);
@@ -148,7 +165,7 @@ function logLine(partial) {
 }
 
 /** @returns {{ ok: true } | { ok: false, status: number, json: object }} */
-function assistantRateAndQuota(clientId, catId, usageDate, feature) {
+function assistantRateAndQuota(clientId, catId, usageDate, feature, planHint) {
   const minute = assertMinuteRate(clientId);
   if (!minute.ok) {
     logLine({
@@ -174,7 +191,7 @@ function assistantRateAndQuota(clientId, catId, usageDate, feature) {
     };
   }
 
-  const daily = assertDailyQuota(clientId, usageDate);
+  const daily = assertDailyQuota(clientId, usageDate, planHint);
   if (!daily.ok) {
     logLine({
       userId: clientId,
@@ -245,6 +262,7 @@ async function handleQa(lang, recordContext, question) {
 export function assistHealthGET(searchParams) {
   const clientId = (searchParams.get('clientId') || '').trim();
   const usageDate = (searchParams.get('usageDate') || '').trim();
+  const planHint = planHintFromBody(searchParams.get('plan'));
   const openaiReady = Boolean(process.env.OPENAI_API_KEY?.trim());
   if (!isClientId(clientId) || !isYmd(usageDate)) {
     return {
@@ -259,13 +277,9 @@ export function assistHealthGET(searchParams) {
       },
     };
   }
-  const limit = getDailyLimit(clientId);
+  const limit = getDailyLimit(clientId, planHint);
   const used = peekDailyUsed(clientId, usageDate);
-  const proIds = (process.env.AI_PRO_CLIENT_IDS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const planEffective = proIds.includes(clientId) ? 'pro' : 'free';
+  const planEffective = effectivePlanForResponse(clientId, planHint);
   return {
     status: 200,
     json: {
@@ -302,7 +316,8 @@ export async function assistCareBundlePOST(body) {
     };
   }
 
-  const rq = assistantRateAndQuota(clientId, catId, usageDate, 'care-bundle');
+  const planHint = planHintFromBody(b.plan);
+  const rq = assistantRateAndQuota(clientId, catId, usageDate, 'care-bundle', planHint);
   if (!rq.ok) return { status: rq.status, json: rq.json };
 
   const lang = b.lang;
@@ -339,7 +354,7 @@ export async function assistCareBundlePOST(body) {
       totalTokens: usage?.total_tokens ?? null,
       estUsd,
     });
-    return { status: 200, json: bundle };
+    return { status: 200, json: { ...bundle, ...dailyQuotaFields(clientId, usageDate, planHint) } };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logLine({
@@ -388,7 +403,8 @@ export async function assistQaPOST(body) {
     };
   }
 
-  const rq = assistantRateAndQuota(clientId, catId, usageDate, 'qa');
+  const planHint = planHintFromBody(b.plan);
+  const rq = assistantRateAndQuota(clientId, catId, usageDate, 'qa', planHint);
   if (!rq.ok) return { status: rq.status, json: rq.json };
 
   const lang = b.lang;
@@ -432,7 +448,7 @@ export async function assistQaPOST(body) {
       totalTokens: usage?.total_tokens ?? null,
       estUsd,
     });
-    return { status: 200, json: { answer } };
+    return { status: 200, json: { answer, ...dailyQuotaFields(clientId, usageDate, planHint) } };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logLine({

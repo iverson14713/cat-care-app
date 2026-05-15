@@ -15,12 +15,21 @@ export function getOrCreateClientId(): string {
   }
 }
 
-/** Client hint only; server grants Pro via AI_PRO_CLIENT_IDS. */
+/** Stored in localStorage; drives client UI and is sent as `plan` to the assistant API. */
 export function getAiPlan(): 'free' | 'pro' {
   try {
     return localStorage.getItem(PLAN_KEY) === 'pro' ? 'pro' : 'free';
   } catch {
     return 'free';
+  }
+}
+
+export function setAiPlan(plan: 'free' | 'pro'): void {
+  try {
+    if (plan === 'pro') localStorage.setItem(PLAN_KEY, 'pro');
+    else localStorage.removeItem(PLAN_KEY);
+  } catch {
+    // ignore
   }
 }
 

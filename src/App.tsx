@@ -4,7 +4,7 @@ import {
   type AssistantCareBundleJson,
   buildSevenDayAnalysis,
 } from './aiCareAssistant';
-import { getOrCreateClientId, getAiPlan } from './aiClient';
+import { getOrCreateClientId, getAiPlan, setAiPlan } from './aiClient';
 import {
   AssistantApiError,
   type AssistantHealthPayload,
@@ -41,7 +41,8 @@ type CheckItem = {
 
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant';
+type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings';
+type AppPlan = 'free' | 'pro';
 
 type AbnormalRecord = {
   date: string;
@@ -129,7 +130,7 @@ const text = {
     historyPickDateFirst: '請先選擇日期',
     historyJumpNoMatch: '找不到此日期的紀錄',
     historyBackLatest: '回到最新',
-    historyRoadmap: '之後預計：異常紀錄篩選、關鍵字搜尋（尚未開放）',
+    historyRoadmap: '快速跳轉仍可使用。進階篩選與搜尋見下方（Pro 功能規劃中）。',
     noHistory: '目前還沒有這隻貓的歷史紀錄',
     completed: '完成',
     vetReport: '獸醫報告',
@@ -262,6 +263,29 @@ const text = {
     assistantSendBusy: '處理中…',
     aiQuotaLine: '今天還能用 {{remaining}} 次（每日共 {{limit}} 次）',
     aiErrQuota: '今天次數用完了，明天再來好嗎？若你已升級仍遇到問題，請聯絡我們。',
+    aiErrQuotaFree: '今日免費 AI 次數已用完。Pro 版每日可使用 30 次。',
+    aiErrQuotaPro: '今日 AI 次數已用完，明天再試試。',
+    settingsTitle: '方案與設定',
+    settingsBack: '返回貓咪',
+    settingsPlanSection: '訂閱方案（測試）',
+    settingsPlanCurrent: '目前方案',
+    settingsPlanFree: '免費版',
+    settingsPlanProTest: 'Pro 測試版',
+    settingsPlanHint: '此處僅供開發測試，不會連結 App Store 或刷卡付款。',
+    settingsSwitchPro: '切換成 Pro 測試版',
+    settingsSwitchFree: '切回免費版',
+    settingsPlanServerHint:
+      '若切換為 Pro 後 AI 每日上限仍顯示 3 次，請在助理伺服器設定 AI_TRUST_CLIENT_PLAN=1（測試用），或將裝置 ID 加入 AI_PRO_CLIENT_IDS。',
+    settingsPaymentNote: '目前未串接金流，不會實際收費。',
+    settingsClientIdCaption: '本裝置 ID（加入伺服器 AI_PRO_CLIENT_IDS 時使用）',
+    planMultiCatUpgrade: '多貓照護是 Pro 功能。升級後可管理多隻貓咪，並獲得更多 AI 分析次數。',
+    planFreeMultiCatBanner: '免費版僅支援 1 隻貓。你目前有超過 1 隻貓咪，請刪減貓咪或切換至 Pro 測試版。',
+    openSettings: '方案與設定',
+    proTeaserHistorySearch: '歷史篩選與搜尋',
+    proTeaserComing: '即將推出',
+    proTeaserAdvancedWeekly: '進階 AI 週報',
+    proTeaserRoadmap: 'Pro 功能規劃中',
+    proTeaserAdvancedVet: '進階獸醫報告',
     aiErrRate: '問得太快啦，休息一下再試。',
     aiAssistantApiErrorPrefix: 'AI 服務錯誤：',
     aiDisclaimerFoot:
@@ -309,7 +333,7 @@ const text = {
     historyPickDateFirst: 'Pick a date first',
     historyJumpNoMatch: 'No saved record for that date',
     historyBackLatest: 'Back to latest',
-    historyRoadmap: 'Coming later: abnormal-only filter and keyword search (not available yet).',
+    historyRoadmap: 'Jump-to-date still works. Advanced filter & search is planned for Pro — see below.',
     noHistory: 'No history for this cat yet',
     completed: 'Completed',
     vetReport: 'Vet report',
@@ -442,6 +466,32 @@ const text = {
     assistantSendBusy: 'Working…',
     aiQuotaLine: '{{remaining}} of {{limit}} summaries left today',
     aiErrQuota: 'That is all for today — come back tomorrow. If you upgraded and still see this, please contact support.',
+    aiErrQuotaFree:
+      "You've used today's free AI quota. Pro includes 30 AI uses per day (when enabled on the server).",
+    aiErrQuotaPro: "You've used today's AI quota — try again tomorrow.",
+    settingsTitle: 'Plan & settings',
+    settingsBack: 'Back to cats',
+    settingsPlanSection: 'Plan (test mode)',
+    settingsPlanCurrent: 'Current plan',
+    settingsPlanFree: 'Free',
+    settingsPlanProTest: 'Pro (test)',
+    settingsPlanHint: 'For development testing only — no App Store or card checkout.',
+    settingsSwitchPro: 'Switch to Pro (test)',
+    settingsSwitchFree: 'Switch back to Free',
+    settingsPlanServerHint:
+      'If the daily AI limit stays at 3 after switching to Pro, set AI_TRUST_CLIENT_PLAN=1 on your assistant server (testing), or add this device ID to AI_PRO_CLIENT_IDS.',
+    settingsPaymentNote: 'No billing is connected — nothing is charged.',
+    settingsClientIdCaption: 'This device ID (for AI_PRO_CLIENT_IDS on the server)',
+    planMultiCatUpgrade:
+      'Multiple cats are a Pro feature. Upgrade to manage more than one cat and get more daily AI analysis.',
+    planFreeMultiCatBanner:
+      'Free supports one cat only. You currently have more than one — delete extras or switch to Pro (test).',
+    openSettings: 'Plan & settings',
+    proTeaserHistorySearch: 'History filter & search',
+    proTeaserComing: 'Coming soon',
+    proTeaserAdvancedWeekly: 'Advanced AI weekly report',
+    proTeaserRoadmap: 'Planned for Pro',
+    proTeaserAdvancedVet: 'Advanced vet report',
     aiErrRate: 'A little too fast — take a short break and try again.',
     aiAssistantApiErrorPrefix: 'AI service error: ',
     aiDisclaimerFoot:
@@ -454,6 +504,11 @@ function aiStatusHint(lang: Lang, kind: 'off' | 'key'): string {
   const dev = import.meta.env.DEV;
   if (kind === 'off') return dev ? tr.aiAssistantUnreachableDev : tr.aiAssistantUnreachableProd;
   return dev ? tr.aiNeedServerEnvDev : tr.aiNeedServerEnvProd;
+}
+
+function aiQuotaExhaustedMessage(lang: Lang, appPlan: AppPlan): string {
+  const t = text[lang];
+  return appPlan === 'free' ? t.aiErrQuotaFree : t.aiErrQuotaPro;
 }
 
 function makeId() {
@@ -853,11 +908,17 @@ export default function App() {
 
   const [page, setPage] = useState<Page>('today');
   const [newCatName, setNewCatName] = useState('');
+  const [multiCatHint, setMultiCatHint] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [historyJumpDate, setHistoryJumpDate] = useState('');
   const [historyJumpHint, setHistoryJumpHint] = useState<string | null>(null);
   const [historyFabVisible, setHistoryFabVisible] = useState(false);
   const [aiClientId] = useState(() => getOrCreateClientId());
+  const [appPlan, setAppPlan] = useState<AppPlan>(() => getAiPlan());
+  const persistAppPlan = (p: AppPlan) => {
+    setAiPlan(p);
+    setAppPlan(p);
+  };
   const [weightDate, setWeightDate] = useState(today);
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
@@ -998,7 +1059,7 @@ export default function App() {
     setAssistantApiReady(null);
     setAssistantHealthReachable(null);
     setAssistantQuota(null);
-    fetchAssistantHealth(aiClientId, today).then((h) => {
+    fetchAssistantHealth(aiClientId, today, undefined, appPlan).then((h) => {
       if (cancelled) return;
       if (!h) {
         setAssistantHealthReachable(false);
@@ -1013,7 +1074,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [page, lang, aiClientId, today]);
+  }, [page, lang, aiClientId, today, appPlan]);
 
   useEffect(() => {
     setAiQuestion('');
@@ -1034,14 +1095,14 @@ export default function App() {
       clientId: aiClientId,
       catId: ctx.catId,
       usageDate: ctx.today,
-      plan: getAiPlan(),
+      plan: appPlan,
     };
     const cached = peekCareBundleCache(ctx, meta);
     if (cached) {
       setAiCareBundle(cached);
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
     }
-  }, [page, assistantContext?.catId, assistantContext?.today, assistantContext?.lang, aiClientId]);
+  }, [page, assistantContext?.catId, assistantContext?.today, assistantContext?.lang, aiClientId, appPlan]);
 
   useEffect(
     () => () => {
@@ -1069,28 +1130,34 @@ export default function App() {
       clientId: aiClientId,
       catId: ctx.catId,
       usageDate: ctx.today,
-      plan: getAiPlan(),
+      plan: appPlan,
     };
     const hasCache = peekCareBundleCache(ctx, meta) != null;
     if (!hasCache && assistantQuota != null && assistantQuota.dailyRemaining <= 0) {
-      setOpenAiErr(text[lang].aiErrQuota);
+      setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
       setAiBundleLoading(false);
       return;
     }
     try {
-      const data = await generateAssistantCareBundleOpenAi(
-        ctx,
-        meta,
-        ac.signal
-      );
-      setAiCareBundle(data);
+      const { bundle, quota } = await generateAssistantCareBundleOpenAi(ctx, meta, ac.signal);
+      setAiCareBundle(bundle);
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
-      const h = await fetchAssistantHealth(aiClientId, ctx.today);
-      if (h) setAssistantQuota(h);
+      if (quota) {
+        setAssistantQuota((prev) => ({
+          openaiReady: prev?.openaiReady ?? true,
+          planEffective: prev?.planEffective ?? 'free',
+          dailyLimit: quota.dailyLimit,
+          dailyUsed: quota.dailyUsed,
+          dailyRemaining: quota.dailyRemaining,
+        }));
+      } else {
+        const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
+        if (h) setAssistantQuota(h);
+      }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
+        if (e.code === 'QUOTA') setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
         else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
         else if (e.code === 'OPENAI')
           setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
@@ -1102,7 +1169,7 @@ export default function App() {
     } finally {
       setAiBundleLoading(false);
     }
-  }, [assistantContext, lang, assistantApiReady, assistantHealthReachable, aiClientId, assistantQuota]);
+  }, [assistantContext, lang, assistantApiReady, assistantHealthReachable, aiClientId, assistantQuota, appPlan]);
 
   const runOpenAiQa = useCallback(async () => {
     const ctx = assistantContext;
@@ -1120,30 +1187,45 @@ export default function App() {
       setAiReply('');
       return;
     }
+    if (assistantQuota != null && assistantQuota.dailyRemaining <= 0) {
+      setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
+      setAiReply('');
+      return;
+    }
     qaAbortRef.current?.abort();
     const ac = new AbortController();
     qaAbortRef.current = ac;
     setAiQaLoading(true);
     setOpenAiErr(null);
     try {
-      const raw = await generateAssistantQaOpenAi(
+      const { answer, quota } = await generateAssistantQaOpenAi(
         ctx,
         q,
         {
           clientId: aiClientId,
           catId: ctx.catId,
           usageDate: ctx.today,
-          plan: getAiPlan(),
+          plan: appPlan,
         },
         ac.signal
       );
-      setAiReply(`${raw.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
-      const h = await fetchAssistantHealth(aiClientId, ctx.today);
-      if (h) setAssistantQuota(h);
+      setAiReply(`${answer.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
+      if (quota) {
+        setAssistantQuota((prev) => ({
+          openaiReady: prev?.openaiReady ?? true,
+          planEffective: prev?.planEffective ?? 'free',
+          dailyLimit: quota.dailyLimit,
+          dailyUsed: quota.dailyUsed,
+          dailyRemaining: quota.dailyRemaining,
+        }));
+      } else {
+        const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
+        if (h) setAssistantQuota(h);
+      }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
+        if (e.code === 'QUOTA') setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
         else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
         else if (e.code === 'OPENAI')
           setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
@@ -1156,7 +1238,7 @@ export default function App() {
     } finally {
       setAiQaLoading(false);
     }
-  }, [assistantContext, aiQuestion, lang, assistantApiReady, assistantHealthReachable, aiClientId]);
+  }, [assistantContext, aiQuestion, lang, assistantApiReady, assistantHealthReachable, aiClientId, appPlan]);
 
   const latestWeight = weightRecords[0];
   const oldestRecentWeight = weightRecords[Math.min(weightRecords.length - 1, 4)];
@@ -1195,6 +1277,10 @@ export default function App() {
   }, [monthly, selectedCat, month]);
 
   useEffect(() => {
+    if (appPlan === 'pro') setMultiCatHint(null);
+  }, [appPlan]);
+
+  useEffect(() => {
     if (!selectedCat) return;
     localStorage.setItem(weightStorageKey(selectedCat.id), JSON.stringify(weightRecords));
   }, [weightRecords, selectedCat]);
@@ -1225,6 +1311,12 @@ export default function App() {
       alert(tr.needCatName);
       return;
     }
+
+    if (appPlan === 'free' && cats.length >= 1) {
+      setMultiCatHint(tr.planMultiCatUpgrade);
+      return;
+    }
+    setMultiCatHint(null);
 
     const newCat: Cat = {
       id: makeId(),
@@ -2024,6 +2116,14 @@ export default function App() {
               <div className="rounded-xl border border-dashed border-stone-300 bg-white/60 px-3 py-2 text-xs leading-5 text-stone-500">
                 {tr.historyRoadmap}
               </div>
+              <button
+                type="button"
+                disabled
+                className="w-full cursor-not-allowed rounded-xl border border-dashed border-stone-300 bg-stone-100/60 px-3 py-2.5 text-left text-xs text-stone-500"
+              >
+                <span className="block font-bold text-stone-600">{tr.proTeaserHistorySearch}</span>
+                <span className="mt-0.5 block text-stone-400">{tr.proTeaserRoadmap}</span>
+              </button>
             </div>
 
             <div id="history-latest-anchor" className="h-0 w-full scroll-mt-28" aria-hidden />
@@ -2075,6 +2175,17 @@ export default function App() {
         </button>
         <button onClick={() => window.print()} className="rounded-2xl bg-stone-800 py-4 font-bold text-white shadow-sm">
           {tr.printPdf}
+        </button>
+      </div>
+
+      <div className="mb-5 rounded-2xl border border-dashed border-stone-300 bg-stone-50/90 p-4 shadow-sm">
+        <button
+          type="button"
+          disabled
+          className="w-full cursor-not-allowed text-left"
+        >
+          <span className="block text-sm font-bold text-stone-600">{tr.proTeaserAdvancedVet}</span>
+          <span className="mt-1 block text-xs text-stone-500">{tr.proTeaserRoadmap}</span>
         </button>
       </div>
 
@@ -2359,6 +2470,17 @@ export default function App() {
           ) : null}
         </section>
 
+        <section className="mb-4 rounded-2xl border border-dashed border-stone-200 bg-white px-3.5 py-3 shadow-sm">
+          <button
+            type="button"
+            disabled
+            className="w-full cursor-not-allowed rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-left opacity-85"
+          >
+            <span className="block text-sm font-bold text-stone-600">{tr.proTeaserAdvancedWeekly}</span>
+            <span className="mt-0.5 block text-xs text-stone-500">{tr.proTeaserComing}</span>
+          </button>
+        </section>
+
         {apiReady && aiBundleLoading ? (
           <section className="mb-4 flex items-center gap-2.5 rounded-2xl border border-orange-100 bg-orange-50/50 px-3.5 py-3 text-[13px] leading-snug text-stone-700">
             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" aria-hidden />
@@ -2411,8 +2533,76 @@ export default function App() {
     );
   };
 
+
+  const renderSettingsPage = () => (
+    <>
+      <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setPage('cats')}
+          className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
+        >
+          ← {tr.settingsBack}
+        </button>
+        <h1 className="text-xl font-bold text-stone-900">{tr.settingsTitle}</h1>
+      </section>
+
+      <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.settingsPlanSection}</h2>
+        <p className="text-sm text-stone-700">
+          {tr.settingsPlanCurrent}：
+          <span className="font-bold text-orange-600">
+            {appPlan === 'pro' ? tr.settingsPlanProTest : tr.settingsPlanFree}
+          </span>
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-stone-500">{tr.settingsPlanHint}</p>
+        <p className="mt-1 text-xs leading-relaxed text-stone-500">{tr.settingsPaymentNote}</p>
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          {appPlan === 'free' ? (
+            <button
+              type="button"
+              onClick={() => persistAppPlan('pro')}
+              className="rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
+            >
+              {tr.settingsSwitchPro}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => persistAppPlan('free')}
+              className="rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700"
+            >
+              {tr.settingsSwitchFree}
+            </button>
+          )}
+        </div>
+
+        <p className="mt-4 text-[11px] leading-relaxed text-stone-400">{tr.settingsPlanServerHint}</p>
+        <p className="mt-2 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
+        <p className="mt-1 break-all rounded-lg bg-stone-50 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
+      </section>
+    </>
+  );
+
   const renderCatsPage = () => (
     <>
+      <section className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPage('settings')}
+          className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 shadow-sm"
+        >
+          ⚙ {tr.openSettings}
+        </button>
+      </section>
+
+      {appPlan === 'free' && cats.length > 1 ? (
+        <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950 shadow-sm">
+          {tr.planFreeMultiCatBanner}
+        </div>
+      ) : null}
+
       <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.catList}</h2>
         <div className="space-y-2">
@@ -2453,14 +2643,26 @@ export default function App() {
         <div className="flex gap-2">
           <input
             value={newCatName}
-            onChange={(e) => setNewCatName(e.target.value)}
+            onChange={(e) => {
+              setNewCatName(e.target.value);
+              setMultiCatHint(null);
+            }}
             placeholder={tr.catNamePlaceholder}
             className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
           />
-          <button onClick={addCat} className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white">
+          <button
+            type="button"
+            onClick={addCat}
+            disabled={appPlan === 'free' && cats.length >= 1}
+            className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-45"
+          >
             {tr.add}
           </button>
         </div>
+        {appPlan === 'free' && cats.length >= 1 ? (
+          <p className="mt-2 text-[12px] leading-snug text-amber-900">{tr.planMultiCatUpgrade}</p>
+        ) : null}
+        {multiCatHint ? <p className="mt-2 text-[12px] leading-snug text-red-800">{multiCatHint}</p> : null}
       </section>
 
       <div className="mb-3 flex items-center gap-2.5 rounded-2xl bg-white px-3 py-2 shadow-sm">
@@ -2596,7 +2798,7 @@ export default function App() {
             <button onClick={() => setPage('history')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'history' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
               {tr.history}
             </button>
-            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' || page === 'settings' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
               {tr.cats}
             </button>
             <button onClick={() => setPage('assistant')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'assistant' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
@@ -2610,6 +2812,7 @@ export default function App() {
         {page === 'vet' && renderVetPage()}
         {page === 'history' && renderHistoryPage()}
         {page === 'cats' && renderCatsPage()}
+        {page === 'settings' && renderSettingsPage()}
         {page === 'assistant' && renderAssistantPage()}
 
         <p className="mt-6 text-center text-xs text-stone-400">{tr.savedLocal}</p>
