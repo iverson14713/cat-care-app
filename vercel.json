@@ -5,6 +5,9 @@
     },
     "api/assistant/qa.js": {
       "maxDuration": 120
+    },
+    "api/assistant/vet-report.js": {
+      "maxDuration": 120
     }
   }
 }

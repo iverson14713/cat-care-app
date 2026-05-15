@@ -309,7 +309,11 @@ export function VetReportPage({
       setAiSummary(summary);
       if (!isPro) recordVetAiUsedToday(today);
     } catch (e) {
-      setAiErr(e instanceof VetReportApiError ? e.message : String(e));
+      if (e instanceof VetReportApiError) {
+        setAiErr(e.message);
+      } else {
+        setAiErr(lang === 'zh' ? 'AI 重點整理暫時無法使用，請稍後再試。' : 'AI summary is temporarily unavailable. Please try again later.');
+      }
     } finally {
       setAiLoading(false);
     }
