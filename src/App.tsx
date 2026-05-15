@@ -27,6 +27,7 @@ import {
   setCareDisplayName,
   type SharedCareCatState,
 } from './sharedCareMock';
+import { useSupabaseAuth } from './useSupabaseAuth';
 
 type Lang = 'zh' | 'en';
 
@@ -280,6 +281,32 @@ const text = {
     aiErrQuotaPro: '今日 AI 次數已用完，明天再試試。',
     settingsTitle: '方案與設定',
     settingsBack: '返回貓咪',
+    authAccountSection: '帳號與登入（Supabase）',
+    authNotConfigured:
+      '尚未設定雲端帳號：請在 `.env` 或部署環境加入 VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY，並在 Supabase 執行 `supabase/migrations` 內的 SQL，然後重新啟動前端。',
+    authLoggedInStrip: '已登入',
+    authOpenSettingsToSignIn: '到「方案與設定」可註冊或登入。',
+    authCurrentAccount: '目前帳號',
+    authSignOut: '登出',
+    authEmail: '電子郵件',
+    authPassword: '密碼',
+    authDisplayNameOptional: '顯示名稱（選填，僅註冊）',
+    authSignIn: '登入',
+    authSignUp: '註冊新帳號',
+    authSwitchToSignUp: '還沒帳號？改為註冊',
+    authSwitchToSignIn: '已有帳號？改為登入',
+    authProcessing: '處理中…',
+    authErrNotConfigured: '尚未連線 Supabase。',
+    authErrInvalid: '帳號或密碼不正確。',
+    authErrEmailNotConfirmed: '請先到信箱完成驗證，再登入。',
+    authErrAlreadyReg: '此信箱已註冊，請改為登入。',
+    authErrWeak: '密碼不符合要求，請改用更長或更複雜的密碼。',
+    authErrGeneric: '發生錯誤：',
+    authErrMissingFields: '請輸入電子郵件與密碼。',
+    authSignUpSent: '若註冊成功，請檢查信箱（含垃圾信）並完成驗證後再登入。',
+    authSignedInOk: '登入成功。',
+    authSignedOutOk: '已登出。',
+    authLocalDataHint: '貓咪與每日紀錄仍儲存在本機，尚未上傳至雲端（下一階段開放）。',
     settingsPlanSection: '訂閱方案（測試）',
     settingsPlanCurrent: '目前方案',
     settingsPlanFree: '免費版',
@@ -517,6 +544,32 @@ const text = {
     aiErrQuotaPro: "You've used today's AI quota — try again tomorrow.",
     settingsTitle: 'Plan & settings',
     settingsBack: 'Back to cats',
+    authAccountSection: 'Account (Supabase)',
+    authNotConfigured:
+      'Cloud sign-in is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to `.env` or your host, run the SQL in `supabase/migrations` on your Supabase project, then restart the dev server.',
+    authLoggedInStrip: 'Signed in',
+    authOpenSettingsToSignIn: 'Open Plan & settings to sign in or register.',
+    authCurrentAccount: 'Account',
+    authSignOut: 'Sign out',
+    authEmail: 'Email',
+    authPassword: 'Password',
+    authDisplayNameOptional: 'Display name (optional, signup only)',
+    authSignIn: 'Sign in',
+    authSignUp: 'Create account',
+    authSwitchToSignUp: 'No account? Switch to sign up',
+    authSwitchToSignIn: 'Have an account? Switch to sign in',
+    authProcessing: 'Working…',
+    authErrNotConfigured: 'Supabase is not configured.',
+    authErrInvalid: 'Invalid email or password.',
+    authErrEmailNotConfirmed: 'Please confirm your email from the inbox, then sign in.',
+    authErrAlreadyReg: 'This email is already registered — try signing in.',
+    authErrWeak: 'Password does not meet requirements — try a longer password.',
+    authErrGeneric: 'Something went wrong: ',
+    authErrMissingFields: 'Please enter email and password.',
+    authSignUpSent: 'If signup succeeded, check your inbox (and spam), confirm your email, then sign in.',
+    authSignedInOk: 'Signed in successfully.',
+    authSignedOutOk: 'Signed out.',
+    authLocalDataHint: 'Cats and daily logs still stay on this device; cloud sync comes in a later phase.',
     settingsPlanSection: 'Plan (test mode)',
     settingsPlanCurrent: 'Current plan',
     settingsPlanFree: 'Free',
@@ -962,6 +1015,21 @@ function sevenDaySummaryNeedsExpand(lines: string[]): boolean {
   return false;
 }
 
+function formatAuthErrorMessage(lang: Lang, err: unknown): string {
+  const t = text[lang];
+  if (err instanceof Error && err.message === 'not_configured') return t.authErrNotConfigured;
+  const msg =
+    err && typeof err === 'object' && 'message' in err
+      ? String((err as { message?: string }).message ?? '')
+      : String(err ?? '');
+  const low = msg.toLowerCase();
+  if (low.includes('invalid login credentials')) return t.authErrInvalid;
+  if (low.includes('email not confirmed')) return t.authErrEmailNotConfirmed;
+  if (low.includes('already registered') || low.includes('user already registered')) return t.authErrAlreadyReg;
+  if (low.includes('password')) return t.authErrWeak;
+  return `${t.authErrGeneric}${msg}`;
+}
+
 export default function App() {
   const today = todayKey();
   const month = monthKey();
@@ -971,6 +1039,14 @@ export default function App() {
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   const tr = text[lang];
+
+  const supabaseAuth = useSupabaseAuth();
+  const authDisplayLabel = useMemo(() => {
+    const u = supabaseAuth.user;
+    if (!u) return '';
+    const n = supabaseAuth.profile?.display_name?.trim();
+    return n || u.email || '';
+  }, [supabaseAuth.user, supabaseAuth.profile]);
 
   const [selectedCatId, setSelectedCatId] = useState<string>(() => {
     const savedCats = loadCats();
@@ -1024,6 +1100,14 @@ export default function App() {
     if (sharedCareCopyTimerRef.current) clearTimeout(sharedCareCopyTimerRef.current);
     sharedCareCopyTimerRef.current = setTimeout(() => setSharedCareCopied(false), 2000);
   }, []);
+
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authDisplayNameReg, setAuthDisplayNameReg] = useState('');
+  const [authMode, setAuthMode] = useState<'signIn' | 'signUp'>('signIn');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authFormError, setAuthFormError] = useState<string | null>(null);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -1398,6 +1482,48 @@ export default function App() {
     setWeightRecords(loadWeightRecords(catId));
     setHistoryRefreshKey((v) => v + 1);
   };
+
+  const handleAuthSignOut = useCallback(async () => {
+    setAuthFormError(null);
+    setAuthMessage(null);
+    const { error } = await supabaseAuth.signOut();
+    if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
+    else setAuthMessage(text[lang].authSignedOutOk);
+  }, [supabaseAuth, lang]);
+
+  const handleAuthSubmit = useCallback(async () => {
+    setAuthFormError(null);
+    setAuthMessage(null);
+    const email = authEmail.trim();
+    if (!email || !authPassword) {
+      setAuthFormError(text[lang].authErrMissingFields);
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      if (authMode === 'signIn') {
+        const { error } = await supabaseAuth.signInWithEmail(email, authPassword);
+        if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
+        else {
+          setAuthMessage(text[lang].authSignedInOk);
+          setAuthPassword('');
+        }
+      } else {
+        const { error } = await supabaseAuth.signUpWithEmail(
+          email,
+          authPassword,
+          authDisplayNameReg.trim() || undefined
+        );
+        if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
+        else {
+          setAuthMessage(text[lang].authSignUpSent);
+          setAuthPassword('');
+        }
+      }
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authEmail, authPassword, authDisplayNameReg, authMode, supabaseAuth, lang]);
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
     if (!selectedCat) return;
@@ -2909,6 +3035,95 @@ export default function App() {
         <h1 className="text-xl font-bold text-stone-900">{tr.settingsTitle}</h1>
       </section>
 
+      <section className="mb-4 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
+        {!supabaseAuth.configured ? (
+          <p className="text-xs leading-relaxed text-stone-600">{tr.authNotConfigured}</p>
+        ) : !supabaseAuth.authReady ? (
+          <p className="text-sm text-stone-500">{tr.authProcessing}</p>
+        ) : supabaseAuth.user ? (
+          <>
+            <p className="text-sm text-stone-700">
+              <span className="font-bold text-stone-500">{tr.authCurrentAccount}</span>{' '}
+              <span className="font-semibold text-orange-700">{authDisplayLabel}</span>
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+            <button
+              type="button"
+              onClick={() => void handleAuthSignOut()}
+              className="mt-3 w-full rounded-xl border border-stone-300 bg-white py-2.5 text-sm font-bold text-stone-700"
+            >
+              {tr.authSignOut}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="mb-3 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+            <div className="mb-3 flex gap-2">
+              <button
+                type="button"
+                className={`flex-1 rounded-xl py-2 text-xs font-bold transition ${authMode === 'signIn' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
+                onClick={() => {
+                  setAuthMode('signIn');
+                  setAuthFormError(null);
+                  setAuthMessage(null);
+                }}
+              >
+                {tr.authSignIn}
+              </button>
+              <button
+                type="button"
+                className={`flex-1 rounded-xl py-2 text-xs font-bold transition ${authMode === 'signUp' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
+                onClick={() => {
+                  setAuthMode('signUp');
+                  setAuthFormError(null);
+                  setAuthMessage(null);
+                }}
+              >
+                {tr.authSignUp}
+              </button>
+            </div>
+            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authEmail}</label>
+            <input
+              type="email"
+              autoComplete="email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
+            />
+            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authPassword}</label>
+            <input
+              type="password"
+              autoComplete={authMode === 'signIn' ? 'current-password' : 'new-password'}
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
+            />
+            {authMode === 'signUp' ? (
+              <>
+                <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authDisplayNameOptional}</label>
+                <input
+                  type="text"
+                  value={authDisplayNameReg}
+                  onChange={(e) => setAuthDisplayNameReg(e.target.value)}
+                  className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
+                />
+              </>
+            ) : null}
+            {authFormError ? <p className="mb-2 text-[13px] font-medium text-red-600">{authFormError}</p> : null}
+            {authMessage ? <p className="mb-2 text-[13px] font-medium text-green-700">{authMessage}</p> : null}
+            <button
+              type="button"
+              disabled={authBusy}
+              onClick={() => void handleAuthSubmit()}
+              className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-55"
+            >
+              {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
+            </button>
+          </>
+        )}
+      </section>
+
       <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.settingsPlanSection}</h2>
         <p className="text-sm text-stone-700">
@@ -2961,14 +3176,24 @@ export default function App() {
 
   const renderCatsPage = () => (
     <>
-      <section className="mb-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setPage('settings')}
-          className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 shadow-sm"
-        >
-          ⚙ {tr.openSettings}
-        </button>
+      <section className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage('settings')}
+            className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 shadow-sm"
+          >
+            ⚙ {tr.openSettings}
+          </button>
+        </div>
+        {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
+          <div className="max-w-[58%] text-right text-[11px] leading-snug text-stone-600">
+            <span className="font-bold text-stone-500">{tr.authLoggedInStrip}</span>{' '}
+            <span className="font-semibold text-orange-700">{authDisplayLabel}</span>
+          </div>
+        ) : supabaseAuth.configured && supabaseAuth.authReady && !supabaseAuth.user ? (
+          <p className="max-w-[58%] text-right text-[10px] leading-snug text-stone-400">{tr.authOpenSettingsToSignIn}</p>
+        ) : null}
       </section>
 
       {appPlan === 'free' && cats.length > 1 ? (
@@ -3199,6 +3424,22 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2.5 text-[12px] text-stone-700 shadow-sm">
+            <span>
+              <span className="font-bold text-stone-500">{tr.authLoggedInStrip}</span>{' '}
+              <span className="font-semibold text-orange-800">{authDisplayLabel}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleAuthSignOut()}
+              className="shrink-0 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-bold text-stone-600"
+            >
+              {tr.authSignOut}
+            </button>
+          </div>
+        ) : null}
 
         {page === 'today' && renderTodayPage()}
         {page === 'weight' && renderWeightPage()}
