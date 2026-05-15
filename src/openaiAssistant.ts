@@ -1,8 +1,10 @@
 import type { AssistantContext, AssistantCareBundleJson, DailyData } from './aiCareAssistant';
 import {
+  buildLocalAiQuota,
   careBundleCacheKey,
   djb2Hash,
   readCareBundleCacheJson,
+  syncLocalAiUsageFromServer,
   writeCareBundleCacheJson,
 } from './aiClient';
 
@@ -161,16 +163,53 @@ export function isAssistantCareBundleNetworkBlocked(
   return isAssistantDailyQuotaExhausted(quota);
 }
 
+/** Merge server snapshot with localStorage; limit always follows client `plan` (Pro test = 30). */
 export function mergeAssistantQuotaFromSnapshot(
   prev: AssistantHealthPayload | null,
-  quota: AssistantQuotaSnapshot
+  quota: AssistantQuotaSnapshot,
+  plan: 'free' | 'pro',
+  clientId: string,
+  usageDate: string
 ): AssistantHealthPayload {
+  const merged = buildLocalAiQuota(plan, clientId, usageDate, quota.dailyUsed);
   return {
     openaiReady: prev?.openaiReady ?? true,
-    planEffective: prev?.planEffective ?? 'free',
-    dailyLimit: quota.dailyLimit,
-    dailyUsed: quota.dailyUsed,
-    dailyRemaining: quota.dailyRemaining,
+    planEffective: plan,
+    dailyLimit: merged.dailyLimit,
+    dailyUsed: merged.dailyUsed,
+    dailyRemaining: merged.dailyRemaining,
+  };
+}
+
+export function buildAssistantHealthFromLocal(
+  plan: 'free' | 'pro',
+  clientId: string,
+  usageDate: string,
+  partial?: Partial<Pick<AssistantHealthPayload, 'openaiReady'>>
+): AssistantHealthPayload {
+  const q = buildLocalAiQuota(plan, clientId, usageDate);
+  return {
+    openaiReady: partial?.openaiReady ?? false,
+    planEffective: plan,
+    dailyLimit: q.dailyLimit,
+    dailyUsed: q.dailyUsed,
+    dailyRemaining: q.dailyRemaining,
+  };
+}
+
+function reconcileAssistantHealth(
+  plan: 'free' | 'pro',
+  clientId: string,
+  usageDate: string,
+  server: AssistantHealthPayload
+): AssistantHealthPayload {
+  const merged = buildLocalAiQuota(plan, clientId, usageDate, server.dailyUsed);
+  return {
+    openaiReady: server.openaiReady,
+    planEffective: plan,
+    dailyLimit: merged.dailyLimit,
+    dailyUsed: merged.dailyUsed,
+    dailyRemaining: merged.dailyRemaining,
   };
 }
 
@@ -273,14 +312,17 @@ export async function fetchAssistantHealth(
     const res = await fetch(`${API_PREFIX}/health?${qs}`, { signal });
     if (!res.ok) return null;
     const d = (await res.json()) as Record<string, unknown>;
-    return {
+    const serverUsed = typeof d?.dailyUsed === 'number' ? d.dailyUsed : Number(d?.dailyUsed) || 0;
+    syncLocalAiUsageFromServer(clientId, usageDate, serverUsed);
+    const raw: AssistantHealthPayload = {
       openaiReady: Boolean(d?.openaiReady),
       dailyLimit: typeof d?.dailyLimit === 'number' ? d.dailyLimit : Number(d?.dailyLimit) || 0,
-      dailyUsed: typeof d?.dailyUsed === 'number' ? d.dailyUsed : Number(d?.dailyUsed) || 0,
+      dailyUsed: serverUsed,
       dailyRemaining:
         typeof d?.dailyRemaining === 'number' ? d.dailyRemaining : Number(d?.dailyRemaining) || 0,
       planEffective: d?.planEffective === 'pro' ? 'pro' : 'free',
     };
+    return reconcileAssistantHealth(plan, clientId, usageDate, raw);
   } catch {
     return null;
   }
@@ -337,7 +379,10 @@ export async function generateAssistantCareBundleOpenAi(
     throw new AssistantApiError(message, code, res.status);
   }
   const data = (await res.json()) as Record<string, unknown>;
-  const quota = parseQuotaSnapshot(data);
+  const quotaRaw = parseQuotaSnapshot(data);
+  const quota = quotaRaw
+    ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
+    : null;
   const bundle = normalizeCareBundlePayload(data, ctx.lang);
   writeCareBundleCacheJson(ck, JSON.stringify(bundle));
   return { bundle, quota };
@@ -372,6 +417,9 @@ export async function generateAssistantQaOpenAi(
   if (typeof data.answer !== 'string') {
     throw new Error('Invalid response: missing answer');
   }
-  const quota = parseQuotaSnapshot(data);
+  const quotaRaw = parseQuotaSnapshot(data);
+  const quota = quotaRaw
+    ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
+    : null;
   return { answer: data.answer.trim(), quota };
 }

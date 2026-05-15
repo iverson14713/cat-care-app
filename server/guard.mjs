@@ -1,3 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const USAGE_PERSIST_FILE = path.join(__dirname, 'logs', 'ai-daily-usage.json');
+
 const FREE_DEFAULT = 3;
 const PRO_DEFAULT = 30;
 const RATE_WINDOW_MS = 60_000;
@@ -24,6 +31,7 @@ function proClientSet() {
 }
 
 export function trustClientPlan() {
+  if (process.env.NODE_ENV !== 'production') return true;
   const v = (process.env.AI_TRUST_CLIENT_PLAN || '').trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes';
 }
@@ -53,6 +61,37 @@ function dailyKey(clientId, usageDate) {
   return `${clientId}|${usageDate}`;
 }
 
+function loadPersistedDailyUsage() {
+  if (process.env.VERCEL) return;
+  try {
+    if (!fs.existsSync(USAGE_PERSIST_FILE)) return;
+    const raw = fs.readFileSync(USAGE_PERSIST_FILE, 'utf8');
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return;
+    for (const [k, v] of Object.entries(obj)) {
+      const n = Number(v);
+      if (typeof k === 'string' && Number.isFinite(n) && n >= 0) {
+        dailyUsage.set(k, Math.floor(n));
+      }
+    }
+  } catch (e) {
+    console.error('[guard] load ai-daily-usage', e);
+  }
+}
+
+function persistDailyUsageToDisk() {
+  if (process.env.VERCEL) return;
+  try {
+    const dir = path.dirname(USAGE_PERSIST_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(USAGE_PERSIST_FILE, JSON.stringify(Object.fromEntries(dailyUsage)), 'utf8');
+  } catch (e) {
+    console.error('[guard] save ai-daily-usage', e);
+  }
+}
+
+loadPersistedDailyUsage();
+
 export function peekDailyUsed(clientId, usageDate) {
   return dailyUsage.get(dailyKey(clientId, usageDate)) || 0;
 }
@@ -60,6 +99,7 @@ export function peekDailyUsed(clientId, usageDate) {
 export function incrementDailyUsed(clientId, usageDate) {
   const k = dailyKey(clientId, usageDate);
   dailyUsage.set(k, (dailyUsage.get(k) || 0) + 1);
+  persistDailyUsageToDisk();
 }
 
 /** @returns {{ ok: true, used: number, limit: number, remaining: number } | { ok: false, code: 'QUOTA', used: number, limit: number, remaining: number }} */

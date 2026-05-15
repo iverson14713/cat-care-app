@@ -4,10 +4,11 @@ import {
   type AssistantCareBundleJson,
   buildSevenDayAnalysis,
 } from './aiCareAssistant';
-import { getOrCreateClientId, getAiPlan, setAiPlan } from './aiClient';
+import { buildLocalAiQuota, getOrCreateClientId, getAiPlan, setAiPlan } from './aiClient';
 import {
   AssistantApiError,
   type AssistantHealthPayload,
+  buildAssistantHealthFromLocal,
   fetchAssistantHealth,
   generateAssistantCareBundleOpenAi,
   generateAssistantQaOpenAi,
@@ -1109,10 +1110,19 @@ export default function App() {
   const [historyFabVisible, setHistoryFabVisible] = useState(false);
   const [aiClientId] = useState(() => getOrCreateClientId());
   const [appPlan, setAppPlan] = useState<AppPlan>(() => getAiPlan());
-  const persistAppPlan = (p: AppPlan) => {
-    setAiPlan(p);
-    setAppPlan(p);
-  };
+  const applyLocalAssistantQuota = useCallback(
+    (plan: AppPlan, clientId: string, usageDate: string, prev: AssistantHealthPayload | null) => {
+      const q = buildLocalAiQuota(plan, clientId, usageDate);
+      return {
+        openaiReady: prev?.openaiReady ?? false,
+        planEffective: plan,
+        dailyLimit: q.dailyLimit,
+        dailyUsed: q.dailyUsed,
+        dailyRemaining: q.dailyRemaining,
+      };
+    },
+    []
+  );
   const [weightDate, setWeightDate] = useState(today);
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
@@ -1280,22 +1290,32 @@ export default function App() {
   const [assistantApiReady, setAssistantApiReady] = useState<boolean | null>(null);
   /** false = health fetch failed; true = got JSON (openaiReady may still be false). */
   const [assistantHealthReachable, setAssistantHealthReachable] = useState<boolean | null>(null);
-  const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(null);
+  const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(() =>
+    buildAssistantHealthFromLocal(getAiPlan(), getOrCreateClientId(), todayKey())
+  );
+  const persistAppPlan = (p: AppPlan) => {
+    setAiPlan(p);
+    setAppPlan(p);
+    setAssistantQuota((prev) => applyLocalAssistantQuota(p, aiClientId, today, prev));
+  };
   const summariesAbortRef = useRef<AbortController | null>(null);
   const qaAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, today, prev));
+  }, [appPlan, aiClientId, today, applyLocalAssistantQuota]);
+
+  useEffect(() => {
     if (page !== 'assistant') return;
     let cancelled = false;
-    setAssistantApiReady(null);
+    setAssistantApiReady((ready) => (ready === true ? true : null));
     setAssistantHealthReachable(null);
-    setAssistantQuota(null);
     fetchAssistantHealth(aiClientId, today, undefined, appPlan).then((h) => {
       if (cancelled) return;
       if (!h) {
         setAssistantHealthReachable(false);
         setAssistantApiReady(false);
-        setAssistantQuota(null);
+        setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, today, prev));
         return;
       }
       setAssistantHealthReachable(true);
@@ -1305,7 +1325,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [page, lang, aiClientId, today, appPlan]);
+  }, [page, lang, aiClientId, today, appPlan, applyLocalAssistantQuota]);
 
   useEffect(() => {
     setAiQuestion('');
@@ -1374,10 +1394,13 @@ export default function App() {
       setAiCareBundle(bundle);
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
       if (quota) {
-        setAssistantQuota((prev) => mergeAssistantQuotaFromSnapshot(prev, quota));
+        setAssistantQuota((prev) =>
+          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today)
+        );
       } else {
         const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
         if (h) setAssistantQuota(h);
+        else setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, ctx.today, prev));
       }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
@@ -1394,7 +1417,16 @@ export default function App() {
     } finally {
       setAiBundleLoading(false);
     }
-  }, [assistantContext, lang, assistantApiReady, assistantHealthReachable, aiClientId, assistantQuota, appPlan]);
+  }, [
+    assistantContext,
+    lang,
+    assistantApiReady,
+    assistantHealthReachable,
+    aiClientId,
+    assistantQuota,
+    appPlan,
+    applyLocalAssistantQuota,
+  ]);
 
   const runOpenAiQa = useCallback(async () => {
     const ctx = assistantContext;
@@ -1436,10 +1468,13 @@ export default function App() {
       );
       setAiReply(`${answer.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
       if (quota) {
-        setAssistantQuota((prev) => mergeAssistantQuotaFromSnapshot(prev, quota));
+        setAssistantQuota((prev) =>
+          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today)
+        );
       } else {
         const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
         if (h) setAssistantQuota(h);
+        else setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, ctx.today, prev));
       }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
@@ -1466,6 +1501,7 @@ export default function App() {
     aiClientId,
     appPlan,
     assistantQuota,
+    applyLocalAssistantQuota,
   ]);
 
   const latestWeight = weightRecords[0];
