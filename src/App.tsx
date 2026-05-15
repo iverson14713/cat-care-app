@@ -52,6 +52,14 @@ import {
   upsertDailyRecordCloud,
   type DailyJson,
 } from './supabaseDaily';
+import {
+  computeHistoryDateRange,
+  isHistorySearchModeActive,
+  searchHistory,
+  type HistoryDatePreset,
+  type HistoryFilterChip,
+  type HistorySearchHit,
+} from './historySearch';
 
 type Lang = 'zh' | 'en';
 
@@ -168,7 +176,26 @@ const text = {
     historyPickDateFirst: '請先選擇日期',
     historyJumpNoMatch: '找不到此日期的紀錄',
     historyBackLatest: '回到最新',
-    historyRoadmap: '快速跳轉仍可使用。進階篩選與搜尋見下方（Pro 功能規劃中）。',
+    historyRoadmap: '快速跳轉仍可使用；下方可篩選、搜尋（Pro）。',
+    historySearchTitle: '篩選與搜尋',
+    historyFilterAll: '全部',
+    historyFilterAbnormal: '只看異常',
+    historyFilterPhoto: '只看有照片',
+    historyFilterNote: '只看有備註',
+    historyFilterWeight: '只看有體重',
+    historySearchPlaceholder: '搜尋異常、備註、體重或貓咪名字…',
+    historyDateStart: '起始日期',
+    historyDateEnd: '結束日期',
+    historyPreset7d: '最近 7 天',
+    historyPreset30d: '最近 30 天',
+    historyPresetMonth: '本月',
+    historyTagAbnormal: '異常',
+    historyTagPhoto: '照片',
+    historyTagNote: '備註',
+    historyTagWeight: '體重',
+    historyNoResults: '找不到符合條件的紀錄',
+    historyProUpgrade: '歷史篩選與搜尋為 Pro 功能。請到「方案與設定」切換 Pro 測試版。',
+    historyClearFilters: '清除篩選',
     noHistory: '目前還沒有這隻貓的歷史紀錄',
     completed: '完成',
     vetReport: '獸醫報告',
@@ -434,7 +461,26 @@ const text = {
     historyPickDateFirst: 'Pick a date first',
     historyJumpNoMatch: 'No saved record for that date',
     historyBackLatest: 'Back to latest',
-    historyRoadmap: 'Jump-to-date still works. Advanced filter & search is planned for Pro — see below.',
+    historyRoadmap: 'Jump-to-date still works; filter and search below (Pro).',
+    historySearchTitle: 'Filter & search',
+    historyFilterAll: 'All',
+    historyFilterAbnormal: 'Abnormal only',
+    historyFilterPhoto: 'With photos',
+    historyFilterNote: 'With notes',
+    historyFilterWeight: 'With weight',
+    historySearchPlaceholder: 'Search notes, weight, or cat name…',
+    historyDateStart: 'From',
+    historyDateEnd: 'To',
+    historyPreset7d: 'Last 7 days',
+    historyPreset30d: 'Last 30 days',
+    historyPresetMonth: 'This month',
+    historyTagAbnormal: 'Abnormal',
+    historyTagPhoto: 'Photo',
+    historyTagNote: 'Note',
+    historyTagWeight: 'Weight',
+    historyNoResults: 'No records match your filters',
+    historyProUpgrade: 'History filter & search is a Pro feature. Switch to Pro (test) in Plan & settings.',
+    historyClearFilters: 'Clear filters',
     noHistory: 'No history for this cat yet',
     completed: 'Completed',
     vetReport: 'Vet report',
@@ -1108,6 +1154,12 @@ export default function App() {
   const [historyJumpDate, setHistoryJumpDate] = useState('');
   const [historyJumpHint, setHistoryJumpHint] = useState<string | null>(null);
   const [historyFabVisible, setHistoryFabVisible] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilterChip>('all');
+  const [historyKeyword, setHistoryKeyword] = useState('');
+  const [historyDateStart, setHistoryDateStart] = useState('');
+  const [historyDateEnd, setHistoryDateEnd] = useState('');
+  const [historyDatePreset, setHistoryDatePreset] = useState<HistoryDatePreset>('none');
+  const [historyProHint, setHistoryProHint] = useState<string | null>(null);
   const [aiClientId] = useState(() => getOrCreateClientId());
   const [appPlan, setAppPlan] = useState<AppPlan>(() => getAiPlan());
   const applyLocalAssistantQuota = useCallback(
@@ -1230,6 +1282,54 @@ export default function App() {
     if (!history.length) return { min: '', max: '' };
     return { min: history[history.length - 1].date, max: history[0].date };
   }, [history]);
+
+  const historySearchMode = useMemo(
+    () =>
+      isHistorySearchModeActive({
+        filter: historyFilter,
+        keyword: historyKeyword,
+        dateStart: historyDateStart,
+        dateEnd: historyDateEnd,
+      }),
+    [historyFilter, historyKeyword, historyDateStart, historyDateEnd]
+  );
+
+  const historySearchHits = useMemo((): HistorySearchHit[] => {
+    if (!selectedCat || !historySearchMode) return [];
+    return searchHistory({
+      catName: selectedCat.name,
+      dailyRows: history,
+      weightRows: weightRecords.map((w) => ({ date: w.date, weight: w.weight, note: w.note })),
+      filter: historyFilter,
+      keyword: historyKeyword,
+      dateStart: historyDateStart,
+      dateEnd: historyDateEnd,
+    });
+  }, [
+    selectedCat,
+    history,
+    weightRecords,
+    historyFilter,
+    historyKeyword,
+    historyDateStart,
+    historyDateEnd,
+    historySearchMode,
+  ]);
+
+  const historyHitDateSet = useMemo(
+    () => new Set(historySearchHits.map((h) => h.date)),
+    [historySearchHits]
+  );
+
+  const historyMonthGroupsFiltered = useMemo(() => {
+    if (!historySearchMode || historySearchHits.length === 0) return [];
+    return historyMonthGroups
+      .map((g) => ({
+        ...g,
+        records: g.records.filter((r) => historyHitDateSet.has(r.date)),
+      }))
+      .filter((g) => g.records.length > 0);
+  }, [historyMonthGroups, historySearchMode, historySearchHits.length, historyHitDateSet]);
 
   const assistantLast14 = useMemo(() => {
     if (!selectedCat) return [];
@@ -2157,6 +2257,12 @@ export default function App() {
   useEffect(() => {
     setHistoryJumpHint(null);
     setHistoryJumpDate('');
+    setHistoryFilter('all');
+    setHistoryKeyword('');
+    setHistoryDateStart('');
+    setHistoryDateEnd('');
+    setHistoryDatePreset('none');
+    setHistoryProHint(null);
   }, [selectedCatId, historyRefreshKey]);
 
   useEffect(() => {
@@ -2498,6 +2604,39 @@ export default function App() {
   );
 
   const renderHistoryPage = () => {
+    const historyProLocked = appPlan !== 'pro';
+    const applyHistoryDatePreset = (preset: HistoryDatePreset) => {
+      if (historyProLocked) {
+        setHistoryProHint(tr.historyProUpgrade);
+        return;
+      }
+      setHistoryDatePreset(preset);
+      const { start, end } = computeHistoryDateRange(preset, today);
+      setHistoryDateStart(start);
+      setHistoryDateEnd(end);
+    };
+    const clearHistorySearch = () => {
+      setHistoryFilter('all');
+      setHistoryKeyword('');
+      setHistoryDateStart('');
+      setHistoryDateEnd('');
+      setHistoryDatePreset('none');
+      setHistoryProHint(null);
+    };
+    const historyTagLabel = (tag: HistorySearchHit['tags'][number]) => {
+      if (tag === 'abnormal') return tr.historyTagAbnormal;
+      if (tag === 'photo') return tr.historyTagPhoto;
+      if (tag === 'note') return tr.historyTagNote;
+      return tr.historyTagWeight;
+    };
+    const historyFilterChips: { id: HistoryFilterChip; label: string }[] = [
+      { id: 'all', label: tr.historyFilterAll },
+      { id: 'abnormal', label: tr.historyFilterAbnormal },
+      { id: 'photo', label: tr.historyFilterPhoto },
+      { id: 'note', label: tr.historyFilterNote },
+      { id: 'weight', label: tr.historyFilterWeight },
+    ];
+
     const renderHistoryDayCard = (record: { date: string; data: DailyRecord }) => {
       const done = dailyItems.filter((item) => record.data[item.id] === true).length;
       const percent = Math.round((done / dailyItems.length) * 100);
@@ -2622,33 +2761,168 @@ export default function App() {
                 </button>
               </div>
               {historyJumpHint ? <p className="text-xs font-medium text-amber-800">{historyJumpHint}</p> : null}
-              <div className="rounded-xl border border-dashed border-stone-300 bg-white/60 px-3 py-2 text-xs leading-5 text-stone-500">
-                {tr.historyRoadmap}
-              </div>
-              <button
-                type="button"
-                disabled
-                className="w-full cursor-not-allowed rounded-xl border border-dashed border-stone-300 bg-stone-100/60 px-3 py-2.5 text-left text-xs text-stone-500"
+              <p className="text-xs leading-5 text-stone-500">{tr.historyRoadmap}</p>
+
+              {/* Filter & search panel */}
+              <div
+                className={`rounded-xl border px-3 py-3 ${historyProLocked ? 'border-dashed border-stone-300 bg-stone-100/50' : 'border-orange-200/80 bg-white'}`}
+                onClick={historyProLocked ? (e) => { e.stopPropagation(); setHistoryProHint(tr.historyProUpgrade); } : undefined}
               >
-                <span className="block font-bold text-stone-600">{tr.proTeaserHistorySearch}</span>
-                <span className="mt-0.5 block text-stone-400">{tr.proTeaserRoadmap}</span>
-              </button>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-stone-700">{tr.historySearchTitle}</span>
+                  {historyProLocked ? (
+                    <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">Pro</span>
+                  ) : historySearchMode ? (
+                    <button type="button" onClick={clearHistorySearch} className="text-[11px] font-medium text-orange-600 hover:underline">
+                      {tr.historyClearFilters}
+                    </button>
+                  ) : null}
+                </div>
+
+                {/* Chip filters */}
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {historyFilterChips.map((chip) => (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      onClick={() => {
+                        if (historyProLocked) { setHistoryProHint(tr.historyProUpgrade); return; }
+                        setHistoryFilter(chip.id);
+                        setHistoryProHint(null);
+                      }}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                        historyFilter === chip.id ? 'bg-orange-500 text-white shadow-sm' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                      } ${historyProLocked ? 'cursor-not-allowed opacity-60' : ''}`}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Keyword search */}
+                <input
+                  type="search"
+                  value={historyKeyword}
+                  placeholder={tr.historySearchPlaceholder}
+                  readOnly={historyProLocked}
+                  onChange={(e) => {
+                    if (historyProLocked) return;
+                    setHistoryKeyword(e.target.value);
+                    setHistoryProHint(null);
+                  }}
+                  className={`mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300 focus:bg-white ${historyProLocked ? 'cursor-not-allowed' : ''}`}
+                />
+
+                {/* Date range */}
+                <div className="mb-2 grid grid-cols-2 gap-2">
+                  {(
+                    [['start', tr.historyDateStart, historyDateStart, setHistoryDateStart],
+                     ['end', tr.historyDateEnd, historyDateEnd, setHistoryDateEnd]] as const
+                  ).map(([key, label, value, setter]) => (
+                    <div key={key}>
+                      <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{label}</label>
+                      <input
+                        type="date"
+                        value={value}
+                        readOnly={historyProLocked}
+                        min={historyDateBounds.min}
+                        max={historyDateBounds.max || today}
+                        onChange={(e) => {
+                          if (historyProLocked) return;
+                          setter(e.target.value);
+                          setHistoryDatePreset('none');
+                          setHistoryProHint(null);
+                        }}
+                        className={`w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-[12px] outline-none focus:border-orange-300 ${historyProLocked ? 'cursor-not-allowed' : ''}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Presets */}
+                <div className="flex flex-wrap gap-1.5">
+                  {([ ['7d', tr.historyPreset7d], ['30d', tr.historyPreset30d], ['month', tr.historyPresetMonth] ] as const).map(
+                    ([preset, label]) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => applyHistoryDatePreset(preset)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          historyDatePreset === preset ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                        } ${historyProLocked ? 'cursor-not-allowed opacity-60' : ''}`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              {historyProHint ? (
+                <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-snug text-amber-950">
+                  <p className="m-0">{historyProHint}</p>
+                  <button
+                    type="button"
+                    onClick={() => setPage('settings')}
+                    className="mt-1.5 font-semibold text-orange-600 hover:underline"
+                  >
+                    {tr.openSettings}
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div id="history-latest-anchor" className="h-0 w-full scroll-mt-28" aria-hidden />
 
-            {historyMonthGroups.map((group) => (
-              <div key={group.monthKey} className="mb-8">
-                <h3 className="mb-3 flex items-center gap-2 text-stone-800">
-                  <span className="h-px min-w-[1rem] flex-1 bg-stone-300" />
-                  <span className="shrink-0 rounded-full bg-stone-800 px-4 py-1.5 text-xs font-bold tracking-wide text-white">
-                    {formatHistoryMonthHeading(lang, group.monthKey)}
-                  </span>
-                  <span className="h-px min-w-[1rem] flex-1 bg-stone-300" />
-                </h3>
-                <div className="space-y-4">{group.records.map((record) => renderHistoryDayCard(record))}</div>
-              </div>
-            ))}
+            {/* Results */}
+            {historySearchMode && appPlan === 'pro' ? (
+              historySearchHits.length === 0 ? (
+                <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.historyNoResults}</div>
+              ) : (
+                <div className="mb-6 space-y-3">
+                  {historySearchHits.map((hit) => (
+                    <article
+                      key={hit.date}
+                      id={`history-day-${hit.date}`}
+                      className="scroll-mt-32 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm"
+                    >
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <h2 className="text-base font-bold text-stone-900">{hit.date}</h2>
+                      </div>
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        {hit.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              tag === 'abnormal' ? 'bg-red-100 text-red-800'
+                              : tag === 'photo' ? 'bg-violet-100 text-violet-800'
+                              : tag === 'weight' ? 'bg-sky-100 text-sky-800'
+                              : 'bg-stone-100 text-stone-700'
+                            }`}
+                          >
+                            {historyTagLabel(tag)}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-stone-700">{hit.snippet}</p>
+                    </article>
+                  ))}
+                </div>
+              )
+            ) : (
+              (historySearchMode ? historyMonthGroupsFiltered : historyMonthGroups).map((group) => (
+                <div key={group.monthKey} className="mb-8">
+                  <h3 className="mb-3 flex items-center gap-2 text-stone-800">
+                    <span className="h-px min-w-[1rem] flex-1 bg-stone-300" />
+                    <span className="shrink-0 rounded-full bg-stone-800 px-4 py-1.5 text-xs font-bold tracking-wide text-white">
+                      {formatHistoryMonthHeading(lang, group.monthKey)}
+                    </span>
+                    <span className="h-px min-w-[1rem] flex-1 bg-stone-300" />
+                  </h3>
+                  <div className="space-y-4">{group.records.map((record) => renderHistoryDayCard(record))}</div>
+                </div>
+              ))
+            )}
           </>
         )}
 
