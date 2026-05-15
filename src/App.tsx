@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AssistantContext,
   type AssistantCareBundleJson,
+  type AssistantWeeklyReportJson,
   buildSevenDayAnalysis,
 } from './aiCareAssistant';
 import { buildLocalAiQuota, getOrCreateClientId, getAiPlan, setAiPlan } from './aiClient';
@@ -12,6 +13,7 @@ import {
   fetchAssistantHealth,
   generateAssistantCareBundleOpenAi,
   generateAssistantQaOpenAi,
+  generateAssistantWeeklyReportOpenAi,
   getCareBundleContextHash,
   isAssistantCareBundleNetworkBlocked,
   isAssistantDailyQuotaExhausted,
@@ -460,6 +462,16 @@ const text = {
     proTeaserHistorySearch: '歷史篩選與搜尋',
     proTeaserComing: '即將推出',
     proTeaserAdvancedWeekly: '進階 AI 週報',
+    weeklyCardTitle: 'AI 週報',
+    weeklyCardLead:
+      '依最近 7 天紀錄整理飲食、飲水、排泄、異常、體重、照片與備註趨勢，並提供下週照護提醒（非診斷、不開藥）。',
+    weeklyGenerateBtn: '生成本週 AI 週報',
+    weeklySummaryTitle: '本週總結',
+    weeklyWatchTitle: '需要留意',
+    weeklyNextWeekTitle: '下週建議紀錄重點',
+    weeklyFreePreview:
+      '免費版可預覽功能說明。升級 Pro 測試版後，可一鍵產生完整 AI 週報（會使用 1 次今日 AI 次數）。',
+    weeklyUpgrade: '升級 Pro 測試版',
     proTeaserRoadmap: 'Pro 功能規劃中',
     proTeaserAdvancedVet: '進階獸醫報告',
     aiErrRate: '問得太快啦，休息一下再試。',
@@ -777,6 +789,16 @@ const text = {
     proTeaserHistorySearch: 'History filter & search',
     proTeaserComing: 'Coming soon',
     proTeaserAdvancedWeekly: 'Advanced AI weekly report',
+    weeklyCardTitle: 'AI weekly report',
+    weeklyCardLead:
+      'Summarizes the last 7 days: food, water, litter, abnormal notes, weight, photos & notes — plus gentle reminders for next week (not diagnosis or meds).',
+    weeklyGenerateBtn: 'Generate this week’s AI report',
+    weeklySummaryTitle: 'This week',
+    weeklyWatchTitle: 'Watch for',
+    weeklyNextWeekTitle: 'What to log next week',
+    weeklyFreePreview:
+      'Free plan: preview only. Upgrade to Pro (test) to generate the full AI weekly report (uses 1 of today’s AI uses).',
+    weeklyUpgrade: 'Upgrade to Pro (test)',
     proTeaserRoadmap: 'Planned for Pro',
     proTeaserAdvancedVet: 'Advanced vet report',
     aiErrRate: 'A little too fast — take a short break and try again.',
@@ -1459,6 +1481,9 @@ export default function App() {
   const [aiBundleSavedHash, setAiBundleSavedHash] = useState<string | null>(null);
   const [aiBundleLoading, setAiBundleLoading] = useState(false);
   const [aiQaLoading, setAiQaLoading] = useState(false);
+  const [aiWeeklyReport, setAiWeeklyReport] = useState<AssistantWeeklyReportJson | null>(null);
+  const [aiWeeklyLoading, setAiWeeklyLoading] = useState(false);
+  const [weeklyErr, setWeeklyErr] = useState<string | null>(null);
   const [openAiErr, setOpenAiErr] = useState<string | null>(null);
   const [assistantApiReady, setAssistantApiReady] = useState<boolean | null>(null);
   /** false = health fetch failed; true = got JSON (openaiReady may still be false). */
@@ -1473,6 +1498,7 @@ export default function App() {
   };
   const summariesAbortRef = useRef<AbortController | null>(null);
   const qaAbortRef = useRef<AbortController | null>(null);
+  const weeklyAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, today, prev));
@@ -1509,6 +1535,8 @@ export default function App() {
   useEffect(() => {
     setAiCareBundle(null);
     setAiBundleSavedHash(null);
+    setAiWeeklyReport(null);
+    setWeeklyErr(null);
   }, [lang, today, selectedCatId]);
 
   useEffect(() => {
@@ -1532,6 +1560,7 @@ export default function App() {
     () => () => {
       summariesAbortRef.current?.abort();
       qaAbortRef.current?.abort();
+      weeklyAbortRef.current?.abort();
     },
     []
   );
@@ -1673,6 +1702,71 @@ export default function App() {
     assistantHealthReachable,
     aiClientId,
     appPlan,
+    assistantQuota,
+    applyLocalAssistantQuota,
+  ]);
+
+  const runOpenAiWeeklyReport = useCallback(async () => {
+    const ctx = assistantContext;
+    if (!ctx || appPlan !== 'pro') return;
+    if (assistantApiReady !== true) {
+      setWeeklyErr(
+        assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
+      );
+      return;
+    }
+    if (isAssistantDailyQuotaExhausted(assistantQuota)) {
+      setWeeklyErr(aiQuotaExhaustedMessage(lang, appPlan));
+      return;
+    }
+    weeklyAbortRef.current?.abort();
+    const ac = new AbortController();
+    weeklyAbortRef.current = ac;
+    setAiWeeklyLoading(true);
+    setWeeklyErr(null);
+    try {
+      const { report, quota } = await generateAssistantWeeklyReportOpenAi(
+        ctx,
+        {
+          clientId: aiClientId,
+          catId: ctx.catId,
+          usageDate: ctx.today,
+          plan: appPlan,
+        },
+        ac.signal
+      );
+      setAiWeeklyReport(report);
+      if (quota) {
+        setAssistantQuota((prev) =>
+          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today)
+        );
+      } else {
+        const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
+        if (h) setAssistantQuota(h);
+        else setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, ctx.today, prev));
+      }
+    } catch (e) {
+      if ((e as { name?: string }).name === 'AbortError') return;
+      if (e instanceof AssistantApiError) {
+        if (e.code === 'QUOTA') setWeeklyErr(aiQuotaExhaustedMessage(lang, appPlan));
+        else if (e.code === 'RATE') setWeeklyErr(text[lang].aiErrRate);
+        else if (e.code === 'OPENAI')
+          setWeeklyErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
+        else if (e.code === 'NO_API_KEY') setWeeklyErr(aiStatusHint(lang, 'key'));
+        else setWeeklyErr(`${text[lang].aiOpenAiFail}${e.message}`);
+      } else {
+        setWeeklyErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
+      }
+    } finally {
+      setAiWeeklyLoading(false);
+    }
+  }, [
+    assistantContext,
+    appPlan,
+    lang,
+    assistantApiReady,
+    assistantHealthReachable,
+    aiClientId,
     assistantQuota,
     applyLocalAssistantQuota,
   ]);
@@ -3072,7 +3166,8 @@ export default function App() {
 
     const apiReady = assistantApiReady === true;
     const apiChecking = assistantApiReady === null;
-    const qaBusy = aiQaLoading || aiBundleLoading;
+    const qaBusy = aiQaLoading || aiBundleLoading || aiWeeklyLoading;
+    const isProPlan = appPlan === 'pro';
     const currentCtxHash = getCareBundleContextHash(assistantContext);
     const dataStale =
       Boolean(aiCareBundle) && aiBundleSavedHash != null && currentCtxHash !== aiBundleSavedHash;
@@ -3240,15 +3335,76 @@ export default function App() {
           ) : null}
         </section>
 
-        <section className="mb-4 rounded-2xl border border-dashed border-stone-200 bg-white px-3.5 py-3 shadow-sm">
-          <button
-            type="button"
-            disabled
-            className="w-full cursor-not-allowed rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-left opacity-85"
-          >
-            <span className="block text-sm font-bold text-stone-600">{tr.proTeaserAdvancedWeekly}</span>
-            <span className="mt-0.5 block text-xs text-stone-500">{tr.proTeaserComing}</span>
-          </button>
+        <section className="mb-4 rounded-2xl border border-violet-100/80 bg-gradient-to-b from-white via-white to-violet-50/40 px-3.5 py-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-base"
+              aria-hidden
+            >
+              📊
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[15px] font-semibold text-stone-900">{tr.weeklyCardTitle}</h2>
+              {!isProPlan ? (
+                <span className="mt-0.5 inline-block rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold text-stone-500">
+                  Pro
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <p className="mb-3 text-[13px] leading-snug text-stone-600">{tr.weeklyCardLead}</p>
+          {!isProPlan ? (
+            <>
+              <p className="mb-3 rounded-xl border border-stone-100 bg-stone-50/90 px-3 py-2.5 text-[12px] leading-snug text-stone-600">
+                {tr.weeklyFreePreview}
+              </p>
+              <button
+                type="button"
+                onClick={() => setPage('settings')}
+                className="w-full rounded-full border border-violet-200 bg-white py-2.5 text-[13px] font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50"
+              >
+                {tr.weeklyUpgrade}
+              </button>
+            </>
+          ) : (
+            <>
+              {apiChecking || !apiReady ? (
+                <p className="mb-3 text-sm leading-snug text-stone-500">
+                  {apiChecking ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400" aria-hidden />
+                      {tr.aiChecking}
+                    </span>
+                  ) : (
+                    <span>
+                      {assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')}
+                    </span>
+                  )}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                disabled={!apiReady || aiWeeklyLoading || qaBlocked}
+                onClick={runOpenAiWeeklyReport}
+                className="w-full rounded-full bg-gradient-to-r from-violet-500 to-violet-600 py-3 text-[14px] font-semibold text-white shadow-md shadow-violet-200/50 transition hover:from-violet-600 hover:to-violet-700 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[200px] sm:px-8"
+              >
+                {aiWeeklyLoading ? tr.aiOpenAiBusy : tr.weeklyGenerateBtn}
+              </button>
+              {weeklyErr ? (
+                <p className="mt-3 whitespace-pre-line rounded-xl border border-red-100 bg-red-50/90 px-3 py-2.5 text-[13px] leading-snug text-red-900">
+                  {weeklyErr}
+                </p>
+              ) : null}
+              {aiWeeklyReport ? (
+                <div className="mt-4 space-y-3">
+                  {renderAiBlock(tr.weeklySummaryTitle, aiWeeklyReport.weekSummary.trim())}
+                  {renderAiBlock(tr.weeklyWatchTitle, aiWeeklyReport.watchItems.trim())}
+                  {renderAiBlock(tr.weeklyNextWeekTitle, aiWeeklyReport.nextWeekFocus.trim())}
+                  <p className="text-center text-[11px] leading-snug text-stone-400">{tr.aiDisclaimerFoot}</p>
+                </div>
+              ) : null}
+            </>
+          )}
         </section>
 
         {apiReady && aiBundleLoading ? (

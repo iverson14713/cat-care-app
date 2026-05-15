@@ -54,6 +54,31 @@ export function qaUserPrompt(lang, context, question) {
   return `${context}\n\nUser question:\n${question.trim()}\n\nAnswer briefly in English using only the records above; no diagnosis, no medical advice, no prescriptions, no invented symptoms.`;
 }
 
+/** Last-7-day AI weekly care report — shares main daily AI quota with care-bundle / qa. */
+export function weeklyReportUserPrompt(lang, context) {
+  if (lang === 'zh') {
+    return (
+      `${context}\n\n` +
+      `請依上述**最近 7 天**照護紀錄，輸出**僅一個 JSON 物件**（不要 markdown），必含三個鍵（皆為非空字串）：\n` +
+      `"weekSummary", "watchItems", "nextWeekFocus"\n\n` +
+      `欄位說明：\n` +
+      `- weekSummary：本週總結（涵蓋飲食、飲水、尿尿／大便、異常、體重、照片與備註等趨勢；繁體中文，6～14 行）\n` +
+      `- watchItems：需要留意（條列式照護觀察，非診斷；4～8 點）\n` +
+      `- nextWeekFocus：下週建議紀錄重點（鼓勵持續記錄哪些項目；3～6 點）\n` +
+      `嚴禁診斷、病因、開藥、醫療結論、檢查處方、急診建議。只做照護觀察與提醒。`
+    );
+  }
+  return (
+    `${context}\n\n` +
+    `From the **last 7 days** of records above, return **only one JSON object** (no markdown) with three non-empty string keys:\n` +
+    `"weekSummary", "watchItems", "nextWeekFocus"\n\n` +
+    `- weekSummary: weekly recap (food, water, litter/elimination, abnormal notes, weight, photos/notes trends; 6–14 lines, English)\n` +
+    `- watchItems: what to watch (care observations only — not diagnosis; 4–8 bullet-style points)\n` +
+    `- nextWeekFocus: what to keep logging next week (3–6 points)\n` +
+    `No diagnosis, prescriptions, medical conclusions, or invented symptoms.`
+  );
+}
+
 /** Advanced vet handoff report — separate from care-bundle quota on server. */
 export function vetReportUserPrompt(lang, context) {
   if (lang === 'zh') {

@@ -1,4 +1,9 @@
-import type { AssistantContext, AssistantCareBundleJson, DailyData } from './aiCareAssistant';
+import type {
+  AssistantContext,
+  AssistantCareBundleJson,
+  AssistantWeeklyReportJson,
+  DailyData,
+} from './aiCareAssistant';
 import {
   buildLocalAiQuota,
   careBundleCacheKey,
@@ -300,6 +305,44 @@ export function buildRecordContextForLlm(ctx: AssistantContext): string {
   return lines.join('\n');
 }
 
+const WEEKLY_REPORT_DEFAULTS: Record<'zh' | 'en', AssistantWeeklyReportJson> = {
+  zh: {
+    weekSummary: '目前無法產生本週總結。',
+    watchItems: '目前無法整理需要留意的事項。',
+    nextWeekFocus: '目前無法整理下週紀錄建議。',
+  },
+  en: {
+    weekSummary: 'Could not produce the weekly summary.',
+    watchItems: 'Could not summarize watch items.',
+    nextWeekFocus: 'Could not summarize next-week logging focus.',
+  },
+};
+
+function normalizeWeeklyReportPayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantWeeklyReportJson {
+  const d = WEEKLY_REPORT_DEFAULTS[lang];
+  const obj =
+    data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  return {
+    weekSummary: careBundleFirstField(obj, ['weekSummary', 'weeklySummary', 'summary']) || d.weekSummary,
+    watchItems: careBundleFirstField(obj, ['watchItems', 'alerts', 'concerns']) || d.watchItems,
+    nextWeekFocus:
+      careBundleFirstField(obj, ['nextWeekFocus', 'nextWeek', 'loggingFocus']) || d.nextWeekFocus,
+  };
+}
+
+/** Last 7 days only — for AI weekly report. */
+export function buildWeeklyReportContextForLlm(ctx: AssistantContext): string {
+  const header =
+    ctx.lang === 'zh'
+      ? '--- 任務：最近 7 天照護週報（僅用下列紀錄；勿診斷、勿開藥） ---\n'
+      : '--- Task: last-7-day care weekly report (records below only; no diagnosis or meds) ---\n';
+  const narrow: AssistantContext = {
+    ...ctx,
+    recentDaysForAi: ctx.last7Days.length ? ctx.last7Days : ctx.recentDaysForAi.slice(0, 7),
+  };
+  return header + buildRecordContextForLlm(narrow);
+}
+
 /** Server reachable + quota snapshot. Returns null on network / parse failure. */
 export async function fetchAssistantHealth(
   clientId: string,
@@ -422,4 +465,36 @@ export async function generateAssistantQaOpenAi(
     ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
     : null;
   return { answer: data.answer.trim(), quota };
+}
+
+export async function generateAssistantWeeklyReportOpenAi(
+  ctx: AssistantContext,
+  meta: AssistantRequestMeta,
+  signal?: AbortSignal
+): Promise<{ report: AssistantWeeklyReportJson; quota: AssistantQuotaSnapshot | null }> {
+  const recordContext = buildWeeklyReportContextForLlm(ctx);
+  const res = await fetch(`${API_PREFIX}/weekly-report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lang: ctx.lang,
+      recordContext,
+      clientId: meta.clientId,
+      catId: meta.catId,
+      usageDate: meta.usageDate,
+      plan: meta.plan,
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    const { message, code } = await readAssistantApiError(res);
+    throw new AssistantApiError(message, code, res.status);
+  }
+  const data = (await res.json()) as Record<string, unknown>;
+  const quotaRaw = parseQuotaSnapshot(data);
+  const quota = quotaRaw
+    ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
+    : null;
+  const report = normalizeWeeklyReportPayload(data, ctx.lang);
+  return { report, quota };
 }

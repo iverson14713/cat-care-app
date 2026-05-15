@@ -1,4 +1,10 @@
-import { systemBase, careBundleUserPrompt, qaUserPrompt, vetReportUserPrompt } from './prompts.mjs';
+import {
+  systemBase,
+  careBundleUserPrompt,
+  qaUserPrompt,
+  vetReportUserPrompt,
+  weeklyReportUserPrompt,
+} from './prompts.mjs';
 import { openAiChatCompletion } from './openai.mjs';
 import {
   assertDailyQuota,
@@ -15,6 +21,7 @@ export const MAX_QUESTION_CHARS = 8_000;
 export const CARE_MAX_TOKENS = 1200;
 export const QA_MAX_TOKENS = 600;
 export const VET_REPORT_MAX_TOKENS = 900;
+export const WEEKLY_REPORT_MAX_TOKENS = 1000;
 
 const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
@@ -229,7 +236,7 @@ function assistantRateAndQuota(clientId, catId, usageDate, feature, planHint) {
  *   catId: string;
  *   usageDate: string;
  *   planHint: 'free' | 'pro';
- *   feature: 'care-bundle' | 'qa';
+ *   feature: 'care-bundle' | 'qa' | 'weekly-report';
  *   run: () => Promise<Record<string, unknown> & { usage: unknown }>;
  * }} opts
  * @returns {Promise<{ status: number, json: object }>}
@@ -314,6 +321,43 @@ async function handleQa(lang, recordContext, question) {
     jsonMode: false,
   });
   return { answer: content, usage };
+}
+
+function normalizeWeeklyReportFromParsed(parsed, lang) {
+  const defaults = {
+    weekSummary: lang === 'zh' ? '目前無法產生本週總結。' : 'Could not produce the weekly summary.',
+    watchItems: lang === 'zh' ? '目前無法整理需要留意的事項。' : 'Could not summarize watch items.',
+    nextWeekFocus:
+      lang === 'zh' ? '目前無法整理下週紀錄建議。' : 'Could not summarize next-week logging focus.',
+  };
+  const obj =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? /** @type {Record<string, unknown>} */ (parsed)
+      : {};
+  const weekSummary = careBundleCoerceString(obj.weekSummary) || defaults.weekSummary;
+  const watchItems = careBundleCoerceString(obj.watchItems) || defaults.watchItems;
+  const nextWeekFocus = careBundleCoerceString(obj.nextWeekFocus) || defaults.nextWeekFocus;
+  return { weekSummary, watchItems, nextWeekFocus };
+}
+
+async function handleWeeklyReport(lang, recordContext) {
+  const { content, usage } = await openAiChatCompletion({
+    messages: [
+      { role: 'system', content: systemBase(lang) },
+      { role: 'user', content: weeklyReportUserPrompt(lang, recordContext) },
+    ],
+    temperature: 0.25,
+    maxTokens: WEEKLY_REPORT_MAX_TOKENS,
+    jsonMode: true,
+  });
+  let report;
+  try {
+    report = normalizeWeeklyReportFromParsed(tryParseJsonObject(content), lang);
+  } catch {
+    report = normalizeWeeklyReportFromParsed({}, lang);
+    report.weekSummary = content.trim().slice(0, 1200) || report.weekSummary;
+  }
+  return { ...report, usage };
 }
 
 /**
@@ -475,6 +519,65 @@ export async function assistQaPOST(body) {
     run: async () => {
       const { answer, usage } = await handleQa(lang, recordContext, question);
       return { answer, usage };
+    },
+  });
+}
+
+/**
+ * @param {unknown} body
+ * @returns {Promise<{ status: number, json: object }>}
+ */
+export async function assistWeeklyReportPOST(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const clientId = typeof b.clientId === 'string' ? b.clientId.trim() : '';
+  const catId = typeof b.catId === 'string' ? b.catId.trim() : '';
+  const usageDate = typeof b.usageDate === 'string' ? b.usageDate.trim() : '';
+
+  if (!isClientId(clientId)) {
+    return { status: 400, json: { error: 'Invalid or missing clientId', code: 'BAD_REQUEST' } };
+  }
+  if (!isCatId(catId)) {
+    return { status: 400, json: { error: 'Invalid or missing catId', code: 'BAD_REQUEST' } };
+  }
+  if (!isYmd(usageDate)) {
+    return {
+      status: 400,
+      json: { error: 'Invalid or missing usageDate (YYYY-MM-DD)', code: 'BAD_REQUEST' },
+    };
+  }
+
+  const planHint = planHintFromBody(b.plan);
+  const rq = assistantRateAndQuota(clientId, catId, usageDate, 'weekly-report', planHint);
+  if (!rq.ok) return { status: rq.status, json: rq.json };
+
+  const lang = b.lang;
+  const recordContext = b.recordContext;
+  if (lang !== 'zh' && lang !== 'en') {
+    return { status: 400, json: { error: 'Invalid lang', code: 'BAD_REQUEST' } };
+  }
+  if (typeof recordContext !== 'string' || !recordContext.trim()) {
+    return { status: 400, json: { error: 'Missing recordContext', code: 'BAD_REQUEST' } };
+  }
+  if (recordContext.length > MAX_CONTEXT_CHARS) {
+    return { status: 400, json: { error: 'recordContext too long', code: 'BAD_REQUEST' } };
+  }
+
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    return {
+      status: 503,
+      json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
+    };
+  }
+
+  return runAssistantOpenAiCounted({
+    clientId,
+    catId,
+    usageDate,
+    planHint,
+    feature: 'weekly-report',
+    run: async () => {
+      const { usage, ...report } = await handleWeeklyReport(lang, recordContext);
+      return { ...report, usage };
     },
   });
 }

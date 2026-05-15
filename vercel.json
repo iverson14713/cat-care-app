@@ -8,6 +8,9 @@
     },
     "api/assistant/vet-report.js": {
       "maxDuration": 120
+    },
+    "api/assistant/weekly-report.js": {
+      "maxDuration": 120
     }
   }
 }

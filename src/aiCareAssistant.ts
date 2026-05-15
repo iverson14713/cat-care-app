@@ -21,6 +21,12 @@ export type AssistantCareBundleJson = {
   vetReport: string;
 };
 
+export type AssistantWeeklyReportJson = {
+  weekSummary: string;
+  watchItems: string;
+  nextWeekFocus: string;
+};
+
 export type AssistantContext = {
   lang: Lang;
   today: string;
