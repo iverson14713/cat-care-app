@@ -11,7 +11,7 @@ export async function openAiChatCompletion(opts) {
     throw err;
   }
 
-  const model = (process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim();
+  const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
   const body = {
     model,
@@ -44,7 +44,7 @@ export async function openAiChatCompletion(opts) {
         // ignore
       }
     }
-    throw new Error(detail || `HTTP ${res.status}`);
+    throw new Error(`OpenAI HTTP ${res.status}: ${detail || res.statusText || 'unknown'}`);
   }
 
   const data = await res.json();

@@ -17,7 +17,7 @@ dotenv.config({ path: ENV_FILE });
 dotenv.config({ path: ENV_LOCAL_FILE, override: true });
 
 const PORT = Number(process.env.ASSISTANT_SERVER_PORT || 8788);
-const MODEL = (process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim();
+const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj);

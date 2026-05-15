@@ -42,6 +42,6 @@
 1. 在 Vercel → **Settings → Environment Variables** 新增 **`OPENAI_API_KEY`**（名稱須完全一致，**不要**加 `VITE_`），並勾選 **Production**（Preview 若要測也請一併勾選）。
 2. 儲存後到 **Deployments → Redeploy**（加變數後一定要重新部署，舊 build 不會帶入新變數）。
 3. 部署完成後用瀏覽器開：`https://你的網域/api/assistant/health` 應回 JSON，且含 `"openaiReady": true`（金鑰有進函式時）。
-4. 可選：`OPENAI_MODEL`、`AI_PRO_CLIENT_IDS` 等（與 `.env.example` 相同語意）。
+4. 可選：`OPENAI_MODEL`（預設 `gpt-4o-mini`）、`AI_PRO_CLIENT_IDS` 等（與 `.env.example` 相同語意）。
 
 **說明：** 每日配額／分鐘頻率在 Vercel 上為無狀態程序，僅能作為參考；若需嚴格計次，之後可改接 KV／資料庫。

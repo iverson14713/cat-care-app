@@ -262,7 +262,7 @@ const text = {
     aiQuotaLine: '今天還能用 {{remaining}} 次（每日共 {{limit}} 次）',
     aiErrQuota: '今天次數用完了，明天再來好嗎？若你已升級仍遇到問題，請聯絡我們。',
     aiErrRate: '問得太快啦，休息一下再試。',
-    aiErrOpenAi: '小幫手這次沒說成功，請稍後再試一次。',
+    aiAssistantApiErrorPrefix: 'AI 服務錯誤：',
     aiDisclaimerFoot:
       'AI 僅提供照護觀察與提醒，\n不能作為診斷或治療依據。\n如症狀持續或惡化，請諮詢獸醫。',
   },
@@ -442,7 +442,7 @@ const text = {
     aiQuotaLine: '{{remaining}} of {{limit}} summaries left today',
     aiErrQuota: 'That is all for today — come back tomorrow. If you upgraded and still see this, please contact support.',
     aiErrRate: 'A little too fast — take a short break and try again.',
-    aiErrOpenAi: 'This one did not go through — please try again later.',
+    aiAssistantApiErrorPrefix: 'AI service error: ',
     aiDisclaimerFoot:
       'The assistant shares care observations and reminders only —\nnot diagnosis or treatment.\nIf symptoms persist or worsen, please see a veterinarian.',
   },
@@ -1028,7 +1028,8 @@ export default function App() {
       if (e instanceof AssistantApiError) {
         if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
         else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiErrOpenAi);
+        else if (e.code === 'OPENAI')
+          setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
         else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
         else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
       } else {
@@ -1080,7 +1081,8 @@ export default function App() {
       if (e instanceof AssistantApiError) {
         if (e.code === 'QUOTA') setOpenAiErr(text[lang].aiErrQuota);
         else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiErrOpenAi);
+        else if (e.code === 'OPENAI')
+          setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
         else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
         else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
       } else {

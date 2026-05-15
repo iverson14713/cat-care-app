@@ -83,12 +83,23 @@ export type AssistantHealthPayload = {
 async function readAssistantApiError(res: Response): Promise<{ message: string; code?: string }> {
   const t = await res.text();
   try {
-    const j = JSON.parse(t) as { error?: string; code?: string };
-    const msg = typeof j?.error === 'string' ? j.error : t || res.statusText;
+    const j = JSON.parse(t) as { error?: string; code?: string; detail?: string };
+    const errStr = typeof j?.error === 'string' ? j.error.trim() : '';
+    const detStr = typeof j?.detail === 'string' ? j.detail.trim() : '';
     const code = typeof j?.code === 'string' ? j.code : undefined;
+    let msg: string;
+    if (detStr && errStr && detStr !== errStr) {
+      msg = `${errStr}（${detStr}）`;
+    } else if (detStr) {
+      msg = detStr;
+    } else {
+      msg = errStr || t.trim() || res.statusText;
+    }
+    if (!msg) msg = `HTTP ${res.status}`;
     return { message: msg, code };
   } catch {
-    return { message: t || res.statusText };
+    const fallback = t.trim() || res.statusText;
+    return { message: fallback || `HTTP ${res.status}` };
   }
 }
 

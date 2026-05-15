@@ -14,7 +14,7 @@ export const MAX_QUESTION_CHARS = 8_000;
 export const CARE_MAX_TOKENS = 1200;
 export const QA_MAX_TOKENS = 600;
 
-const MODEL = (process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim();
+const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
 function estUsdFromUsage(usage) {
   const inPer1m = Number(process.env.AI_EST_INPUT_PER_1M_USD);
