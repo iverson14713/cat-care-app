@@ -42,6 +42,88 @@ function tryParseJsonObject(raw) {
   }
 }
 
+/** @param {unknown} v */
+function careBundleCoerceString(v) {
+  if (typeof v === 'string') return v.trim();
+  if (v == null) return '';
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v).trim();
+  return '';
+}
+
+/**
+ * @param {Record<string, unknown>} obj
+ * @param {readonly string[]} keys
+ */
+function careBundleFirstStringField(obj, keys) {
+  for (const k of keys) {
+    const s = careBundleCoerceString(obj[k]);
+    if (s) return s;
+  }
+  return '';
+}
+
+/**
+ * Accept canonical keys plus common aliases; fill missing/empty with safe defaults.
+ * @param {unknown} parsed
+ * @param {'zh' | 'en'} lang
+ */
+function normalizeCareBundleFromParsed(parsed, lang) {
+  const zh = lang === 'zh';
+  const defaults = {
+    healthSummary: zh ? '目前無法產生今日摘要。' : "Could not produce today's summary.",
+    sevenDayAnalysis: zh ? '目前無法產生週期分析。' : 'Could not produce the weekly analysis.',
+    vetReport: zh ? '目前沒有需整理給獸醫的重點。' : 'No vet handoff highlights from logs at this time.',
+  };
+  let obj =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? /** @type {Record<string, unknown>} */ (parsed)
+      : {};
+  if (Array.isArray(parsed) && parsed[0] && typeof parsed[0] === 'object' && !Array.isArray(parsed[0])) {
+    obj = /** @type {Record<string, unknown>} */ (parsed[0]);
+  }
+  const h = careBundleFirstStringField(obj, [
+    'healthSummary',
+    'summary',
+    'todaySummary',
+    'health_summary',
+  ]);
+  const s = careBundleFirstStringField(obj, [
+    'sevenDayAnalysis',
+    'alerts',
+    'weeklyAnalysis',
+    'weekAnalysis',
+    'seven_day_analysis',
+  ]);
+  const v = careBundleFirstStringField(obj, ['vetReport', 'vet_summary', 'vetHandoff']);
+  return {
+    healthSummary: h || defaults.healthSummary,
+    sevenDayAnalysis: s || defaults.sevenDayAnalysis,
+    vetReport: v || defaults.vetReport,
+  };
+}
+
+/**
+ * Model output was not valid JSON — surface raw text in the main block so the feature still works.
+ * @param {'zh' | 'en'} lang
+ * @param {string} raw
+ */
+function careBundleFromUnparsedContent(lang, raw) {
+  const zh = lang === 'zh';
+  const defaults = normalizeCareBundleFromParsed({}, lang);
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  const prefix = zh
+    ? '【以下為助理回覆原文；系統未能解析為預期 JSON，僅供參考。】\n\n'
+    : '[Raw assistant reply; could not parse as the expected JSON — for reference only.]\n\n';
+  const body = t || (zh ? '（模型未回傳可讀文字。）' : '(No readable text from the model.)');
+  return {
+    healthSummary: prefix + body,
+    sevenDayAnalysis: zh
+      ? '週期分析未能以結構化格式取得；請以上方「照護摘要」區塊為準。'
+      : 'Weekly analysis was not available in structured form; use the summary block above.',
+    vetReport: defaults.vetReport,
+  };
+}
+
 /** Stable client id from browser localStorage (not a login). */
 export function isClientId(s) {
   if (typeof s !== 'string') return false;
@@ -133,17 +215,14 @@ async function handleCareBundle(lang, recordContext) {
     jsonMode: true,
   });
 
-  const parsed = tryParseJsonObject(content);
-  const keys = ['healthSummary', 'sevenDayAnalysis', 'vetReport'];
-  const out = {};
-  for (const k of keys) {
-    const v = parsed[k];
-    if (typeof v !== 'string' || !v.trim()) {
-      throw new Error(`Missing or invalid field: ${k}`);
-    }
-    out[k] = v.trim();
+  let bundle;
+  try {
+    const parsed = tryParseJsonObject(content);
+    bundle = normalizeCareBundleFromParsed(parsed, lang);
+  } catch {
+    bundle = careBundleFromUnparsedContent(lang, content);
   }
-  return { bundle: out, usage };
+  return { bundle, usage };
 }
 
 async function handleQa(lang, recordContext, question) {

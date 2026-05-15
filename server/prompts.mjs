@@ -20,22 +20,28 @@ export function careBundleUserPrompt(lang, context) {
   if (lang === 'zh') {
     return (
       `以下是使用者允許你使用的照護紀錄（僅文字與勾選狀態，沒有照片像素內容）。\n\n${context}\n\n` +
-      `請輸出**僅一個 JSON 物件**（不要 markdown），鍵名必須完全一致：\n` +
-      `"healthSummary", "sevenDayAnalysis", "vetReport"。\n` +
-      `說明：\n` +
-      `- healthSummary：以「今日與近期紀錄」為主的 AI 健康摘要（照護觀察與提醒，3～10 行，繁體中文）。\n` +
-      `- sevenDayAnalysis：最近 7 天照護分析（趨勢與紀錄完整度，3～12 行）；若某几天無紀錄請據實說明。\n` +
-      `- vetReport：給獸醫參考的「紀錄摘要」（條列重點：體重、飲食／喝水／排泄勾選、異常欄與備註摘要、照片張數等；不是診斷報告，3～12 行）。\n` +
+      `請輸出**僅一個 JSON 物件**（不要 markdown、不要程式碼區塊、不要註解），且**必須**同時包含下列三個鍵，鍵名逐字相同，值皆為**非空字串**：\n` +
+      `"healthSummary", "sevenDayAnalysis", "vetReport"\n` +
+      `（缺一不可；若某段暫無內容可寫，仍請輸出簡短說明字串，勿省略鍵或留空。）\n\n` +
+      `結構範例（請依實際紀錄撰寫內文，勿照抄範例文字）：\n` +
+      `{"healthSummary":"…","sevenDayAnalysis":"…","vetReport":"…"}\n\n` +
+      `欄位說明：\n` +
+      `- healthSummary：以「今日與近期紀錄」為主的照護觀察與提醒（3～10 行，繁體中文）。\n` +
+      `- sevenDayAnalysis：最近 7 天趨勢與紀錄完整度（3～12 行）；若數天無紀錄請據實說明。\n` +
+      `- vetReport：給獸醫參考的紀錄摘要（體重、飲食／喝水／排泄勾選、異常欄與備註、照片張數等；非診斷，3～12 行）。\n` +
       `禁止診斷、禁止醫療建議、禁止臆測未記載的症狀。`
     );
   }
   return (
     `Below are care records the user allows you to use (checkboxes and text only — no photo pixels).\n\n${context}\n\n` +
-    `Return **only one JSON object** (no markdown) with keys exactly:\n` +
-    `"healthSummary", "sevenDayAnalysis", "vetReport".\n` +
-    `- healthSummary: AI care summary grounded in today/recent logs (3–10 lines, English).\n` +
-    `- sevenDayAnalysis: last-7-day care pattern analysis (3–12 lines).\n` +
-    `- vetReport: factual visit handoff for a vet from logs only (not a diagnosis; 3–12 lines).\n` +
+    `Return **only one JSON object** (no markdown, no code fences, no comments). It **must** include all three keys exactly as written, each a **non-empty string**:\n` +
+    `"healthSummary", "sevenDayAnalysis", "vetReport"\n` +
+    `(Do not omit a key or use null; if a section is thin, still write a short sentence.)\n\n` +
+    `Shape example (replace text with real content from the logs — do not copy placeholder text):\n` +
+    `{"healthSummary":"...","sevenDayAnalysis":"...","vetReport":"..."}\n\n` +
+    `- healthSummary: care observations grounded in today/recent logs (3–10 lines, English).\n` +
+    `- sevenDayAnalysis: last-7-day pattern and logging completeness (3–12 lines).\n` +
+    `- vetReport: factual visit handoff from logs only (not a diagnosis; 3–12 lines).\n` +
     `No diagnosis, no medical advice, no invented symptoms.`
   );
 }

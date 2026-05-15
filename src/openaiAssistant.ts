@@ -31,6 +31,63 @@ const MONTHLY_IDS = [
 
 const API_PREFIX = '/api/assistant';
 
+const CARE_BUNDLE_DEFAULTS: Record<'zh' | 'en', AssistantCareBundleJson> = {
+  zh: {
+    healthSummary: '目前無法產生今日摘要。',
+    sevenDayAnalysis: '目前無法產生週期分析。',
+    vetReport: '目前沒有需整理給獸醫的重點。',
+  },
+  en: {
+    healthSummary: "Could not produce today's summary.",
+    sevenDayAnalysis: 'Could not produce the weekly analysis.',
+    vetReport: 'No vet handoff highlights from logs at this time.',
+  },
+};
+
+function careBundleCoerceString(v: unknown): string {
+  if (typeof v === 'string') return v.trim();
+  if (v == null) return '';
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v).trim();
+  return '';
+}
+
+function careBundleFirstField(obj: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const s = careBundleCoerceString(obj[k]);
+    if (s) return s;
+  }
+  return '';
+}
+
+/** Same rules as server: canonical + alias keys, safe defaults for missing/empty fields. */
+function normalizeCareBundlePayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantCareBundleJson {
+  const d = CARE_BUNDLE_DEFAULTS[lang];
+  let obj: Record<string, unknown> =
+    data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  if (Array.isArray(data) && data[0] && typeof data[0] === 'object' && !Array.isArray(data[0])) {
+    obj = data[0] as Record<string, unknown>;
+  }
+  const h = careBundleFirstField(obj, [
+    'healthSummary',
+    'summary',
+    'todaySummary',
+    'health_summary',
+  ]);
+  const s = careBundleFirstField(obj, [
+    'sevenDayAnalysis',
+    'alerts',
+    'weeklyAnalysis',
+    'weekAnalysis',
+    'seven_day_analysis',
+  ]);
+  const v = careBundleFirstField(obj, ['vetReport', 'vet_summary', 'vetHandoff']);
+  return {
+    healthSummary: h || d.healthSummary,
+    sevenDayAnalysis: s || d.sevenDayAnalysis,
+    vetReport: v || d.vetReport,
+  };
+}
+
 function clip(s: string, max: number): string {
   const t = s.trim();
   if (t.length <= max) return t;
@@ -198,19 +255,10 @@ export function peekCareBundleCache(
   if (!cachedRaw) return null;
   try {
     const parsed = JSON.parse(cachedRaw) as Record<string, unknown>;
-    const keys = ['healthSummary', 'sevenDayAnalysis', 'vetReport'] as const;
-    const out: Partial<AssistantCareBundleJson> = {};
-    for (const k of keys) {
-      const v = parsed[k];
-      if (typeof v === 'string' && v.trim()) out[k] = v.trim();
-    }
-    if (out.healthSummary && out.sevenDayAnalysis && out.vetReport) {
-      return out as AssistantCareBundleJson;
-    }
+    return normalizeCareBundlePayload(parsed, ctx.lang);
   } catch {
     return null;
   }
-  return null;
 }
 
 export async function generateAssistantCareBundleOpenAi(
@@ -241,16 +289,7 @@ export async function generateAssistantCareBundleOpenAi(
     throw new AssistantApiError(message, code, res.status);
   }
   const data = (await res.json()) as Record<string, unknown>;
-  const keys = ['healthSummary', 'sevenDayAnalysis', 'vetReport'] as const;
-  const out: Partial<AssistantCareBundleJson> = {};
-  for (const k of keys) {
-    const v = data[k];
-    if (typeof v !== 'string' || !v.trim()) {
-      throw new Error(`Invalid response: missing ${k}`);
-    }
-    out[k] = v.trim();
-  }
-  const bundle = out as AssistantCareBundleJson;
+  const bundle = normalizeCareBundlePayload(data, ctx.lang);
   writeCareBundleCacheJson(ck, JSON.stringify(bundle));
   return bundle;
 }
