@@ -503,6 +503,15 @@ function weightStorageKey(catId: string) {
   return `cat-calendar-weights-${catId}`;
 }
 
+/** One weight per calendar day; if duplicates exist in storage, keep the last entry in file order (newest wins). */
+function dedupeWeightRecordsByDate(records: WeightRecord[]): WeightRecord[] {
+  const byDate = new Map<string, WeightRecord>();
+  for (const r of records) {
+    byDate.set(r.date, r);
+  }
+  return Array.from(byDate.values()).sort((a, b) => b.date.localeCompare(a.date));
+}
+
 function loadLang(): Lang {
   const saved = localStorage.getItem(LANG_KEY);
   return saved === 'en' ? 'en' : 'zh';
@@ -575,15 +584,16 @@ function loadWeightRecords(catId: string): WeightRecord[] {
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed
-      .map((item) => ({
-        id: typeof item.id === 'string' ? item.id : makeId(),
-        date: typeof item.date === 'string' ? item.date : todayKey(),
-        weight: Number(item.weight),
-        note: typeof item.note === 'string' ? item.note : '',
-      }))
-      .filter((item) => Number.isFinite(item.weight) && item.weight > 0)
-      .sort((a, b) => b.date.localeCompare(a.date));
+    return dedupeWeightRecordsByDate(
+      parsed
+        .map((item) => ({
+          id: typeof item.id === 'string' ? item.id : makeId(),
+          date: typeof item.date === 'string' ? item.date : todayKey(),
+          weight: Number(item.weight),
+          note: typeof item.note === 'string' ? item.note : '',
+        }))
+        .filter((item) => Number.isFinite(item.weight) && item.weight > 0)
+    );
   } catch {
     return [];
   }
@@ -1350,9 +1360,11 @@ export default function App() {
       note: weightNote.trim(),
     };
 
-    setWeightRecords((prev) =>
-      [nextRecord, ...prev].sort((a, b) => b.date.localeCompare(a.date))
-    );
+    setWeightRecords((prev) => {
+      const d = nextRecord.date;
+      const withoutSameDay = prev.filter((r) => r.date !== d);
+      return [nextRecord, ...withoutSameDay].sort((a, b) => b.date.localeCompare(a.date));
+    });
     setWeightValue('');
     setWeightNote('');
   };
@@ -2171,12 +2183,12 @@ export default function App() {
     placeholder = ''
   ) => (
     <div>
-      <label className="mb-1 block text-xs font-bold text-stone-500">{label}</label>
+      <label className="mb-0.5 block text-[11px] font-bold text-stone-500">{label}</label>
       <input
         value={value ?? ''}
         onChange={(e) => updateSelectedCat({ [keyName]: e.target.value })}
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none focus:border-orange-300"
+        className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
       />
     </div>
   );
@@ -2188,12 +2200,12 @@ export default function App() {
     placeholder = ''
   ) => (
     <div>
-      <label className="mb-1 block text-xs font-bold text-stone-500">{label}</label>
+      <label className="mb-0.5 block text-[11px] font-bold text-stone-500">{label}</label>
       <textarea
         value={value ?? ''}
         onChange={(e) => updateSelectedCat({ [keyName]: e.target.value })}
         placeholder={placeholder}
-        className="min-h-20 w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300"
+        className="min-h-[4.5rem] w-full resize-none rounded-xl border border-stone-200 bg-stone-50 p-3 text-[13px] outline-none focus:border-orange-300"
       />
     </div>
   );
@@ -2401,29 +2413,83 @@ export default function App() {
 
   const renderCatsPage = () => (
     <>
-      <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="text-4xl">🐱</div>
-        <h1 className="mt-2 text-2xl font-bold">{tr.myCats}</h1>
-        <p className="mt-1 text-sm text-stone-500">{tr.catsDesc}</p>
+      <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.catList}</h2>
+        <div className="space-y-2">
+          {cats.map((cat) => (
+            <div
+              key={cat.id}
+              className={`rounded-2xl border p-2.5 shadow-sm ${selectedCat?.id === cat.id ? 'border-orange-200 bg-orange-50' : 'border-stone-100 bg-white'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <button onClick={() => selectCat(cat.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                  {cat.profilePhoto ? (
+                    <span className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-orange-50">
+                      <img src={cat.profilePhoto} alt={cat.name} className="h-full w-full object-cover" />
+                    </span>
+                  ) : (
+                    <span className="text-2xl leading-none">{cat.emoji}</span>
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-bold">{cat.name}</h3>
+                    <p className="text-xs text-stone-500">{selectedCat?.id === cat.id ? tr.selected : tr.tapToSwitch}</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => deleteCat(cat.id)}
+                  className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1.5 text-xs font-bold text-stone-500"
+                >
+                  {tr.delete}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.addCat}</h2>
+        <div className="flex gap-2">
+          <input
+            value={newCatName}
+            onChange={(e) => setNewCatName(e.target.value)}
+            placeholder={tr.catNamePlaceholder}
+            className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
+          />
+          <button onClick={addCat} className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white">
+            {tr.add}
+          </button>
+        </div>
+      </section>
+
+      <div className="mb-3 flex items-center gap-2.5 rounded-2xl bg-white px-3 py-2 shadow-sm">
+        <span className="text-2xl leading-none" aria-hidden>
+          🐱
+        </span>
+        <div className="min-w-0">
+          <h1 className="text-base font-bold leading-tight text-stone-900">{tr.myCats}</h1>
+          <p className="text-[11px] leading-snug text-stone-500">{tr.catsDesc}</p>
+        </div>
       </div>
 
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold">{tr.catProfile}</h2>
-        <p className="mb-4 text-sm text-stone-500">{tr.catProfileDesc}</p>
+      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.catProfile}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.catProfileDesc}</p>
 
-        <div className="mb-5 flex items-center gap-4">
-          <div className="h-24 w-24 overflow-hidden rounded-3xl bg-orange-50">
+        <div className="mb-3 flex items-center gap-3">
+          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-orange-50">
             {selectedCat?.profilePhoto ? (
               <button onClick={() => setSelectedPhoto(selectedCat.profilePhoto ?? null)} className="h-full w-full">
                 <img src={selectedCat.profilePhoto} alt={selectedCat.name} className="h-full w-full object-cover" />
               </button>
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-5xl">🐱</div>
+              <div className="flex h-full w-full items-center justify-center text-3xl">🐱</div>
             )}
           </div>
-          <div className="flex-1">
-            <p className="mb-2 text-xs font-bold text-stone-500">{tr.profilePhoto}</p>
-            <label className="inline-block cursor-pointer rounded-2xl bg-orange-100 px-4 py-3 text-sm font-bold text-orange-700">
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 text-[11px] font-bold text-stone-500">{tr.profilePhoto}</p>
+            <label className="inline-block cursor-pointer rounded-xl bg-orange-100 px-3 py-2 text-xs font-bold text-orange-700">
               {tr.selectPhoto}
               <input
                 type="file"
@@ -2438,16 +2504,21 @@ export default function App() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-2">
           {renderProfileInput(tr.name, selectedCat?.name, 'name', tr.catNamePlaceholder)}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs font-bold text-stone-500">{tr.birthday}</label>
-              <input type="date" value={selectedCat?.birthday ?? ''} onChange={(e) => updateSelectedCat({ birthday: e.target.value })} className="w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none focus:border-orange-300" />
+              <label className="mb-0.5 block text-[11px] font-bold text-stone-500">{tr.birthday}</label>
+              <input
+                type="date"
+                value={selectedCat?.birthday ?? ''}
+                onChange={(e) => updateSelectedCat({ birthday: e.target.value })}
+                className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
+              />
             </div>
             {renderProfileInput(tr.gender, selectedCat?.gender, 'gender', lang === 'zh' ? '公 / 母' : 'Male / Female')}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             {renderProfileInput(tr.breed, selectedCat?.breed, 'breed', lang === 'zh' ? '米克斯 / 英短' : 'Mix / British Shorthair')}
             {renderProfileInput(tr.neutered, selectedCat?.neutered, 'neutered', lang === 'zh' ? '已結紮 / 未結紮' : 'Yes / No')}
           </div>
@@ -2459,16 +2530,16 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-2 text-lg font-bold">{tr.backupTitle}</h2>
-        <p className="mb-4 text-sm leading-6 text-stone-500">{tr.backupDesc}</p>
+      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.backupTitle}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.backupDesc}</p>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button onClick={exportBackup} className="rounded-2xl bg-orange-400 py-3 font-bold text-white shadow-sm">
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={exportBackup} className="rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white shadow-sm">
             {tr.exportBackup}
           </button>
 
-          <label className="cursor-pointer rounded-2xl bg-stone-800 py-3 text-center font-bold text-white shadow-sm">
+          <label className="cursor-pointer rounded-xl bg-stone-800 py-2.5 text-center text-sm font-bold text-white shadow-sm">
             {tr.importBackup}
             <input
               type="file"
@@ -2482,62 +2553,26 @@ export default function App() {
           </label>
         </div>
 
-        <p className="mt-3 text-xs leading-5 text-stone-400">{tr.importBackupDesc}</p>
+        <p className="mt-2 text-[11px] leading-snug text-stone-400">{tr.importBackupDesc}</p>
       </section>
 
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-2 text-lg font-bold">{tr.privacyTitle}</h2>
-        <p className="mb-4 text-sm leading-6 text-stone-500">{tr.privacyDesc}</p>
+      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.privacyTitle}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.privacyDesc}</p>
 
-        <div className="space-y-2 text-sm leading-6 text-stone-700">
+        <div className="space-y-1.5 text-[13px] leading-snug text-stone-700">
           <p>1. {tr.privacyPoint1}</p>
           <p>2. {tr.privacyPoint2}</p>
           <p>3. {tr.privacyPoint3}</p>
           <p>4. {tr.privacyPoint4}</p>
         </div>
 
-        <button onClick={copyPrivacyPolicy} className="mt-4 w-full rounded-2xl border border-stone-200 bg-white py-3 font-bold text-stone-600">
+        <button
+          onClick={copyPrivacyPolicy}
+          className="mt-3 w-full rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-600"
+        >
           {tr.copyPrivacy}
         </button>
-      </section>
-
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold">{tr.addCat}</h2>
-        <div className="flex gap-2">
-          <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder={tr.catNamePlaceholder} className="min-w-0 flex-1 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none focus:border-orange-300" />
-          <button onClick={addCat} className="rounded-2xl bg-orange-400 px-5 py-3 font-bold text-white">
-            {tr.add}
-          </button>
-        </div>
-      </section>
-
-      <section className="mb-5">
-        <h2 className="mb-3 text-lg font-bold">{tr.catList}</h2>
-        <div className="space-y-3">
-          {cats.map((cat) => (
-            <div key={cat.id} className={`rounded-3xl border p-4 shadow-sm ${selectedCat?.id === cat.id ? 'border-orange-200 bg-orange-50' : 'border-stone-100 bg-white'}`}>
-              <div className="flex items-center justify-between gap-3">
-                <button onClick={() => selectCat(cat.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                  {cat.profilePhoto ? (
-                    <span className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl bg-orange-50">
-                      <img src={cat.profilePhoto} alt={cat.name} className="h-full w-full object-cover" />
-                    </span>
-                  ) : (
-                    <span className="text-3xl">{cat.emoji}</span>
-                  )}
-                  <div className="min-w-0">
-                    <h3 className="truncate text-lg font-bold">{cat.name}</h3>
-                    <p className="text-sm text-stone-500">{selectedCat?.id === cat.id ? tr.selected : tr.tapToSwitch}</p>
-                  </div>
-                </button>
-
-                <button onClick={() => deleteCat(cat.id)} className="rounded-full bg-stone-100 px-3 py-2 text-sm font-bold text-stone-500">
-                  {tr.delete}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
       </section>
     </>
   );
