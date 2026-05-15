@@ -13,6 +13,7 @@ import {
   syncLocalAiUsageFromServer,
   writeCareBundleCacheJson,
 } from './aiClient';
+import { normalizeWeeklyReport } from './weeklyReportModel';
 
 const DAILY_CHECKBOX_IDS = [
   'feedMorning',
@@ -66,7 +67,7 @@ function careBundleFirstField(obj: Record<string, unknown>, keys: string[]): str
 }
 
 /** Same rules as server: canonical + alias keys, safe defaults for missing/empty fields. */
-function normalizeCareBundlePayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantCareBundleJson {
+export function normalizeCareBundlePayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantCareBundleJson {
   const d = CARE_BUNDLE_DEFAULTS[lang];
   let obj: Record<string, unknown> =
     data && typeof data === 'object' && !Array.isArray(data) ? data : {};
@@ -382,46 +383,8 @@ export function buildQuickAnalysisContextForLlm(ctx: AssistantContext): string {
   return lines.join('\n');
 }
 
-const WEEKLY_REPORT_DEFAULTS: Record<'zh' | 'en', AssistantWeeklyReportJson> = {
-  zh: {
-    weekSummary: '目前無法產生本週總結。',
-    completionRate: '目前無法評估照護完成度。',
-    trends: '目前無法整理趨勢。',
-    abnormalTimeline: '本週無異常紀錄或資料不足。',
-    weightChange: '本週無體重紀錄。',
-    vsLastWeek: '上週資料不足，無法比較。',
-    nextWeekFocus: '請持續記錄餵食、喝水與排泄。',
-  },
-  en: {
-    weekSummary: 'Could not produce the weekly summary.',
-    completionRate: 'Could not assess logging completion.',
-    trends: 'Could not summarize trends.',
-    abnormalTimeline: 'No abnormal timeline or insufficient data.',
-    weightChange: 'No weight entries this week.',
-    vsLastWeek: 'Not enough prior-week data to compare.',
-    nextWeekFocus: 'Keep logging meals, water, and litter.',
-  },
-};
-
 function normalizeWeeklyReportPayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantWeeklyReportJson {
-  const d = WEEKLY_REPORT_DEFAULTS[lang];
-  const obj = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-  const pick = (keys: string[], fallback: string) => {
-    for (const k of keys) {
-      const s = careBundleFirstField(obj, [k]);
-      if (s) return s;
-    }
-    return fallback;
-  };
-  return {
-    weekSummary: pick(['weekSummary', 'weeklySummary', 'summary'], d.weekSummary),
-    completionRate: pick(['completionRate', 'completion'], d.completionRate),
-    trends: pick(['trends', 'trend'], d.trends),
-    abnormalTimeline: pick(['abnormalTimeline', 'abnormal', 'watchItems'], d.abnormalTimeline),
-    weightChange: pick(['weightChange', 'weight'], d.weightChange),
-    vsLastWeek: pick(['vsLastWeek', 'compareLastWeek'], d.vsLastWeek),
-    nextWeekFocus: pick(['nextWeekFocus', 'nextWeek'], d.nextWeekFocus),
-  };
+  return normalizeWeeklyReport(data, lang);
 }
 
 /** This week + previous week (up to 14 days) — formal Pro weekly report. */
@@ -612,8 +575,17 @@ export async function generateAssistantWeeklyReportOpenAi(
     const { message, code } = await readAssistantApiError(res);
     throw new AssistantApiError(message, code, res.status);
   }
-  const data = (await res.json()) as Record<string, unknown>;
+  let data: Record<string, unknown>;
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch (parseErr) {
+    console.error('[AI weekly report] invalid JSON response', parseErr);
+    throw new AssistantApiError('Invalid JSON response', 'OPENAI', res.status);
+  }
   const quota = quotaAfterCountedAiSuccess(data, meta);
   const report = normalizeWeeklyReportPayload(data, ctx.lang);
+  if (!report.weekSummary && !report.trends) {
+    console.error('[AI weekly report] unexpected payload shape', data);
+  }
   return { report, quota };
 }

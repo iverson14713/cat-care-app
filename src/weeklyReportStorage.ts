@@ -1,4 +1,5 @@
 import type { AssistantWeeklyReportJson } from './aiCareAssistant';
+import { normalizeWeeklyReport, weeklySectionText, type Lang } from './weeklyReportModel';
 
 export type SavedWeeklyReport = {
   catId: string;
@@ -17,18 +18,26 @@ export function loadSavedWeeklyReport(catId: string, weekEnd: string): SavedWeek
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SavedWeeklyReport;
     if (!parsed?.report || parsed.catId !== catId) return null;
-    return parsed;
+    return {
+      ...parsed,
+      report: normalizeWeeklyReport(parsed.report),
+    };
   } catch {
     return null;
   }
 }
 
-export function saveWeeklyReport(catId: string, weekEnd: string, report: AssistantWeeklyReportJson): void {
+export function saveWeeklyReport(
+  catId: string,
+  weekEnd: string,
+  report: AssistantWeeklyReportJson,
+  lang: Lang = 'zh'
+): void {
   const payload: SavedWeeklyReport = {
     catId,
     weekEnd,
     savedAt: new Date().toISOString(),
-    report,
+    report: normalizeWeeklyReport(report, lang),
   };
   localStorage.setItem(storageKey(catId, weekEnd), JSON.stringify(payload));
 }
@@ -44,25 +53,26 @@ export function formatWeeklyReportPlainText(
   lines.push(`${weekStart} — ${weekEnd}`);
   lines.push('');
   lines.push(zh ? '■ 本週總結' : '■ This week');
-  lines.push(report.weekSummary.trim());
+  const safe = normalizeWeeklyReport(report, lang);
+  lines.push(weeklySectionText(safe, 'weekSummary'));
   lines.push('');
   lines.push(zh ? '■ 照護完成度' : '■ Logging completion');
-  lines.push(report.completionRate.trim());
+  lines.push(weeklySectionText(safe, 'completionRate'));
   lines.push('');
   lines.push(zh ? '■ 趨勢' : '■ Trends');
-  lines.push(report.trends.trim());
+  lines.push(weeklySectionText(safe, 'trends'));
   lines.push('');
   lines.push(zh ? '■ 異常時間線' : '■ Abnormal timeline');
-  lines.push(report.abnormalTimeline.trim());
+  lines.push(weeklySectionText(safe, 'abnormalTimeline'));
   lines.push('');
   lines.push(zh ? '■ 體重變化' : '■ Weight');
-  lines.push(report.weightChange.trim());
+  lines.push(weeklySectionText(safe, 'weightChange'));
   lines.push('');
   lines.push(zh ? '■ 與上週比較' : '■ vs last week');
-  lines.push(report.vsLastWeek.trim());
+  lines.push(weeklySectionText(safe, 'vsLastWeek'));
   lines.push('');
   lines.push(zh ? '■ 下週照護重點' : '■ Next week focus');
-  lines.push(report.nextWeekFocus.trim());
+  lines.push(weeklySectionText(safe, 'nextWeekFocus'));
   lines.push('');
   lines.push(
     zh

@@ -14,6 +14,7 @@ import {
   generateAssistantCareBundleOpenAi,
   generateAssistantQaOpenAi,
   generateAssistantWeeklyReportOpenAi,
+  normalizeCareBundlePayload,
   getCareBundleContextHash,
   isAssistantCareBundleNetworkBlocked,
   isAssistantDailyQuotaExhausted,
@@ -85,11 +86,14 @@ import {
   exportReportElementAsPng,
   shareReportText,
 } from './vetReportExport';
+import { AssistantWeeklyReportView } from './AssistantWeeklyReportView';
+import { WeeklyReportErrorBoundary } from './WeeklyReportErrorBoundary';
 import {
   formatWeeklyReportPlainText,
   loadSavedWeeklyReport,
   saveWeeklyReport,
 } from './weeklyReportStorage';
+import { normalizeWeeklyReport } from './weeklyReportModel';
 
 type Lang = 'zh' | 'en';
 
@@ -490,6 +494,9 @@ const text = {
     weeklyShareOk: '已複製／分享週報文字',
     weeklyShareFail: '無法分享',
     weeklyExportProOnly: '匯出需 Pro',
+    weeklyFailed: 'AI 週報暫時無法產生，請稍後再試。',
+    weeklySectionEmpty: '此區塊尚無資料',
+    weeklyBoundaryFail: '週報顯示發生錯誤，請重新生成或稍後再試。',
     weeklyFreePreview:
       '免費版可預覽功能說明。升級 Pro 測試版後，可一鍵產生完整 AI 週報（會使用 1 次今日 AI 次數）。',
     weeklyUpgrade: '升級 Pro 測試版',
@@ -828,6 +835,9 @@ const text = {
     weeklyShareOk: 'Report text copied / shared',
     weeklyShareFail: 'Could not share',
     weeklyExportProOnly: 'Export requires Pro',
+    weeklyFailed: 'The AI weekly report is temporarily unavailable. Please try again later.',
+    weeklySectionEmpty: 'No data for this section yet',
+    weeklyBoundaryFail: 'Could not display the report. Please regenerate or try again later.',
     weeklyFreePreview:
       'Free plan: preview only. Upgrade to Pro (test) to generate the full AI weekly report (uses 1 of today’s AI uses).',
     weeklyUpgrade: 'Upgrade to Pro (test)',
@@ -1537,6 +1547,8 @@ export default function App() {
   const summariesAbortRef = useRef<AbortController | null>(null);
   const qaAbortRef = useRef<AbortController | null>(null);
   const weeklyAbortRef = useRef<AbortController | null>(null);
+  const weeklyReportRef = useRef<HTMLDivElement | null>(null);
+  const [weeklySaveHint, setWeeklySaveHint] = useState<string | null>(null);
 
   useEffect(() => {
     setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, today, prev));
@@ -1599,8 +1611,8 @@ export default function App() {
     const ctx = assistantContext;
     if (!ctx) return;
     const saved = loadSavedWeeklyReport(ctx.catId, ctx.today);
-    if (saved?.report) setAiWeeklyReport(saved.report);
-  }, [page, appPlan, assistantContext?.catId, assistantContext?.today]);
+    if (saved?.report) setAiWeeklyReport(normalizeWeeklyReport(saved.report, lang));
+  }, [page, appPlan, assistantContext?.catId, assistantContext?.today, lang]);
 
   useEffect(
     () => () => {
@@ -1775,8 +1787,9 @@ export default function App() {
         },
         ac.signal
       );
-      setAiWeeklyReport(report);
-      saveWeeklyReport(ctx.catId, ctx.today, report);
+      const safeReport = normalizeWeeklyReport(report, lang);
+      setAiWeeklyReport(safeReport);
+      saveWeeklyReport(ctx.catId, ctx.today, safeReport, lang);
       setWeeklySaveHint(text[lang].weeklySavedOk);
       setAssistantQuota((prev) =>
         mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
@@ -1785,15 +1798,15 @@ export default function App() {
       );
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
+      console.error('[AI weekly report] generate failed', e);
+      setAiWeeklyReport(null);
       if (e instanceof AssistantApiError) {
         if (e.code === 'QUOTA') setWeeklyErr(aiQuotaExhaustedMessage(lang, appPlan));
         else if (e.code === 'RATE') setWeeklyErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI')
-          setWeeklyErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
         else if (e.code === 'NO_API_KEY') setWeeklyErr(aiStatusHint(lang, 'key'));
-        else setWeeklyErr(`${text[lang].aiOpenAiFail}${e.message}`);
+        else setWeeklyErr(tr.weeklyFailed);
       } else {
-        setWeeklyErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
+        setWeeklyErr(tr.weeklyFailed);
       }
     } finally {
       setAiWeeklyLoading(false);
@@ -1802,6 +1815,7 @@ export default function App() {
     assistantContext,
     appPlan,
     lang,
+    text,
     assistantApiReady,
     assistantHealthReachable,
     aiClientId,
@@ -3244,6 +3258,20 @@ export default function App() {
       </section>
     );
 
+    const safeCareBundle = aiCareBundle
+      ? normalizeCareBundlePayload(aiCareBundle as unknown as Record<string, unknown>, lang)
+      : null;
+
+    const weeklySections = [
+      { key: 'weekSummary' as const, title: tr.weeklySummaryTitle },
+      { key: 'completionRate' as const, title: tr.weeklyCompletionTitle },
+      { key: 'trends' as const, title: tr.weeklyTrendsTitle },
+      { key: 'abnormalTimeline' as const, title: tr.weeklyAbnormalTitle },
+      { key: 'weightChange' as const, title: tr.weeklyWeightTitle },
+      { key: 'vsLastWeek' as const, title: tr.weeklyVsLastTitle },
+      { key: 'nextWeekFocus' as const, title: tr.weeklyNextWeekTitle },
+    ];
+
     return (
       <>
         {renderCatSwitcher()}
@@ -3372,10 +3400,10 @@ export default function App() {
             </p>
           ) : null}
 
-          {aiCareBundle ? (
+          {safeCareBundle ? (
             <div className="mt-4 space-y-3 border-t border-orange-100/80 pt-4">
-              {renderAiBlock(tr.assistantQuickSummary, aiCareBundle.quickSummary.trim())}
-              {renderAiBlock(tr.assistantCareReminders, aiCareBundle.careReminders.trim())}
+              {renderAiBlock(tr.assistantQuickSummary, safeCareBundle.quickSummary)}
+              {renderAiBlock(tr.assistantCareReminders, safeCareBundle.careReminders)}
               <p className="text-center text-[11px] leading-snug text-stone-400">{tr.aiDisclaimerFoot}</p>
             </div>
           ) : null}
@@ -3441,28 +3469,36 @@ export default function App() {
                   {weeklyErr}
                 </p>
               ) : null}
+              {aiWeeklyLoading ? (
+                <p className="mt-3 flex items-center gap-2 text-[13px] text-stone-600">
+                  <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400" aria-hidden />
+                  {tr.aiOpenAiBusy}
+                </p>
+              ) : null}
               {aiWeeklyReport ? (
+                <WeeklyReportErrorBoundary
+                  fallback={
+                    <p className="mt-3 rounded-xl border border-red-100 bg-red-50/90 px-3 py-2.5 text-[13px] text-red-900">
+                      {tr.weeklyBoundaryFail}
+                    </p>
+                  }
+                >
                 <div className="mt-4">
-                  <div
-                    ref={weeklyReportRef}
-                    id="weekly-ai-report-print"
-                    className="space-y-3 rounded-2xl border border-violet-100 bg-white/90 p-3"
-                  >
-                    {renderAiBlock(tr.weeklySummaryTitle, aiWeeklyReport.weekSummary.trim())}
-                    {renderAiBlock(tr.weeklyCompletionTitle, aiWeeklyReport.completionRate.trim())}
-                    {renderAiBlock(tr.weeklyTrendsTitle, aiWeeklyReport.trends.trim())}
-                    {renderAiBlock(tr.weeklyAbnormalTitle, aiWeeklyReport.abnormalTimeline.trim())}
-                    {renderAiBlock(tr.weeklyWeightTitle, aiWeeklyReport.weightChange.trim())}
-                    {renderAiBlock(tr.weeklyVsLastTitle, aiWeeklyReport.vsLastWeek.trim())}
-                    {renderAiBlock(tr.weeklyNextWeekTitle, aiWeeklyReport.nextWeekFocus.trim())}
-                    <p className="text-center text-[11px] leading-snug text-stone-400">{tr.aiDisclaimerFoot}</p>
-                  </div>
+                  <AssistantWeeklyReportView
+                    report={aiWeeklyReport}
+                    lang={lang}
+                    reportRef={weeklyReportRef}
+                    disclaimer={tr.aiDisclaimerFoot}
+                    emptySectionLabel={tr.weeklySectionEmpty}
+                    sections={weeklySections}
+                    renderBlock={renderAiBlock}
+                  />
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <button
                       type="button"
                       onClick={() => {
                         if (!assistantContext || !aiWeeklyReport) return;
-                        saveWeeklyReport(assistantContext.catId, assistantContext.today, aiWeeklyReport);
+                        saveWeeklyReport(assistantContext.catId, assistantContext.today, normalizeWeeklyReport(aiWeeklyReport, lang), lang);
                         setWeeklySaveHint(tr.weeklySavedOk);
                       }}
                       className="rounded-xl border border-violet-200 bg-white py-2 text-[12px] font-semibold text-violet-800"
@@ -3475,7 +3511,7 @@ export default function App() {
                         if (!assistantContext || !aiWeeklyReport) return;
                         const ok = await shareReportText(
                           tr.weeklyCardTitle,
-                          formatWeeklyReportPlainText(aiWeeklyReport, {
+                          formatWeeklyReportPlainText(normalizeWeeklyReport(aiWeeklyReport, lang), {
                             catName: assistantContext.cat.name,
                             weekStart: addDaysYmd(assistantContext.today, -6),
                             weekEnd: assistantContext.today,
@@ -3529,6 +3565,9 @@ export default function App() {
                     <p className="mt-2 text-center text-[12px] text-violet-700">{weeklySaveHint}</p>
                   ) : null}
                 </div>
+                </WeeklyReportErrorBoundary>
+              ) : !aiWeeklyLoading && !weeklyErr ? (
+                <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiEmptyHint}</p>
               ) : null}
             </>
           )}
