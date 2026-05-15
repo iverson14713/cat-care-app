@@ -60,6 +60,23 @@ import {
   type HistoryFilterChip,
   type HistorySearchHit,
 } from './historySearch';
+import {
+  createCustomReminder,
+  createReminderFromTemplate,
+  getNotificationPermission,
+  getNotificationSupport,
+  getReminderLimit,
+  loadReminders,
+  processDueReminders,
+  REMINDER_TEMPLATES,
+  repeatTypeLabel,
+  requestNotificationPermission,
+  saveReminders,
+  wasNotificationPermissionAsked,
+  type Reminder,
+  type ReminderKind,
+  type ReminderRepeatType,
+} from './reminders';
 
 type Lang = 'zh' | 'en';
 
@@ -87,7 +104,7 @@ type CheckItem = {
 
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings' | 'sharedCare';
+type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings' | 'sharedCare' | 'reminders';
 type AppPlan = 'free' | 'pro';
 
 type AbnormalRecord = {
@@ -376,6 +393,36 @@ const text = {
     planMultiCatUpgrade: '多貓照護是 Pro 功能。升級後可管理多隻貓咪，並獲得更多 AI 分析次數。',
     planFreeMultiCatBanner: '免費版僅支援 1 隻貓。你目前有超過 1 隻貓咪，請刪減貓咪或切換至 Pro 測試版。',
     openSettings: '方案與設定',
+    remindersTitle: '提醒設定',
+    remindersBack: '返回設定',
+    remindersLead: '本機瀏覽器通知（PWA / 開啟分頁時有效）。',
+    remindersNotifyDenied: '尚未開啟通知權限',
+    remindersNotifyEnable: '開啟通知',
+    remindersNotifyGranted: '通知已開啟',
+    remindersNotifyUnsupported: '此瀏覽器不支援通知',
+    remindersCount: '提醒數量',
+    remindersAdd: '新增提醒',
+    remindersAddCustom: '自訂提醒',
+    remindersEmpty: '尚未設定提醒，可從下方快速新增。',
+    remindersForCat: '貓咪',
+    remindersTime: '時間',
+    remindersRepeat: '重複',
+    remindersTitleField: '標題',
+    remindersEnabled: '啟用',
+    remindersDelete: '刪除',
+    remindersSave: '儲存',
+    remindersQuickAdd: '快速新增',
+    remindersLimitFree: '免費版最多 3 則提醒。升級 Pro 測試版可設定最多 30 則。',
+    remindersLimitReached: '已達提醒上限',
+    remindersRepeatDaily: '每天',
+    remindersRepeatWeekly: '每週',
+    remindersRepeatMonthly: '每月',
+    remindersInterval: '間隔',
+    remindersTypeDaily: '每日照護',
+    remindersTypeWeight: '體重',
+    remindersTypeDeworming: '驅蟲',
+    remindersTypeVet: '看獸醫',
+    remindersTypeCustom: '自訂',
     sharedCareTitle: '共同照護',
     sharedCareNavHint: '與家人／室友共享同一隻貓的紀錄（示範流程）',
     sharedCareBack: '返回',
@@ -663,6 +710,36 @@ const text = {
     planFreeMultiCatBanner:
       'Free supports one cat only. You currently have more than one — delete extras or switch to Pro (test).',
     openSettings: 'Plan & settings',
+    remindersTitle: 'Reminders',
+    remindersBack: 'Back to settings',
+    remindersLead: 'Local browser notifications (works in PWA while the app is open).',
+    remindersNotifyDenied: 'Notification permission is off',
+    remindersNotifyEnable: 'Enable notifications',
+    remindersNotifyGranted: 'Notifications enabled',
+    remindersNotifyUnsupported: 'Notifications are not supported here',
+    remindersCount: 'Reminders',
+    remindersAdd: 'Add reminder',
+    remindersAddCustom: 'Custom reminder',
+    remindersEmpty: 'No reminders yet — use quick add below.',
+    remindersForCat: 'Cat',
+    remindersTime: 'Time',
+    remindersRepeat: 'Repeat',
+    remindersTitleField: 'Title',
+    remindersEnabled: 'On',
+    remindersDelete: 'Delete',
+    remindersSave: 'Save',
+    remindersQuickAdd: 'Quick add',
+    remindersLimitFree: 'Free plan: up to 3 reminders. Pro (test) allows up to 30.',
+    remindersLimitReached: 'Reminder limit reached',
+    remindersRepeatDaily: 'Daily',
+    remindersRepeatWeekly: 'Weekly',
+    remindersRepeatMonthly: 'Monthly',
+    remindersInterval: 'Every',
+    remindersTypeDaily: 'Daily care',
+    remindersTypeWeight: 'Weight',
+    remindersTypeDeworming: 'Deworming',
+    remindersTypeVet: 'Vet',
+    remindersTypeCustom: 'Custom',
     sharedCareTitle: 'Shared care',
     sharedCareNavHint: 'Share one cat’s log with family or roommates (demo flow).',
     sharedCareBack: 'Back',
@@ -1160,6 +1237,15 @@ export default function App() {
   const [historyDateEnd, setHistoryDateEnd] = useState('');
   const [historyDatePreset, setHistoryDatePreset] = useState<HistoryDatePreset>('none');
   const [historyProHint, setHistoryProHint] = useState<string | null>(null);
+  const [reminders, setReminders] = useState<Reminder[]>(() => loadReminders());
+  const [notificationPerm, setNotificationPerm] = useState(() => getNotificationPermission());
+  const [reminderLimitHint, setReminderLimitHint] = useState<string | null>(null);
+  const [customReminderTitle, setCustomReminderTitle] = useState('');
+  const [customReminderTime, setCustomReminderTime] = useState('09:00');
+  const [customReminderRepeat, setCustomReminderRepeat] = useState<ReminderRepeatType>('daily');
+  const [customReminderInterval, setCustomReminderInterval] = useState(1);
+  const [customReminderKind, setCustomReminderKind] = useState<ReminderKind>('custom');
+  const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
   const [aiClientId] = useState(() => getOrCreateClientId());
   const [appPlan, setAppPlan] = useState<AppPlan>(() => getAiPlan());
   const applyLocalAssistantQuota = useCallback(
@@ -1610,6 +1696,70 @@ export default function App() {
     latestWeight && oldestRecentWeight && latestWeight.id !== oldestRecentWeight.id
       ? latestWeight.weight - oldestRecentWeight.weight
       : 0;
+
+  const catNameById = useMemo(
+    () => Object.fromEntries(cats.map((c) => [c.id, c.name])),
+    [cats]
+  );
+  const reminderLimit = getReminderLimit(appPlan);
+
+  const persistReminders = useCallback((list: Reminder[]) => {
+    saveReminders(list);
+    setReminders(list);
+  }, []);
+
+  const tryAddReminder = useCallback(
+    (r: Reminder) => {
+      if (reminders.length >= reminderLimit) {
+        setReminderLimitHint(
+          appPlan === 'free' ? tr.remindersLimitFree : tr.remindersLimitReached
+        );
+        return false;
+      }
+      setReminderLimitHint(null);
+      persistReminders([r, ...reminders]);
+      return true;
+    },
+    [reminders, reminderLimit, appPlan, tr.remindersLimitFree, tr.remindersLimitReached, persistReminders]
+  );
+
+  const updateReminder = useCallback(
+    (id: string, patch: Partial<Reminder>) => {
+      persistReminders(reminders.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    },
+    [reminders, persistReminders]
+  );
+
+  const deleteReminder = useCallback(
+    (id: string) => {
+      persistReminders(reminders.filter((r) => r.id !== id));
+    },
+    [reminders, persistReminders]
+  );
+
+  useEffect(() => {
+    setCustomReminderCatId((prev) =>
+      cats.some((c) => c.id === prev) ? prev : selectedCatId
+    );
+  }, [selectedCatId, cats]);
+
+  useEffect(() => {
+    if (!getNotificationSupport()) return;
+    if (!wasNotificationPermissionAsked()) {
+      void requestNotificationPermission().then(() => {
+        setNotificationPerm(getNotificationPermission());
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const tick = () => {
+      setReminders((prev) => processDueReminders(prev, catNameById, lang));
+    };
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, [lang, catNameById]);
 
   useEffect(() => {
     localStorage.setItem(LANG_KEY, lang);
@@ -3586,6 +3736,250 @@ export default function App() {
   };
 
 
+  const renderRemindersPage = () => {
+    const perm = notificationPerm;
+    const canNotify = perm === 'granted';
+    const kindLabel = (k: ReminderKind) => {
+      if (k === 'daily') return tr.remindersTypeDaily;
+      if (k === 'weight') return tr.remindersTypeWeight;
+      if (k === 'deworming') return tr.remindersTypeDeworming;
+      if (k === 'vet') return tr.remindersTypeVet;
+      return tr.remindersTypeCustom;
+    };
+
+    return (
+      <>
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setPage('settings')}
+            className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
+          >
+            ← {tr.remindersBack}
+          </button>
+          <div className="text-3xl" aria-hidden>🔔</div>
+          <h1 className="mt-2 text-xl font-bold text-stone-900">{tr.remindersTitle}</h1>
+          <p className="mt-1 text-sm text-stone-500">{tr.remindersLead}</p>
+        </section>
+
+        <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
+          {!getNotificationSupport() ? (
+            <p className="text-sm text-stone-600">{tr.remindersNotifyUnsupported}</p>
+          ) : canNotify ? (
+            <p className="text-sm font-medium text-emerald-700">{tr.remindersNotifyGranted}</p>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-amber-800">{tr.remindersNotifyDenied}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  void requestNotificationPermission().then(() => {
+                    setNotificationPerm(getNotificationPermission());
+                  });
+                }}
+                className="mt-3 w-full rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white"
+              >
+                {tr.remindersNotifyEnable}
+              </button>
+            </>
+          )}
+        </section>
+
+        <p className="mb-3 text-xs text-stone-500">
+          {tr.remindersCount}：{reminders.length} / {reminderLimit}
+        </p>
+        {reminderLimitHint ? (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            {reminderLimitHint}
+            {appPlan === 'free' ? (
+              <button
+                type="button"
+                onClick={() => setPage('settings')}
+                className="mt-2 block font-semibold text-orange-600 hover:underline"
+              >
+                {tr.openSettings}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {reminders.length === 0 ? (
+          <div className="mb-4 rounded-2xl bg-white p-6 text-center text-sm text-stone-500 shadow-sm">
+            {tr.remindersEmpty}
+          </div>
+        ) : (
+          <div className="mb-4 space-y-3">
+            {reminders.map((r) => {
+              const cat = cats.find((c) => c.id === r.catId);
+              return (
+                <article
+                  key={r.id}
+                  className={`rounded-2xl border p-4 shadow-sm ${r.enabled ? 'border-orange-100 bg-white' : 'border-stone-100 bg-stone-50/80 opacity-80'}`}
+                >
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-stone-900">{r.title}</p>
+                      <p className="mt-0.5 text-xs text-stone-500">
+                        {cat?.emoji} {cat?.name ?? r.catId} · {kindLabel(r.type)} ·{' '}
+                        {repeatTypeLabel(r.repeatType, lang)}
+                        {r.repeatInterval > 1 ? ` ×${r.repeatInterval}` : ''}
+                      </p>
+                    </div>
+                    <label className="flex shrink-0 items-center gap-1.5 text-xs font-bold text-stone-600">
+                      <input
+                        type="checkbox"
+                        checked={r.enabled}
+                        onChange={(e) => updateReminder(r.id, { enabled: e.target.checked })}
+                        className="h-4 w-4 rounded border-stone-300 text-orange-500"
+                      />
+                      {tr.remindersEnabled}
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{tr.remindersTime}</label>
+                      <input
+                        type="time"
+                        value={r.time}
+                        onChange={(e) => updateReminder(r.id, { time: e.target.value })}
+                        className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteReminder(r.id)}
+                      className="ml-auto rounded-xl border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
+                    >
+                      {tr.remindersDelete}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-sm font-bold text-stone-900">{tr.remindersQuickAdd}</h2>
+          <div className="mb-3">
+            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersForCat}</label>
+            <select
+              value={customReminderCatId}
+              onChange={(e) => setCustomReminderCatId(e.target.value)}
+              className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-300"
+            >
+              {cats.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.emoji} {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {REMINDER_TEMPLATES.map((tpl) => {
+              const label = lang === 'zh' ? tpl.titleZh : tpl.titleEn;
+              return (
+                <button
+                  key={`${tpl.kind}-${tpl.titleZh}`}
+                  type="button"
+                  onClick={() => {
+                    tryAddReminder(createReminderFromTemplate(tpl, customReminderCatId, lang));
+                  }}
+                  className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-[11px] font-semibold text-orange-800 hover:bg-orange-100"
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-sm font-bold text-stone-900">{tr.remindersAddCustom}</h2>
+          <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersTitleField}</label>
+          <input
+            value={customReminderTitle}
+            onChange={(e) => setCustomReminderTitle(e.target.value)}
+            className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-300"
+          />
+          <div className="mb-2 grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersTime}</label>
+              <input
+                type="time"
+                value={customReminderTime}
+                onChange={(e) => setCustomReminderTime(e.target.value)}
+                className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersRepeat}</label>
+              <select
+                value={customReminderRepeat}
+                onChange={(e) => setCustomReminderRepeat(e.target.value as ReminderRepeatType)}
+                className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
+              >
+                <option value="daily">{tr.remindersRepeatDaily}</option>
+                <option value="weekly">{tr.remindersRepeatWeekly}</option>
+                <option value="monthly">{tr.remindersRepeatMonthly}</option>
+              </select>
+            </div>
+          </div>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersForCat}</label>
+              <select
+                value={customReminderCatId}
+                onChange={(e) => setCustomReminderCatId(e.target.value)}
+                className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
+              >
+                {cats.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.emoji} {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersInterval}</label>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={customReminderInterval}
+                onChange={(e) => setCustomReminderInterval(Math.max(1, Number(e.target.value) || 1))}
+                className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const title = customReminderTitle.trim();
+              if (!title) return;
+              if (
+                tryAddReminder(
+                  createCustomReminder(customReminderCatId, {
+                    type: customReminderKind,
+                    title,
+                    time: customReminderTime,
+                    repeatType: customReminderRepeat,
+                    repeatInterval: customReminderInterval,
+                  })
+                )
+              ) {
+                setCustomReminderTitle('');
+              }
+            }}
+            className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm"
+          >
+            {tr.remindersAdd}
+          </button>
+        </section>
+      </>
+    );
+  };
+
   const renderSettingsPage = () => (
     <>
       <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
@@ -3597,6 +3991,21 @@ export default function App() {
           ← {tr.settingsBack}
         </button>
         <h1 className="text-xl font-bold text-stone-900">{tr.settingsTitle}</h1>
+      </section>
+
+      <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.remindersTitle}</h2>
+        <p className="mb-3 text-xs leading-relaxed text-stone-500">{tr.remindersLead}</p>
+        <button
+          type="button"
+          onClick={() => setPage('reminders')}
+          className="w-full rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
+        >
+          {tr.remindersTitle}
+        </button>
+        {appPlan === 'free' ? (
+          <p className="mt-2 text-[11px] leading-relaxed text-stone-400">{tr.remindersLimitFree}</p>
+        ) : null}
       </section>
 
       <section className="mb-4 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm">
@@ -3993,7 +4402,7 @@ export default function App() {
             <button onClick={() => setPage('history')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'history' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
               {tr.history}
             </button>
-            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' || page === 'settings' || page === 'sharedCare' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
+            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' || page === 'settings' || page === 'sharedCare' || page === 'reminders' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
               {tr.cats}
             </button>
             <button onClick={() => setPage('assistant')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'assistant' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
@@ -4024,6 +4433,7 @@ export default function App() {
         {page === 'history' && renderHistoryPage()}
         {page === 'cats' && renderCatsPage()}
         {page === 'settings' && renderSettingsPage()}
+        {page === 'reminders' && renderRemindersPage()}
         {page === 'sharedCare' && renderSharedCarePage()}
         {page === 'assistant' && renderAssistantPage()}
 
