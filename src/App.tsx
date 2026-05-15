@@ -12,6 +12,9 @@ import {
   generateAssistantCareBundleOpenAi,
   generateAssistantQaOpenAi,
   getCareBundleContextHash,
+  isAssistantCareBundleNetworkBlocked,
+  isAssistantDailyQuotaExhausted,
+  mergeAssistantQuotaFromSnapshot,
   peekCareBundleCache,
 } from './openaiAssistant';
 import {
@@ -36,6 +39,18 @@ import {
   mergeCloudCatsWithLocal,
   updateCatForOwner,
 } from './supabaseCats';
+import type { CareEventRow } from './supabaseDaily';
+import {
+  careEventCreatedOnLocalDate,
+  fetchCareEventsForCat,
+  fetchDailyRecordRow,
+  formatCareEventTimeLabel,
+  insertCareEventRow,
+  mergeCloudDailyPreferCloud,
+  stripPhotoFieldsFromDaily,
+  upsertDailyRecordCloud,
+  type DailyJson,
+} from './supabaseDaily';
 
 type Lang = 'zh' | 'en';
 
@@ -283,10 +298,9 @@ const text = {
     aiOpenAiBusy: '正在整理…',
     aiOpenAiFail: '這次沒成功：',
     assistantSendBusy: '處理中…',
-    aiQuotaLine: '今天還能用 {{remaining}} 次（每日共 {{limit}} 次）',
-    aiErrQuota: '今天次數用完了，明天再來好嗎？若你已升級仍遇到問題，請聯絡我們。',
-    aiErrQuotaFree: '今日免費 AI 次數已用完。Pro 版每日可使用 30 次。',
-    aiErrQuotaPro: '今日 AI 次數已用完，明天再試試。',
+    aiQuotaLine: '今天剩餘 AI 次數：{{remaining}} / {{limit}}',
+    aiQuotaExhaustedTitle: '今日 AI 次數已用完',
+    aiQuotaExhaustedUpgradeFree: '升級 Pro 可獲得更多 AI 次數',
     settingsTitle: '方案與設定',
     settingsBack: '返回貓咪',
     authAccountSection: '帳號與登入（Supabase）',
@@ -319,6 +333,7 @@ const text = {
     catsCloudLoadErr: '雲端貓咪載入失敗：',
     catsCloudSaveErr: '無法寫入雲端：',
     catsCloudDeleteErr: '無法從雲端刪除：',
+    careEventDailyUpdated: '更新了今日照護紀錄',
     settingsPlanSection: '訂閱方案（測試）',
     settingsPlanCurrent: '目前方案',
     settingsPlanFree: '免費版',
@@ -549,11 +564,9 @@ const text = {
     aiOpenAiBusy: 'Putting it together…',
     aiOpenAiFail: 'Something went wrong: ',
     assistantSendBusy: 'Working…',
-    aiQuotaLine: '{{remaining}} of {{limit}} summaries left today',
-    aiErrQuota: 'That is all for today — come back tomorrow. If you upgraded and still see this, please contact support.',
-    aiErrQuotaFree:
-      "You've used today's free AI quota. Pro includes 30 AI uses per day (when enabled on the server).",
-    aiErrQuotaPro: "You've used today's AI quota — try again tomorrow.",
+    aiQuotaLine: 'AI uses remaining today: {{remaining}} / {{limit}}',
+    aiQuotaExhaustedTitle: "Today's AI quota is used up.",
+    aiQuotaExhaustedUpgradeFree: 'Upgrade to Pro for more daily AI uses.',
     settingsTitle: 'Plan & settings',
     settingsBack: 'Back to cats',
     authAccountSection: 'Account (Supabase)',
@@ -586,6 +599,7 @@ const text = {
     catsCloudLoadErr: 'Could not load cats from the cloud: ',
     catsCloudSaveErr: 'Could not save to the cloud: ',
     catsCloudDeleteErr: 'Could not delete from the cloud: ',
+    careEventDailyUpdated: 'Updated today’s care log',
     settingsPlanSection: 'Plan (test mode)',
     settingsPlanCurrent: 'Current plan',
     settingsPlanFree: 'Free',
@@ -656,7 +670,10 @@ function aiStatusHint(lang: Lang, kind: 'off' | 'key'): string {
 
 function aiQuotaExhaustedMessage(lang: Lang, appPlan: AppPlan): string {
   const t = text[lang];
-  return appPlan === 'free' ? t.aiErrQuotaFree : t.aiErrQuotaPro;
+  if (appPlan === 'free') {
+    return `${t.aiQuotaExhaustedTitle}\n\n${t.aiQuotaExhaustedUpgradeFree}`;
+  }
+  return t.aiQuotaExhaustedTitle;
 }
 
 function makeId() {
@@ -1077,6 +1094,12 @@ export default function App() {
 
   const selectedCat = cats.find((cat) => cat.id === selectedCatId) ?? cats[0];
 
+  const useCloudDaily = useMemo(
+    () =>
+      Boolean(supabaseAuth.user && supabaseAuth.supabase && selectedCat && isCloudCatId(selectedCat.id)),
+    [supabaseAuth.user, supabaseAuth.supabase, selectedCat?.id]
+  );
+
   const [page, setPage] = useState<Page>('today');
   const [newCatName, setNewCatName] = useState('');
   const [multiCatHint, setMultiCatHint] = useState<string | null>(null);
@@ -1126,6 +1149,10 @@ export default function App() {
   const [authFormError, setAuthFormError] = useState<string | null>(null);
   const [catsCloudBusy, setCatsCloudBusy] = useState(false);
   const [catsCloudErr, setCatsCloudErr] = useState<string | null>(null);
+  const [cloudCareEvents, setCloudCareEvents] = useState<CareEventRow[]>([]);
+  const lastCloudDailyStripRef = useRef('');
+  const cloudDailyFetchSeqRef = useRef(0);
+  const cloudDailyHydratingRef = useRef(false);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -1337,7 +1364,7 @@ export default function App() {
       plan: appPlan,
     };
     const hasCache = peekCareBundleCache(ctx, meta) != null;
-    if (!hasCache && assistantQuota != null && assistantQuota.dailyRemaining <= 0) {
+    if (isAssistantCareBundleNetworkBlocked(assistantQuota, hasCache)) {
       setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
       setAiBundleLoading(false);
       return;
@@ -1347,13 +1374,7 @@ export default function App() {
       setAiCareBundle(bundle);
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
       if (quota) {
-        setAssistantQuota((prev) => ({
-          openaiReady: prev?.openaiReady ?? true,
-          planEffective: prev?.planEffective ?? 'free',
-          dailyLimit: quota.dailyLimit,
-          dailyUsed: quota.dailyUsed,
-          dailyRemaining: quota.dailyRemaining,
-        }));
+        setAssistantQuota((prev) => mergeAssistantQuotaFromSnapshot(prev, quota));
       } else {
         const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
         if (h) setAssistantQuota(h);
@@ -1391,7 +1412,7 @@ export default function App() {
       setAiReply('');
       return;
     }
-    if (assistantQuota != null && assistantQuota.dailyRemaining <= 0) {
+    if (isAssistantDailyQuotaExhausted(assistantQuota)) {
       setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
       setAiReply('');
       return;
@@ -1415,13 +1436,7 @@ export default function App() {
       );
       setAiReply(`${answer.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
       if (quota) {
-        setAssistantQuota((prev) => ({
-          openaiReady: prev?.openaiReady ?? true,
-          planEffective: prev?.planEffective ?? 'free',
-          dailyLimit: quota.dailyLimit,
-          dailyUsed: quota.dailyUsed,
-          dailyRemaining: quota.dailyRemaining,
-        }));
+        setAssistantQuota((prev) => mergeAssistantQuotaFromSnapshot(prev, quota));
       } else {
         const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
         if (h) setAssistantQuota(h);
@@ -1442,7 +1457,16 @@ export default function App() {
     } finally {
       setAiQaLoading(false);
     }
-  }, [assistantContext, aiQuestion, lang, assistantApiReady, assistantHealthReachable, aiClientId, appPlan]);
+  }, [
+    assistantContext,
+    aiQuestion,
+    lang,
+    assistantApiReady,
+    assistantHealthReachable,
+    aiClientId,
+    appPlan,
+    assistantQuota,
+  ]);
 
   const latestWeight = weightRecords[0];
   const oldestRecentWeight = weightRecords[Math.min(weightRecords.length - 1, 4)];
@@ -1521,6 +1545,92 @@ export default function App() {
     );
     setHistoryRefreshKey((v) => v + 1);
   }, [daily, selectedCat, today]);
+
+  useEffect(() => {
+    if (!useCloudDaily || !selectedCat || !supabaseAuth.supabase) return;
+    const sb = supabaseAuth.supabase;
+    const mySeq = ++cloudDailyFetchSeqRef.current;
+    cloudDailyHydratingRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      const { data: cloudPart, error } = await fetchDailyRecordRow(sb, selectedCat.id, today);
+      if (cancelled || mySeq !== cloudDailyFetchSeqRef.current) {
+        cloudDailyHydratingRef.current = false;
+        return;
+      }
+      if (error) {
+        console.warn('[daily_records fetch]', error.message);
+        cloudDailyHydratingRef.current = false;
+        return;
+      }
+      const localFull = loadDailyRecord(selectedCat.id, today) as unknown as DailyJson;
+      const merged = mergeCloudDailyPreferCloud(cloudPart as DailyJson | null, localFull) as DailyRecord;
+      setDaily(merged);
+      lastCloudDailyStripRef.current = JSON.stringify(stripPhotoFieldsFromDaily(merged as unknown as DailyJson));
+      cloudDailyHydratingRef.current = false;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [useCloudDaily, selectedCat?.id, today, supabaseAuth.supabase]);
+
+  useEffect(() => {
+    if (!useCloudDaily || !selectedCat || !supabaseAuth.supabase) {
+      setCloudCareEvents([]);
+      return;
+    }
+    void fetchCareEventsForCat(supabaseAuth.supabase, selectedCat.id).then(({ data, error }) => {
+      if (!error) setCloudCareEvents(data);
+    });
+  }, [useCloudDaily, selectedCat?.id, supabaseAuth.supabase]);
+
+  useEffect(() => {
+    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user.id;
+    const handle = window.setTimeout(() => {
+      if (cloudDailyHydratingRef.current) return;
+      const strip = stripPhotoFieldsFromDaily(daily as unknown as DailyJson);
+      const json = JSON.stringify(strip);
+      if (json === lastCloudDailyStripRef.current) return;
+      void (async () => {
+        const { error } = await upsertDailyRecordCloud(sb, {
+          catId: selectedCat.id,
+          recordDate: today,
+          data: strip,
+          updatedBy: uid,
+        });
+        if (error) {
+          console.warn('[daily_records upsert]', error.message);
+          return;
+        }
+        lastCloudDailyStripRef.current = json;
+        const actor =
+          supabaseAuth.profile?.display_name?.trim() || supabaseAuth.user?.email || 'User';
+        const summary = text[lang].careEventDailyUpdated;
+        const { error: evErr } = await insertCareEventRow(sb, {
+          catId: selectedCat.id,
+          actor,
+          action: 'daily_save',
+          summary,
+        });
+        if (evErr) console.warn('[care_events]', evErr.message);
+        const res = await fetchCareEventsForCat(sb, selectedCat.id);
+        if (!res.error) setCloudCareEvents(res.data);
+      })();
+    }, 550);
+    return () => window.clearTimeout(handle);
+  }, [
+    daily,
+    useCloudDaily,
+    selectedCat?.id,
+    today,
+    supabaseAuth.user?.id,
+    supabaseAuth.supabase,
+    supabaseAuth.profile?.display_name,
+    supabaseAuth.user?.email,
+    lang,
+  ]);
 
   useEffect(() => {
     if (!selectedCat) return;
@@ -2096,6 +2206,9 @@ export default function App() {
     const sharedCareToday = selectedCat
       ? sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang)
       : null;
+    const todayCloudFeed = useCloudDaily
+      ? cloudCareEvents.filter((e) => careEventCreatedOnLocalDate(e.created_at, today)).slice(0, 12)
+      : [];
 
     return (
     <>
@@ -2105,6 +2218,13 @@ export default function App() {
         <h2 className="text-base font-bold text-stone-900">{tr.sharedCareTodayFeedTitle}</h2>
         <p className="mt-1 text-xs text-stone-500">{tr.sharedCareTodayFeedDemo}</p>
         <ul className="mt-3 space-y-2 text-sm text-stone-700">
+          {todayCloudFeed.map((e) => (
+            <li key={e.id}>
+              <span className="font-semibold text-stone-900">{e.actor}</span>
+              <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
+              <span> — {e.summary}</span>
+            </li>
+          ))}
           {(sharedCareToday?.activities ?? []).slice(0, 8).map((a) => (
             <li key={a.id}>
               <span className="font-semibold text-stone-900">{a.actor}</span>
@@ -2112,7 +2232,7 @@ export default function App() {
               <span> — {a.summary}</span>
             </li>
           ))}
-          {!sharedCareToday?.activities?.length ? (
+          {!todayCloudFeed.length && !sharedCareToday?.activities?.length ? (
             <>
               <li>{tr.sharedCareDemoLine1}</li>
               <li>{tr.sharedCareDemoLine2}</li>
@@ -2690,6 +2810,21 @@ export default function App() {
             .replace('{{limit}}', String(assistantQuota.dailyLimit))
         : null;
 
+    const bundleMeta = {
+      clientId: aiClientId,
+      catId: assistantContext.catId,
+      usageDate: assistantContext.today,
+      plan: appPlan,
+    };
+    const careHasCache = peekCareBundleCache(assistantContext, bundleMeta) != null;
+    const bundleNetBlocked = isAssistantCareBundleNetworkBlocked(assistantQuota, careHasCache);
+    const qaBlocked = isAssistantDailyQuotaExhausted(assistantQuota);
+    const quotaExhaustedNotice =
+      apiReady &&
+      assistantQuota != null &&
+      assistantQuota.dailyLimit > 0 &&
+      assistantQuota.dailyRemaining <= 0;
+
     const dataFreshBundle = Boolean(aiCareBundle && !dataStale);
 
     const sevenDayLines = splitSevenDaySummaryIntoLines(buildSevenDayAnalysis(assistantContext));
@@ -2721,6 +2856,19 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        {quotaLine ? (
+          <p className="mb-3 text-[12px] leading-snug text-stone-500">{quotaLine}</p>
+        ) : null}
+
+        {quotaExhaustedNotice ? (
+          <div className="mb-3 rounded-xl border border-amber-200/90 bg-amber-50/90 px-3 py-2.5 text-[12px] leading-snug text-amber-950">
+            <p className="m-0 font-medium">{tr.aiQuotaExhaustedTitle}</p>
+            {appPlan === 'free' ? (
+              <p className="mt-1.5 m-0 text-[11px] text-amber-900/90">{tr.aiQuotaExhaustedUpgradeFree}</p>
+            ) : null}
+          </div>
+        ) : null}
 
         <section className="mb-4 rounded-2xl border border-stone-100 bg-white px-3.5 py-3.5 shadow-sm">
           <div className="mb-2.5 flex items-center gap-2">
@@ -2787,7 +2935,7 @@ export default function App() {
 
           <button
             type="button"
-            disabled={!apiReady || aiBundleLoading}
+            disabled={!apiReady || aiBundleLoading || bundleNetBlocked}
             onClick={runOpenAiCareBundle}
             className="w-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 py-3 text-[14px] font-semibold text-white shadow-md shadow-orange-200/50 transition hover:from-orange-500 hover:to-orange-600 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[200px] sm:px-8"
           >
@@ -2812,12 +2960,8 @@ export default function App() {
             <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiEmptyHint}</p>
           ) : null}
 
-          {quotaLine ? (
-            <p className="mt-3 text-[11px] leading-snug text-stone-400">{quotaLine}</p>
-          ) : null}
-
           {openAiErr ? (
-            <p className="mt-3 rounded-xl border border-red-100 bg-red-50/90 px-3 py-2.5 text-[13px] leading-snug text-red-900">
+            <p className="mt-3 whitespace-pre-line rounded-xl border border-red-100 bg-red-50/90 px-3 py-2.5 text-[13px] leading-snug text-red-900">
               {openAiErr}
             </p>
           ) : null}
@@ -2864,12 +3008,12 @@ export default function App() {
             value={aiQuestion}
             onChange={(e) => setAiQuestion(e.target.value)}
             placeholder={tr.assistantAskPlaceholder}
-            disabled={qaBusy || !apiReady}
+            disabled={qaBusy || !apiReady || qaBlocked}
             className="min-h-[5.5rem] w-full resize-none rounded-xl border border-stone-200 bg-stone-50/50 p-3 text-[13px] leading-snug text-stone-800 outline-none transition focus:border-orange-300 focus:bg-white disabled:opacity-60"
           />
           <button
             type="button"
-            disabled={qaBusy || !apiReady}
+            disabled={qaBusy || !apiReady || qaBlocked}
             onClick={runOpenAiQa}
             className="mt-3 w-full rounded-full border border-orange-200 bg-white py-3 text-[14px] font-semibold text-orange-600 shadow-sm transition hover:bg-orange-50 disabled:opacity-60"
           >
@@ -3102,9 +3246,20 @@ export default function App() {
 
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-2 text-base font-bold text-stone-900">{t.sharedCareActivityTitle}</h2>
-          {sc.activities.length === 0 ? (
+          {useCloudDaily && cloudCareEvents.length > 0 ? (
+            <ul className="mb-3 space-y-2">
+              {cloudCareEvents.map((e) => (
+                <li key={e.id} className="text-[13px] leading-snug text-stone-700">
+                  <span className="font-semibold text-stone-900">{e.actor}</span>
+                  <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
+                  <span> — {e.summary}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {sc.activities.length === 0 && !(useCloudDaily && cloudCareEvents.length > 0) ? (
             <p className="text-sm text-stone-500">{t.sharedCareActivityEmpty}</p>
-          ) : (
+          ) : sc.activities.length > 0 ? (
             <ul className="space-y-2">
               {sc.activities.map((a) => (
                 <li key={a.id} className="text-[13px] leading-snug text-stone-700">
@@ -3114,7 +3269,7 @@ export default function App() {
                 </li>
               ))}
             </ul>
-          )}
+          ) : null}
         </section>
       </>
     );

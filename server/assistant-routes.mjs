@@ -221,6 +221,66 @@ function assistantRateAndQuota(clientId, catId, usageDate, feature, planHint) {
   return { ok: true };
 }
 
+/**
+ * Shared path: OpenAI call → on success only, increment daily pool + append usage log + attach quota fields.
+ * @param {{
+ *   clientId: string;
+ *   catId: string;
+ *   usageDate: string;
+ *   planHint: 'free' | 'pro';
+ *   feature: 'care-bundle' | 'qa';
+ *   run: () => Promise<Record<string, unknown> & { usage: unknown }>;
+ * }} opts
+ * @returns {Promise<{ status: number, json: object }>}
+ */
+async function runAssistantOpenAiCounted(opts) {
+  const { clientId, catId, usageDate, planHint, feature, run } = opts;
+  try {
+    const out = await run();
+    const usage = out.usage;
+    const { usage: _u, ...jsonPayload } = out;
+    incrementDailyUsed(clientId, usageDate);
+    const estUsd = estUsdFromUsage(usage);
+    logLine({
+      userId: clientId,
+      catId,
+      feature,
+      ok: true,
+      statusCode: 200,
+      promptTokens: usage?.prompt_tokens ?? null,
+      completionTokens: usage?.completion_tokens ?? null,
+      totalTokens: usage?.total_tokens ?? null,
+      estUsd,
+    });
+    return {
+      status: 200,
+      json: { ...jsonPayload, ...dailyQuotaFields(clientId, usageDate, planHint) },
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logLine({
+      userId: clientId,
+      catId,
+      feature,
+      ok: false,
+      statusCode: 502,
+      error: msg.slice(0, 500),
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      estUsd: null,
+    });
+    return {
+      status: 502,
+      json: {
+        error: 'The AI service returned an error. Please try again later.',
+        code: 'OPENAI',
+        detail: msg.slice(0, 300),
+      },
+    };
+  }
+}
+
 async function handleCareBundle(lang, recordContext) {
   const { content, usage } = await openAiChatCompletion({
     messages: [
@@ -339,45 +399,17 @@ export async function assistCareBundlePOST(body) {
     };
   }
 
-  try {
-    const { bundle, usage } = await handleCareBundle(lang, recordContext);
-    incrementDailyUsed(clientId, usageDate);
-    const estUsd = estUsdFromUsage(usage);
-    logLine({
-      userId: clientId,
-      catId,
-      feature: 'care-bundle',
-      ok: true,
-      statusCode: 200,
-      promptTokens: usage?.prompt_tokens ?? null,
-      completionTokens: usage?.completion_tokens ?? null,
-      totalTokens: usage?.total_tokens ?? null,
-      estUsd,
-    });
-    return { status: 200, json: { ...bundle, ...dailyQuotaFields(clientId, usageDate, planHint) } };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logLine({
-      userId: clientId,
-      catId,
-      feature: 'care-bundle',
-      ok: false,
-      statusCode: 502,
-      error: msg.slice(0, 500),
-      promptTokens: null,
-      completionTokens: null,
-      totalTokens: null,
-      estUsd: null,
-    });
-    return {
-      status: 502,
-      json: {
-        error: 'The AI service returned an error. Please try again later.',
-        code: 'OPENAI',
-        detail: msg.slice(0, 300),
-      },
-    };
-  }
+  return runAssistantOpenAiCounted({
+    clientId,
+    catId,
+    usageDate,
+    planHint,
+    feature: 'care-bundle',
+    run: async () => {
+      const { bundle, usage } = await handleCareBundle(lang, recordContext);
+      return { ...bundle, usage };
+    },
+  });
 }
 
 /**
@@ -433,43 +465,15 @@ export async function assistQaPOST(body) {
     };
   }
 
-  try {
-    const { answer, usage } = await handleQa(lang, recordContext, question);
-    incrementDailyUsed(clientId, usageDate);
-    const estUsd = estUsdFromUsage(usage);
-    logLine({
-      userId: clientId,
-      catId,
-      feature: 'qa',
-      ok: true,
-      statusCode: 200,
-      promptTokens: usage?.prompt_tokens ?? null,
-      completionTokens: usage?.completion_tokens ?? null,
-      totalTokens: usage?.total_tokens ?? null,
-      estUsd,
-    });
-    return { status: 200, json: { answer, ...dailyQuotaFields(clientId, usageDate, planHint) } };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logLine({
-      userId: clientId,
-      catId,
-      feature: 'qa',
-      ok: false,
-      statusCode: 502,
-      error: msg.slice(0, 500),
-      promptTokens: null,
-      completionTokens: null,
-      totalTokens: null,
-      estUsd: null,
-    });
-    return {
-      status: 502,
-      json: {
-        error: 'The AI service returned an error. Please try again later.',
-        code: 'OPENAI',
-        detail: msg.slice(0, 300),
-      },
-    };
-  }
+  return runAssistantOpenAiCounted({
+    clientId,
+    catId,
+    usageDate,
+    planHint,
+    feature: 'qa',
+    run: async () => {
+      const { answer, usage } = await handleQa(lang, recordContext, question);
+      return { answer, usage };
+    },
+  });
 }

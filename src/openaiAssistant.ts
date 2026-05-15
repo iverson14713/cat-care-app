@@ -142,6 +142,38 @@ export type AssistantQuotaSnapshot = Pick<
   'dailyLimit' | 'dailyUsed' | 'dailyRemaining'
 >;
 
+/** True when the client already knows today’s pool is empty (server is still authoritative). */
+export function isAssistantDailyQuotaExhausted(
+  quota: Pick<AssistantHealthPayload, 'dailyRemaining'> | null
+): boolean {
+  return quota != null && quota.dailyRemaining <= 0;
+}
+
+/**
+ * Block a new care-bundle API call (not a local cache read).
+ * Cached bundle can still be shown without spending a slot.
+ */
+export function isAssistantCareBundleNetworkBlocked(
+  quota: Pick<AssistantHealthPayload, 'dailyRemaining'> | null,
+  hasCachedBundle: boolean
+): boolean {
+  if (hasCachedBundle) return false;
+  return isAssistantDailyQuotaExhausted(quota);
+}
+
+export function mergeAssistantQuotaFromSnapshot(
+  prev: AssistantHealthPayload | null,
+  quota: AssistantQuotaSnapshot
+): AssistantHealthPayload {
+  return {
+    openaiReady: prev?.openaiReady ?? true,
+    planEffective: prev?.planEffective ?? 'free',
+    dailyLimit: quota.dailyLimit,
+    dailyUsed: quota.dailyUsed,
+    dailyRemaining: quota.dailyRemaining,
+  };
+}
+
 function parseQuotaSnapshot(d: Record<string, unknown>): AssistantQuotaSnapshot | null {
   const dailyLimit = Number(d.dailyLimit);
   const dailyUsed = Number(d.dailyUsed);
