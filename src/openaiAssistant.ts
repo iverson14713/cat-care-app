@@ -5,6 +5,7 @@ import type {
   DailyData,
 } from './aiCareAssistant';
 import {
+  applySuccessfulAiUsage,
   buildLocalAiQuota,
   careBundleCacheKey,
   djb2Hash,
@@ -40,14 +41,12 @@ const API_PREFIX = '/api/assistant';
 
 const CARE_BUNDLE_DEFAULTS: Record<'zh' | 'en', AssistantCareBundleJson> = {
   zh: {
-    healthSummary: '目前無法產生今日摘要。',
-    sevenDayAnalysis: '目前無法產生週期分析。',
-    vetReport: '目前沒有需整理給獸醫的重點。',
+    quickSummary: '目前無法產生快速摘要。',
+    careReminders: '請持續記錄今日照護項目。',
   },
   en: {
-    healthSummary: "Could not produce today's summary.",
-    sevenDayAnalysis: 'Could not produce the weekly analysis.',
-    vetReport: 'No vet handoff highlights from logs at this time.',
+    quickSummary: 'Could not produce a quick summary.',
+    careReminders: 'Keep logging today’s care items.',
   },
 };
 
@@ -74,24 +73,21 @@ function normalizeCareBundlePayload(data: Record<string, unknown>, lang: 'zh' | 
   if (Array.isArray(data) && data[0] && typeof data[0] === 'object' && !Array.isArray(data[0])) {
     obj = data[0] as Record<string, unknown>;
   }
-  const h = careBundleFirstField(obj, [
-    'healthSummary',
+  const q = careBundleFirstField(obj, [
+    'quickSummary',
     'summary',
+    'healthSummary',
     'todaySummary',
-    'health_summary',
   ]);
-  const s = careBundleFirstField(obj, [
-    'sevenDayAnalysis',
+  const r = careBundleFirstField(obj, [
+    'careReminders',
+    'reminders',
     'alerts',
-    'weeklyAnalysis',
-    'weekAnalysis',
-    'seven_day_analysis',
+    'sevenDayAnalysis',
   ]);
-  const v = careBundleFirstField(obj, ['vetReport', 'vet_summary', 'vetHandoff']);
   return {
-    healthSummary: h || d.healthSummary,
-    sevenDayAnalysis: s || d.sevenDayAnalysis,
-    vetReport: v || d.vetReport,
+    quickSummary: q || d.quickSummary,
+    careReminders: r || d.careReminders,
   };
 }
 
@@ -174,9 +170,12 @@ export function mergeAssistantQuotaFromSnapshot(
   quota: AssistantQuotaSnapshot,
   plan: 'free' | 'pro',
   clientId: string,
-  usageDate: string
+  usageDate: string,
+  options?: { countedSuccess?: boolean }
 ): AssistantHealthPayload {
-  const merged = buildLocalAiQuota(plan, clientId, usageDate, quota.dailyUsed);
+  const merged = options?.countedSuccess
+    ? applySuccessfulAiUsage(plan, clientId, usageDate, quota.dailyUsed)
+    : buildLocalAiQuota(plan, clientId, usageDate, quota.dailyUsed);
   return {
     openaiReady: prev?.openaiReady ?? true,
     planEffective: plan,
@@ -184,6 +183,19 @@ export function mergeAssistantQuotaFromSnapshot(
     dailyUsed: merged.dailyUsed,
     dailyRemaining: merged.dailyRemaining,
   };
+}
+
+function quotaAfterCountedAiSuccess(
+  data: Record<string, unknown>,
+  meta: AssistantRequestMeta
+): AssistantQuotaSnapshot {
+  const raw = parseQuotaSnapshot(data);
+  return applySuccessfulAiUsage(
+    meta.plan,
+    meta.clientId,
+    meta.usageDate,
+    raw?.dailyUsed
+  );
 }
 
 export function buildAssistantHealthFromLocal(
@@ -305,42 +317,158 @@ export function buildRecordContextForLlm(ctx: AssistantContext): string {
   return lines.join('\n');
 }
 
+function appendDayRecordsBlock(
+  lines: string[],
+  days: { date: string; data: DailyData }[],
+  label: string
+): void {
+  lines.push(label);
+  if (!days.length) {
+    lines.push('(no days in range)');
+    lines.push('');
+    return;
+  }
+  for (const day of days) {
+    const x = day.data;
+    const bits = DAILY_CHECKBOX_IDS.map((id) => `${id}=${x[id] === true ? 1 : 0}`).join(', ');
+    const an = strField(x, 'abnormalNote');
+    const dn = strField(x, 'dailyNote');
+    lines.push(
+      `${day.date}: ${bits} | abnormalNote="${clip(an, 200)}" | dailyNote="${clip(dn, 200)}" | abnormalPhotos=${photoCount(x, 'abnormalPhotos')} | dailyPhotos=${photoCount(x, 'dailyPhotos')}`
+    );
+  }
+  lines.push('');
+}
+
+/** Today + up to 7 recent days — quick AI snapshot only. */
+export function buildQuickAnalysisContextForLlm(ctx: AssistantContext): string {
+  const recent = ctx.last7Days.length ? ctx.last7Days : ctx.recentDaysForAi.slice(0, 7);
+  const oldest = recent.length > 0 ? recent[recent.length - 1].date : ctx.today;
+  const wRows = ctx.weightRecords
+    .filter((w) => w.date >= oldest && w.date <= ctx.today)
+    .slice(0, 4);
+
+  const lines: string[] = [];
+  const zh = ctx.lang === 'zh';
+  lines.push(
+    zh
+      ? '--- 任務：快速照護摘要（今日＋最近幾天；非完整週報） ---'
+      : '--- Task: quick care snapshot (today + recent days — NOT a full weekly report) ---'
+  );
+  lines.push(`Language for reply: ${zh ? 'Traditional Chinese (zh-TW)' : 'English'}`);
+  lines.push(`Today (local date): ${ctx.today}`);
+  lines.push(`Selected cat name: ${ctx.cat.name}`);
+  lines.push(`Chronic / meds note: ${clip(ctx.cat.chronicNote ?? '', 300)}`);
+  lines.push('');
+  lines.push('--- Today daily record ---');
+  const d = ctx.todayDaily;
+  for (const id of DAILY_CHECKBOX_IDS) {
+    lines.push(boolLine(d, id));
+  }
+  lines.push(`abnormalNote: ${clip(strField(d, 'abnormalNote'), 400)}`);
+  lines.push(`dailyNote: ${clip(strField(d, 'dailyNote'), 400)}`);
+  lines.push(`abnormalPhotosCount: ${photoCount(d, 'abnormalPhotos')}`);
+  lines.push('');
+  appendDayRecordsBlock(
+    lines,
+    recent,
+    zh
+      ? `--- Recent days (newest first, max ${recent.length}) ---`
+      : `--- Recent days (newest first, max ${recent.length}) ---`
+  );
+  lines.push('--- Weight (recent, newest first) ---');
+  if (!wRows.length) lines.push('(none)');
+  else for (const w of wRows) lines.push(`${w.date}: ${w.weight} kg`);
+  return lines.join('\n');
+}
+
 const WEEKLY_REPORT_DEFAULTS: Record<'zh' | 'en', AssistantWeeklyReportJson> = {
   zh: {
     weekSummary: '目前無法產生本週總結。',
-    watchItems: '目前無法整理需要留意的事項。',
-    nextWeekFocus: '目前無法整理下週紀錄建議。',
+    completionRate: '目前無法評估照護完成度。',
+    trends: '目前無法整理趨勢。',
+    abnormalTimeline: '本週無異常紀錄或資料不足。',
+    weightChange: '本週無體重紀錄。',
+    vsLastWeek: '上週資料不足，無法比較。',
+    nextWeekFocus: '請持續記錄餵食、喝水與排泄。',
   },
   en: {
     weekSummary: 'Could not produce the weekly summary.',
-    watchItems: 'Could not summarize watch items.',
-    nextWeekFocus: 'Could not summarize next-week logging focus.',
+    completionRate: 'Could not assess logging completion.',
+    trends: 'Could not summarize trends.',
+    abnormalTimeline: 'No abnormal timeline or insufficient data.',
+    weightChange: 'No weight entries this week.',
+    vsLastWeek: 'Not enough prior-week data to compare.',
+    nextWeekFocus: 'Keep logging meals, water, and litter.',
   },
 };
 
 function normalizeWeeklyReportPayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantWeeklyReportJson {
   const d = WEEKLY_REPORT_DEFAULTS[lang];
-  const obj =
-    data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const obj = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const pick = (keys: string[], fallback: string) => {
+    for (const k of keys) {
+      const s = careBundleFirstField(obj, [k]);
+      if (s) return s;
+    }
+    return fallback;
+  };
   return {
-    weekSummary: careBundleFirstField(obj, ['weekSummary', 'weeklySummary', 'summary']) || d.weekSummary,
-    watchItems: careBundleFirstField(obj, ['watchItems', 'alerts', 'concerns']) || d.watchItems,
-    nextWeekFocus:
-      careBundleFirstField(obj, ['nextWeekFocus', 'nextWeek', 'loggingFocus']) || d.nextWeekFocus,
+    weekSummary: pick(['weekSummary', 'weeklySummary', 'summary'], d.weekSummary),
+    completionRate: pick(['completionRate', 'completion'], d.completionRate),
+    trends: pick(['trends', 'trend'], d.trends),
+    abnormalTimeline: pick(['abnormalTimeline', 'abnormal', 'watchItems'], d.abnormalTimeline),
+    weightChange: pick(['weightChange', 'weight'], d.weightChange),
+    vsLastWeek: pick(['vsLastWeek', 'compareLastWeek'], d.vsLastWeek),
+    nextWeekFocus: pick(['nextWeekFocus', 'nextWeek'], d.nextWeekFocus),
   };
 }
 
-/** Last 7 days only — for AI weekly report. */
+/** This week + previous week (up to 14 days) — formal Pro weekly report. */
 export function buildWeeklyReportContextForLlm(ctx: AssistantContext): string {
-  const header =
-    ctx.lang === 'zh'
-      ? '--- 任務：最近 7 天照護週報（僅用下列紀錄；勿診斷、勿開藥） ---\n'
-      : '--- Task: last-7-day care weekly report (records below only; no diagnosis or meds) ---\n';
-  const narrow: AssistantContext = {
-    ...ctx,
-    recentDaysForAi: ctx.last7Days.length ? ctx.last7Days : ctx.recentDaysForAi.slice(0, 7),
-  };
-  return header + buildRecordContextForLlm(narrow);
+  const all = ctx.recentDaysForAi.length >= 7 ? ctx.recentDaysForAi : [...ctx.last7Days, ...ctx.recentDaysForAi];
+  const deduped: { date: string; data: DailyData }[] = [];
+  const seen = new Set<string>();
+  for (const day of all) {
+    if (seen.has(day.date)) continue;
+    seen.add(day.date);
+    deduped.push(day);
+    if (deduped.length >= 14) break;
+  }
+  const thisWeek = deduped.slice(0, 7);
+  const prevWeek = deduped.slice(7, 14);
+  const oldest = deduped.length ? deduped[deduped.length - 1].date : ctx.today;
+  const wRows = ctx.weightRecords
+    .filter((w) => w.date >= oldest && w.date <= ctx.today)
+    .slice(0, 20);
+
+  const lines: string[] = [];
+  const zh = ctx.lang === 'zh';
+  lines.push(
+    zh
+      ? '--- 任務：正式照護週報（本週 vs 上週；完整格式） ---'
+      : '--- Task: formal weekly care report (this week vs previous week) ---'
+  );
+  lines.push(`Language for reply: ${zh ? 'Traditional Chinese (zh-TW)' : 'English'}`);
+  lines.push(`Today (local date): ${ctx.today}`);
+  lines.push(`Selected cat: ${ctx.cat.name}`);
+  lines.push(`Chronic / meds: ${clip(ctx.cat.chronicNote ?? '', 400)}`);
+  lines.push(`Allergy: ${clip(ctx.cat.allergyNote ?? '', 300)}`);
+  lines.push('');
+  appendDayRecordsBlock(
+    lines,
+    thisWeek,
+    zh ? '--- 本週（最近 7 天，新→舊）---' : '--- This week (last 7 days, newest first) ---'
+  );
+  appendDayRecordsBlock(
+    lines,
+    prevWeek,
+    zh ? '--- 上週（再往前 7 天，新→舊）---' : '--- Previous week (days 8–14 back, newest first) ---'
+  );
+  lines.push(zh ? '--- 體重紀錄（同期間，新→舊）---' : '--- Weight entries (same window, newest first) ---');
+  if (!wRows.length) lines.push('(none)');
+  else for (const w of wRows) lines.push(`${w.date}: ${w.weight} kg | note: ${clip(w.note, 200)}`);
+  return lines.join('\n');
 }
 
 /** Server reachable + quota snapshot. Returns null on network / parse failure. */
@@ -373,7 +501,7 @@ export async function fetchAssistantHealth(
 
 /** Hash of the payload sent to the care-bundle API (for stale UI + cache keys). */
 export function getCareBundleContextHash(ctx: AssistantContext): string {
-  return djb2Hash(buildRecordContextForLlm(ctx));
+  return djb2Hash(buildQuickAnalysisContextForLlm(ctx));
 }
 
 /** Read cached care bundle for current cat/day/context without calling the network. */
@@ -381,7 +509,7 @@ export function peekCareBundleCache(
   ctx: AssistantContext,
   meta: AssistantRequestMeta
 ): AssistantCareBundleJson | null {
-  const recordContext = buildRecordContextForLlm(ctx);
+  const recordContext = buildQuickAnalysisContextForLlm(ctx);
   const h = djb2Hash(recordContext);
   const ck = careBundleCacheKey(meta.catId, meta.usageDate, h);
   const cachedRaw = readCareBundleCacheJson(ck);
@@ -399,7 +527,7 @@ export async function generateAssistantCareBundleOpenAi(
   meta: AssistantRequestMeta,
   signal?: AbortSignal
 ): Promise<{ bundle: AssistantCareBundleJson; quota: AssistantQuotaSnapshot | null }> {
-  const recordContext = buildRecordContextForLlm(ctx);
+  const recordContext = buildQuickAnalysisContextForLlm(ctx);
   const ck = careBundleCacheKey(meta.catId, meta.usageDate, djb2Hash(recordContext));
   const fromCache = peekCareBundleCache(ctx, meta);
   if (fromCache) return { bundle: fromCache, quota: null };
@@ -422,10 +550,7 @@ export async function generateAssistantCareBundleOpenAi(
     throw new AssistantApiError(message, code, res.status);
   }
   const data = (await res.json()) as Record<string, unknown>;
-  const quotaRaw = parseQuotaSnapshot(data);
-  const quota = quotaRaw
-    ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
-    : null;
+  const quota = quotaAfterCountedAiSuccess(data, meta);
   const bundle = normalizeCareBundlePayload(data, ctx.lang);
   writeCareBundleCacheJson(ck, JSON.stringify(bundle));
   return { bundle, quota };
@@ -460,10 +585,7 @@ export async function generateAssistantQaOpenAi(
   if (typeof data.answer !== 'string') {
     throw new Error('Invalid response: missing answer');
   }
-  const quotaRaw = parseQuotaSnapshot(data);
-  const quota = quotaRaw
-    ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
-    : null;
+  const quota = quotaAfterCountedAiSuccess(data, meta);
   return { answer: data.answer.trim(), quota };
 }
 
@@ -491,10 +613,7 @@ export async function generateAssistantWeeklyReportOpenAi(
     throw new AssistantApiError(message, code, res.status);
   }
   const data = (await res.json()) as Record<string, unknown>;
-  const quotaRaw = parseQuotaSnapshot(data);
-  const quota = quotaRaw
-    ? buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, quotaRaw.dailyUsed)
-    : null;
+  const quota = quotaAfterCountedAiSuccess(data, meta);
   const report = normalizeWeeklyReportPayload(data, ctx.lang);
   return { report, quota };
 }

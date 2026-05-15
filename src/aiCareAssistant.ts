@@ -15,15 +15,20 @@ export type WeightEntry = { id: string; date: string; weight: number; note: stri
 
 export type DayRecord = { date: string; data: DailyData };
 
+/** Quick AI snapshot — today + recent days, short reminders only. */
 export type AssistantCareBundleJson = {
-  healthSummary: string;
-  sevenDayAnalysis: string;
-  vetReport: string;
+  quickSummary: string;
+  careReminders: string;
 };
 
+/** Pro formal weekly report — full structured sections. */
 export type AssistantWeeklyReportJson = {
   weekSummary: string;
-  watchItems: string;
+  completionRate: string;
+  trends: string;
+  abnormalTimeline: string;
+  weightChange: string;
+  vsLastWeek: string;
   nextWeekFocus: string;
 };
 

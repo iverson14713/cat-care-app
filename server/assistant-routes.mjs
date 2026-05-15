@@ -18,10 +18,10 @@ import { appendUsageLog } from './usage-log.mjs';
 
 export const MAX_CONTEXT_CHARS = 48_000;
 export const MAX_QUESTION_CHARS = 8_000;
-export const CARE_MAX_TOKENS = 1200;
+export const CARE_MAX_TOKENS = 450;
 export const QA_MAX_TOKENS = 600;
 export const VET_REPORT_MAX_TOKENS = 900;
-export const WEEKLY_REPORT_MAX_TOKENS = 1000;
+export const WEEKLY_REPORT_MAX_TOKENS = 2000;
 
 const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
@@ -95,9 +95,8 @@ function careBundleFirstStringField(obj, keys) {
 function normalizeCareBundleFromParsed(parsed, lang) {
   const zh = lang === 'zh';
   const defaults = {
-    healthSummary: zh ? '目前無法產生今日摘要。' : "Could not produce today's summary.",
-    sevenDayAnalysis: zh ? '目前無法產生週期分析。' : 'Could not produce the weekly analysis.',
-    vetReport: zh ? '目前沒有需整理給獸醫的重點。' : 'No vet handoff highlights from logs at this time.',
+    quickSummary: zh ? '目前無法產生快速摘要。' : 'Could not produce a quick summary.',
+    careReminders: zh ? '請持續記錄今日照護項目。' : 'Keep logging today’s care items.',
   };
   let obj =
     parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -106,25 +105,17 @@ function normalizeCareBundleFromParsed(parsed, lang) {
   if (Array.isArray(parsed) && parsed[0] && typeof parsed[0] === 'object' && !Array.isArray(parsed[0])) {
     obj = /** @type {Record<string, unknown>} */ (parsed[0]);
   }
-  const h = careBundleFirstStringField(obj, [
-    'healthSummary',
-    'summary',
-    'todaySummary',
-    'health_summary',
-  ]);
-  const s = careBundleFirstStringField(obj, [
-    'sevenDayAnalysis',
-    'alerts',
-    'weeklyAnalysis',
-    'weekAnalysis',
-    'seven_day_analysis',
-  ]);
-  const v = careBundleFirstStringField(obj, ['vetReport', 'vet_summary', 'vetHandoff']);
-  return {
-    healthSummary: h || defaults.healthSummary,
-    sevenDayAnalysis: s || defaults.sevenDayAnalysis,
-    vetReport: v || defaults.vetReport,
-  };
+  const q =
+    careBundleFirstStringField(obj, ['quickSummary', 'summary', 'healthSummary', 'todaySummary']) ||
+    defaults.quickSummary;
+  const r =
+    careBundleFirstStringField(obj, [
+      'careReminders',
+      'reminders',
+      'alerts',
+      'sevenDayAnalysis',
+    ]) || defaults.careReminders;
+  return { quickSummary: q, careReminders: r };
 }
 
 /**
@@ -141,11 +132,8 @@ function careBundleFromUnparsedContent(lang, raw) {
     : '[Raw assistant reply; could not parse as the expected JSON — for reference only.]\n\n';
   const body = t || (zh ? '（模型未回傳可讀文字。）' : '(No readable text from the model.)');
   return {
-    healthSummary: prefix + body,
-    sevenDayAnalysis: zh
-      ? '週期分析未能以結構化格式取得；請以上方「照護摘要」區塊為準。'
-      : 'Weekly analysis was not available in structured form; use the summary block above.',
-    vetReport: defaults.vetReport,
+    quickSummary: prefix + body,
+    careReminders: defaults.careReminders,
   };
 }
 
@@ -324,20 +312,36 @@ async function handleQa(lang, recordContext, question) {
 }
 
 function normalizeWeeklyReportFromParsed(parsed, lang) {
+  const zh = lang === 'zh';
   const defaults = {
-    weekSummary: lang === 'zh' ? '目前無法產生本週總結。' : 'Could not produce the weekly summary.',
-    watchItems: lang === 'zh' ? '目前無法整理需要留意的事項。' : 'Could not summarize watch items.',
-    nextWeekFocus:
-      lang === 'zh' ? '目前無法整理下週紀錄建議。' : 'Could not summarize next-week logging focus.',
+    weekSummary: zh ? '目前無法產生本週總結。' : 'Could not produce the weekly summary.',
+    completionRate: zh ? '目前無法評估照護完成度。' : 'Could not assess logging completion.',
+    trends: zh ? '目前無法整理趨勢。' : 'Could not summarize trends.',
+    abnormalTimeline: zh ? '本週無異常紀錄或資料不足。' : 'No abnormal timeline or insufficient data.',
+    weightChange: zh ? '本週無體重紀錄。' : 'No weight entries this week.',
+    vsLastWeek: zh ? '上週資料不足，無法比較。' : 'Not enough prior-week data to compare.',
+    nextWeekFocus: zh ? '請持續記錄餵食、喝水與排泄。' : 'Keep logging meals, water, and litter.',
   };
   const obj =
     parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? /** @type {Record<string, unknown>} */ (parsed)
       : {};
-  const weekSummary = careBundleCoerceString(obj.weekSummary) || defaults.weekSummary;
-  const watchItems = careBundleCoerceString(obj.watchItems) || defaults.watchItems;
-  const nextWeekFocus = careBundleCoerceString(obj.nextWeekFocus) || defaults.nextWeekFocus;
-  return { weekSummary, watchItems, nextWeekFocus };
+  const pick = (keys, fallback) => {
+    for (const k of keys) {
+      const s = careBundleCoerceString(obj[k]);
+      if (s) return s;
+    }
+    return fallback;
+  };
+  return {
+    weekSummary: pick(['weekSummary', 'weeklySummary', 'summary'], defaults.weekSummary),
+    completionRate: pick(['completionRate', 'completion', 'loggingCompletion'], defaults.completionRate),
+    trends: pick(['trends', 'trend'], defaults.trends),
+    abnormalTimeline: pick(['abnormalTimeline', 'abnormal', 'watchItems'], defaults.abnormalTimeline),
+    weightChange: pick(['weightChange', 'weight'], defaults.weightChange),
+    vsLastWeek: pick(['vsLastWeek', 'compareLastWeek', 'lastWeekCompare'], defaults.vsLastWeek),
+    nextWeekFocus: pick(['nextWeekFocus', 'nextWeek'], defaults.nextWeekFocus),
+  };
 }
 
 async function handleWeeklyReport(lang, recordContext) {

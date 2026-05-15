@@ -84,6 +84,31 @@ export function remainingAiUsage(
   return buildLocalAiQuota(plan, clientId, usageDate, serverUsed).dailyRemaining;
 }
 
+/**
+ * After a successful counted AI call (care-bundle / qa / weekly-report).
+ * Serverless hosts may return a low `dailyUsed` (cold instance); always bump local by at least 1.
+ */
+export function applySuccessfulAiUsage(
+  plan: 'free' | 'pro',
+  clientId: string,
+  usageDate: string,
+  serverUsed?: number
+): LocalAiQuotaFields {
+  const limit = getDailyAiLimit(plan);
+  const local = readLocalAiUsageCount(clientId, usageDate);
+  const server =
+    serverUsed != null && Number.isFinite(serverUsed) ? Math.max(0, Math.floor(serverUsed)) : null;
+  let nextUsed = local + 1;
+  if (server != null && server > nextUsed) nextUsed = server;
+  nextUsed = Math.min(nextUsed, limit);
+  writeLocalAiUsageCount(clientId, usageDate, nextUsed);
+  return {
+    dailyLimit: limit,
+    dailyUsed: nextUsed,
+    dailyRemaining: Math.max(0, limit - nextUsed),
+  };
+}
+
 export function getOrCreateClientId(): string {
   try {
     let id = localStorage.getItem(CLIENT_KEY);

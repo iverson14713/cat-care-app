@@ -80,6 +80,16 @@ import {
   type ReminderRepeatType,
 } from './reminders';
 import { VetReportPage } from './VetReportPage';
+import {
+  exportReportElementAsPdf,
+  exportReportElementAsPng,
+  shareReportText,
+} from './vetReportExport';
+import {
+  formatWeeklyReportPlainText,
+  loadSavedWeeklyReport,
+  saveWeeklyReport,
+} from './weeklyReportStorage';
 
 type Lang = 'zh' | 'en';
 
@@ -320,28 +330,27 @@ const text = {
     assistantNav: '照護',
     assistantTitle: 'AI 照護助理',
     assistantLead: '依紀錄整理趨勢與提醒；僅供參考，不能取代獸醫。',
-    assistantToday: '健康小結',
-    assistantSeven: '照護感想',
-    assistantVetAi: '給獸醫的重點',
+    assistantQuickSummary: '今日快覽',
+    assistantCareReminders: '照護提醒（1～3 點）',
     assistantAsk: '隨口問問',
     assistantAskHint: '我會依你存的紀錄陪聊力所能及的小問題，無法代替看診。',
     assistantAskPlaceholder: '例如：這週喝水感覺怎樣？體重需要多留意嗎？',
     assistantSend: '送出',
     assistantReplyLabel: '回覆',
     aiChecking: '稍等一下…',
-    assistantLocalSevenTitle: '最近 7 天摘要',
+    assistantLocalSevenTitle: '本機週期快覽（非 AI）',
     assistantSevenExpandMore: '展開更多 ↓',
     assistantSevenCollapse: '收合 ↑',
-    assistantAnalysisCardTitle: '照護分析',
-    aiGenerateWeek: '生成 AI 照護分析',
-    aiAnalysisCardSubtitle: '分析最近 7 天紀錄並產生觀察與提醒。',
-    aiBundleCurrentHint: '已使用今日分析，可直接查看結果',
+    assistantAnalysisCardTitle: '快速照護分析',
+    aiGenerateWeek: '取得快速照護提醒',
+    aiAnalysisCardSubtitle: '只看今天與最近幾天，短文字 + 1～3 個照護提醒（非完整週報）。',
+    aiBundleCurrentHint: '已有今日快速摘要，可直接查看',
     aiDataStaleHint: '資料已更新，可重新生成分析',
     aiNeedServerEnvDev: '小幫手暫時醒不過來，請確認本機環境已依說明啟動後重新整理。',
     aiNeedServerEnvProd: '小幫手暫時無法使用，請稍後再試；若剛完成設定，請稍待部署完成。',
     aiAssistantUnreachableDev: '目前連不上服務，請確認開發環境已啟動後重新整理。',
     aiAssistantUnreachableProd: '目前連不上服務，請稍後再試或重新整理頁面。',
-    aiEmptyHint: '尚未生成分析，點下方按鈕即可開始。',
+    aiEmptyHint: '尚未取得快速提醒，點下方按鈕即可開始。',
     aiAskEmpty: '先寫下想問的內容好嗎？',
     aiOpenAiBusy: '正在整理…',
     aiOpenAiFail: '這次沒成功：',
@@ -464,11 +473,23 @@ const text = {
     proTeaserAdvancedWeekly: '進階 AI 週報',
     weeklyCardTitle: 'AI 週報',
     weeklyCardLead:
-      '依最近 7 天紀錄整理飲食、飲水、排泄、異常、體重、照片與備註趨勢，並提供下週照護提醒（非診斷、不開藥）。',
+      'Pro 正式照護週報：完成度、趨勢、異常時間線、體重、與上週比較、下週重點；可儲存、匯出、分享（非診斷、不開藥）。',
     weeklyGenerateBtn: '生成本週 AI 週報',
     weeklySummaryTitle: '本週總結',
-    weeklyWatchTitle: '需要留意',
-    weeklyNextWeekTitle: '下週建議紀錄重點',
+    weeklyCompletionTitle: '照護完成度',
+    weeklyTrendsTitle: '趨勢',
+    weeklyAbnormalTitle: '異常時間線',
+    weeklyWeightTitle: '體重變化',
+    weeklyVsLastTitle: '與上週比較',
+    weeklyNextWeekTitle: '下週照護重點',
+    weeklySave: '儲存週報',
+    weeklyShare: '分享文字',
+    weeklyExportPdf: '匯出 PDF',
+    weeklyExportPng: '匯出圖片',
+    weeklySavedOk: '週報已儲存於本機',
+    weeklyShareOk: '已複製／分享週報文字',
+    weeklyShareFail: '無法分享',
+    weeklyExportProOnly: '匯出需 Pro',
     weeklyFreePreview:
       '免費版可預覽功能說明。升級 Pro 測試版後，可一鍵產生完整 AI 週報（會使用 1 次今日 AI 次數）。',
     weeklyUpgrade: '升級 Pro 測試版',
@@ -645,28 +666,27 @@ const text = {
     assistantNav: 'Care',
     assistantTitle: 'AI Care Assistant',
     assistantLead: 'Trends from your logs; reference only—not vet advice.',
-    assistantToday: 'Health snapshot',
-    assistantSeven: 'Care notes',
-    assistantVetAi: 'For your vet',
+    assistantQuickSummary: 'Today at a glance',
+    assistantCareReminders: 'Care reminders (1–3)',
     assistantAsk: 'Ask a small question',
     assistantAskHint: 'I answer from what you have saved — not a substitute for an exam.',
     assistantAskPlaceholder: 'Example: How did hydration feel this week?',
     assistantSend: 'Send',
     assistantReplyLabel: 'Reply',
     aiChecking: 'One moment…',
-    assistantLocalSevenTitle: 'Last 7 days summary',
+    assistantLocalSevenTitle: 'Local week glance (not AI)',
     assistantSevenExpandMore: 'Show more ↓',
     assistantSevenCollapse: 'Show less ↑',
-    assistantAnalysisCardTitle: 'Care analysis',
-    aiGenerateWeek: 'Generate AI care analysis',
-    aiAnalysisCardSubtitle: 'Looks at the last week of logs and turns them into observations and reminders.',
-    aiBundleCurrentHint: 'You already have today’s analysis — scroll down to read it.',
+    assistantAnalysisCardTitle: 'Quick care snapshot',
+    aiGenerateWeek: 'Get quick care reminders',
+    aiAnalysisCardSubtitle: 'Today + recent days only — short text and 1–3 reminders (not a full weekly report).',
+    aiBundleCurrentHint: 'You already have today’s quick snapshot — see below.',
     aiDataStaleHint: 'Your logs changed — you can generate a fresh analysis.',
     aiNeedServerEnvDev: 'The companion is waking up — please start your local setup, then refresh.',
     aiNeedServerEnvProd: 'The companion is unavailable right now — try again shortly after setup finishes.',
     aiAssistantUnreachableDev: 'We could not reach the service — start your local environment and refresh.',
     aiAssistantUnreachableProd: 'We could not reach the service — please try again in a little while.',
-    aiEmptyHint: 'No analysis yet — tap the button below to begin.',
+    aiEmptyHint: 'No quick snapshot yet — tap the button below.',
     aiAskEmpty: 'Write a little question first.',
     aiOpenAiBusy: 'Putting it together…',
     aiOpenAiFail: 'Something went wrong: ',
@@ -791,11 +811,23 @@ const text = {
     proTeaserAdvancedWeekly: 'Advanced AI weekly report',
     weeklyCardTitle: 'AI weekly report',
     weeklyCardLead:
-      'Summarizes the last 7 days: food, water, litter, abnormal notes, weight, photos & notes — plus gentle reminders for next week (not diagnosis or meds).',
+      'Pro formal weekly report: completion, trends, abnormal timeline, weight, vs last week, next-week focus — save, export, share (not diagnosis or meds).',
     weeklyGenerateBtn: 'Generate this week’s AI report',
     weeklySummaryTitle: 'This week',
-    weeklyWatchTitle: 'Watch for',
-    weeklyNextWeekTitle: 'What to log next week',
+    weeklyCompletionTitle: 'Logging completion',
+    weeklyTrendsTitle: 'Trends',
+    weeklyAbnormalTitle: 'Abnormal timeline',
+    weeklyWeightTitle: 'Weight',
+    weeklyVsLastTitle: 'vs last week',
+    weeklyNextWeekTitle: 'Next week focus',
+    weeklySave: 'Save report',
+    weeklyShare: 'Share text',
+    weeklyExportPdf: 'Export PDF',
+    weeklyExportPng: 'Export image',
+    weeklySavedOk: 'Report saved on this device',
+    weeklyShareOk: 'Report text copied / shared',
+    weeklyShareFail: 'Could not share',
+    weeklyExportProOnly: 'Export requires Pro',
     weeklyFreePreview:
       'Free plan: preview only. Upgrade to Pro (test) to generate the full AI weekly report (uses 1 of today’s AI uses).',
     weeklyUpgrade: 'Upgrade to Pro (test)',
@@ -852,6 +884,12 @@ function formatHistoryMonthHeading(lang: Lang, monthKey: string): string {
 
 function todayKey() {
   return formatDateLocal(new Date());
+}
+
+function addDaysYmd(ymd: string, delta: number): string {
+  const d = new Date(`${ymd}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  return formatDateLocal(d);
 }
 
 function monthKey() {
@@ -1556,6 +1594,14 @@ export default function App() {
     }
   }, [page, assistantContext?.catId, assistantContext?.today, assistantContext?.lang, aiClientId, appPlan]);
 
+  useEffect(() => {
+    if (page !== 'assistant' || appPlan !== 'pro') return;
+    const ctx = assistantContext;
+    if (!ctx) return;
+    const saved = loadSavedWeeklyReport(ctx.catId, ctx.today);
+    if (saved?.report) setAiWeeklyReport(saved.report);
+  }, [page, appPlan, assistantContext?.catId, assistantContext?.today]);
+
   useEffect(
     () => () => {
       summariesAbortRef.current?.abort();
@@ -1597,12 +1643,10 @@ export default function App() {
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
       if (quota) {
         setAssistantQuota((prev) =>
-          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today)
+          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
+            countedSuccess: true,
+          })
         );
-      } else {
-        const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
-        if (h) setAssistantQuota(h);
-        else setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, ctx.today, prev));
       }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
@@ -1669,15 +1713,11 @@ export default function App() {
         ac.signal
       );
       setAiReply(`${answer.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
-      if (quota) {
-        setAssistantQuota((prev) =>
-          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today)
-        );
-      } else {
-        const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
-        if (h) setAssistantQuota(h);
-        else setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, ctx.today, prev));
-      }
+      setAssistantQuota((prev) =>
+        mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
+          countedSuccess: true,
+        })
+      );
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
@@ -1736,15 +1776,13 @@ export default function App() {
         ac.signal
       );
       setAiWeeklyReport(report);
-      if (quota) {
-        setAssistantQuota((prev) =>
-          mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today)
-        );
-      } else {
-        const h = await fetchAssistantHealth(aiClientId, ctx.today, undefined, appPlan);
-        if (h) setAssistantQuota(h);
-        else setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, ctx.today, prev));
-      }
+      saveWeeklyReport(ctx.catId, ctx.today, report);
+      setWeeklySaveHint(text[lang].weeklySavedOk);
+      setAssistantQuota((prev) =>
+        mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
+          countedSuccess: true,
+        })
+      );
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
@@ -3333,6 +3371,14 @@ export default function App() {
               {openAiErr}
             </p>
           ) : null}
+
+          {aiCareBundle ? (
+            <div className="mt-4 space-y-3 border-t border-orange-100/80 pt-4">
+              {renderAiBlock(tr.assistantQuickSummary, aiCareBundle.quickSummary.trim())}
+              {renderAiBlock(tr.assistantCareReminders, aiCareBundle.careReminders.trim())}
+              <p className="text-center text-[11px] leading-snug text-stone-400">{tr.aiDisclaimerFoot}</p>
+            </div>
+          ) : null}
         </section>
 
         <section className="mb-4 rounded-2xl border border-violet-100/80 bg-gradient-to-b from-white via-white to-violet-50/40 px-3.5 py-4 shadow-sm">
@@ -3396,11 +3442,92 @@ export default function App() {
                 </p>
               ) : null}
               {aiWeeklyReport ? (
-                <div className="mt-4 space-y-3">
-                  {renderAiBlock(tr.weeklySummaryTitle, aiWeeklyReport.weekSummary.trim())}
-                  {renderAiBlock(tr.weeklyWatchTitle, aiWeeklyReport.watchItems.trim())}
-                  {renderAiBlock(tr.weeklyNextWeekTitle, aiWeeklyReport.nextWeekFocus.trim())}
-                  <p className="text-center text-[11px] leading-snug text-stone-400">{tr.aiDisclaimerFoot}</p>
+                <div className="mt-4">
+                  <div
+                    ref={weeklyReportRef}
+                    id="weekly-ai-report-print"
+                    className="space-y-3 rounded-2xl border border-violet-100 bg-white/90 p-3"
+                  >
+                    {renderAiBlock(tr.weeklySummaryTitle, aiWeeklyReport.weekSummary.trim())}
+                    {renderAiBlock(tr.weeklyCompletionTitle, aiWeeklyReport.completionRate.trim())}
+                    {renderAiBlock(tr.weeklyTrendsTitle, aiWeeklyReport.trends.trim())}
+                    {renderAiBlock(tr.weeklyAbnormalTitle, aiWeeklyReport.abnormalTimeline.trim())}
+                    {renderAiBlock(tr.weeklyWeightTitle, aiWeeklyReport.weightChange.trim())}
+                    {renderAiBlock(tr.weeklyVsLastTitle, aiWeeklyReport.vsLastWeek.trim())}
+                    {renderAiBlock(tr.weeklyNextWeekTitle, aiWeeklyReport.nextWeekFocus.trim())}
+                    <p className="text-center text-[11px] leading-snug text-stone-400">{tr.aiDisclaimerFoot}</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!assistantContext || !aiWeeklyReport) return;
+                        saveWeeklyReport(assistantContext.catId, assistantContext.today, aiWeeklyReport);
+                        setWeeklySaveHint(tr.weeklySavedOk);
+                      }}
+                      className="rounded-xl border border-violet-200 bg-white py-2 text-[12px] font-semibold text-violet-800"
+                    >
+                      {tr.weeklySave}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!assistantContext || !aiWeeklyReport) return;
+                        const ok = await shareReportText(
+                          tr.weeklyCardTitle,
+                          formatWeeklyReportPlainText(aiWeeklyReport, {
+                            catName: assistantContext.cat.name,
+                            weekStart: addDaysYmd(assistantContext.today, -6),
+                            weekEnd: assistantContext.today,
+                            lang,
+                          })
+                        );
+                        setWeeklySaveHint(ok ? tr.weeklyShareOk : tr.weeklyShareFail);
+                      }}
+                      className="rounded-xl border border-violet-200 bg-white py-2 text-[12px] font-semibold text-violet-800"
+                    >
+                      {tr.weeklyShare}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const el = weeklyReportRef.current;
+                        if (!el || !assistantContext) return;
+                        try {
+                          await exportReportElementAsPdf(
+                            el,
+                            `weekly-report-${assistantContext.cat.name}-${assistantContext.today}.pdf`
+                          );
+                        } catch {
+                          setWeeklyErr(tr.weeklyShareFail);
+                        }
+                      }}
+                      className="rounded-xl border border-violet-200 bg-violet-600 py-2 text-[12px] font-semibold text-white"
+                    >
+                      {tr.weeklyExportPdf}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const el = weeklyReportRef.current;
+                        if (!el || !assistantContext) return;
+                        try {
+                          await exportReportElementAsPng(
+                            el,
+                            `weekly-report-${assistantContext.cat.name}-${assistantContext.today}.png`
+                          );
+                        } catch {
+                          setWeeklyErr(tr.weeklyShareFail);
+                        }
+                      }}
+                      className="rounded-xl border border-violet-200 bg-violet-600 py-2 text-[12px] font-semibold text-white"
+                    >
+                      {tr.weeklyExportPng}
+                    </button>
+                  </div>
+                  {weeklySaveHint ? (
+                    <p className="mt-2 text-center text-[12px] text-violet-700">{weeklySaveHint}</p>
+                  ) : null}
                 </div>
               ) : null}
             </>
@@ -3412,17 +3539,6 @@ export default function App() {
             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" aria-hidden />
             {tr.aiOpenAiBusy}
           </section>
-        ) : null}
-
-        {aiCareBundle ? (
-          <div className="mb-4">
-            {renderAiBlock(tr.assistantToday, aiCareBundle.healthSummary.trim())}
-            {renderAiBlock(tr.assistantSeven, aiCareBundle.sevenDayAnalysis.trim())}
-            {renderAiBlock(tr.assistantVetAi, aiCareBundle.vetReport.trim())}
-            <p className="mx-auto max-w-md px-1 text-center text-[11px] leading-snug text-stone-400">
-              {tr.aiDisclaimerFoot}
-            </p>
-          </div>
         ) : null}
 
         <section className="mb-4 rounded-2xl border border-stone-100 bg-white px-3.5 py-4 shadow-sm">

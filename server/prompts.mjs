@@ -15,34 +15,26 @@ export function systemBase(lang) {
   ].join('\n');
 }
 
-/** @param {'zh' | 'en'} lang */
+/** Quick snapshot — today + last few days; NOT a full weekly report. */
 export function careBundleUserPrompt(lang, context) {
   if (lang === 'zh') {
     return (
-      `以下是使用者允許你使用的照護紀錄（僅文字與勾選狀態，沒有照片像素內容）。\n\n${context}\n\n` +
-      `請輸出**僅一個 JSON 物件**（不要 markdown、不要程式碼區塊、不要註解），且**必須**同時包含下列三個鍵，鍵名逐字相同，值皆為**非空字串**：\n` +
-      `"healthSummary", "sevenDayAnalysis", "vetReport"\n` +
-      `（缺一不可；若某段暫無內容可寫，仍請輸出簡短說明字串，勿省略鍵或留空。）\n\n` +
-      `結構範例（請依實際紀錄撰寫內文，勿照抄範例文字）：\n` +
-      `{"healthSummary":"…","sevenDayAnalysis":"…","vetReport":"…"}\n\n` +
+      `以下是「快速照護摘要」用的紀錄（僅文字與勾選；無照片像素）。**不要**寫完整週報或獸醫報告。\n\n${context}\n\n` +
+      `請輸出**僅一個 JSON 物件**（不要 markdown），必含兩個鍵（皆為非空字串）：\n` +
+      `"quickSummary", "careReminders"\n\n` +
       `欄位說明：\n` +
-      `- healthSummary：以「今日與近期紀錄」為主的照護觀察與提醒（3～10 行，繁體中文）。\n` +
-      `- sevenDayAnalysis：最近 7 天趨勢與紀錄完整度（3～12 行）；若數天無紀錄請據實說明。\n` +
-      `- vetReport：給獸醫參考的紀錄摘要（體重、飲食／喝水／排泄勾選、異常欄與備註、照片張數等；非診斷，3～12 行）。\n` +
-      `禁止診斷、禁止醫療建議、禁止臆測未記載的症狀。`
+      `- quickSummary：今日＋最近幾天（約 3～7 天）的**極短**照護快覽（繁體中文，**最多 4 行**；每行一句）。\n` +
+      `- careReminders：**僅 1～3 點**照護提醒（條列，用 \\n 分隔；每點一行；非診斷、不開藥）。\n` +
+      `禁止：完整週報、長篇趨勢分析、獸醫就診摘要、診斷、醫療建議、臆測未記載症狀。`
     );
   }
   return (
-    `Below are care records the user allows you to use (checkboxes and text only — no photo pixels).\n\n${context}\n\n` +
-    `Return **only one JSON object** (no markdown, no code fences, no comments). It **must** include all three keys exactly as written, each a **non-empty string**:\n` +
-    `"healthSummary", "sevenDayAnalysis", "vetReport"\n` +
-    `(Do not omit a key or use null; if a section is thin, still write a short sentence.)\n\n` +
-    `Shape example (replace text with real content from the logs — do not copy placeholder text):\n` +
-    `{"healthSummary":"...","sevenDayAnalysis":"...","vetReport":"..."}\n\n` +
-    `- healthSummary: care observations grounded in today/recent logs (3–10 lines, English).\n` +
-    `- sevenDayAnalysis: last-7-day pattern and logging completeness (3–12 lines).\n` +
-    `- vetReport: factual visit handoff from logs only (not a diagnosis; 3–12 lines).\n` +
-    `No diagnosis, no medical advice, no invented symptoms.`
+    `Records for a **quick care snapshot** only (checkboxes/text — no photo pixels). **Do not** write a full weekly report or vet handoff.\n\n${context}\n\n` +
+    `Return **only one JSON object** (no markdown) with two non-empty string keys:\n` +
+    `"quickSummary", "careReminders"\n\n` +
+    `- quickSummary: very short glance at today + recent ~3–7 days (**max 4 lines**, one sentence each, English).\n` +
+    `- careReminders: **only 1–3** gentle care reminders (bullet lines separated by \\n; not diagnosis or meds).\n` +
+    `Forbidden: full weekly report, long trend essays, vet visit summary, diagnosis, medical advice, invented symptoms.`
   );
 }
 
@@ -54,27 +46,35 @@ export function qaUserPrompt(lang, context, question) {
   return `${context}\n\nUser question:\n${question.trim()}\n\nAnswer briefly in English using only the records above; no diagnosis, no medical advice, no prescriptions, no invented symptoms.`;
 }
 
-/** Last-7-day AI weekly care report — shares main daily AI quota with care-bundle / qa. */
+/** Pro formal weekly report — full structure; shares main daily AI quota with care-bundle / qa. */
 export function weeklyReportUserPrompt(lang, context) {
   if (lang === 'zh') {
     return (
       `${context}\n\n` +
-      `請依上述**最近 7 天**照護紀錄，輸出**僅一個 JSON 物件**（不要 markdown），必含三個鍵（皆為非空字串）：\n` +
-      `"weekSummary", "watchItems", "nextWeekFocus"\n\n` +
+      `請撰寫**正式照護週報**（比「快速摘要」完整得多）。輸出**僅一個 JSON 物件**（不要 markdown），必含下列鍵（皆為非空字串）：\n` +
+      `"weekSummary", "completionRate", "trends", "abnormalTimeline", "weightChange", "vsLastWeek", "nextWeekFocus"\n\n` +
       `欄位說明：\n` +
-      `- weekSummary：本週總結（涵蓋飲食、飲水、尿尿／大便、異常、體重、照片與備註等趨勢；繁體中文，6～14 行）\n` +
-      `- watchItems：需要留意（條列式照護觀察，非診斷；4～8 點）\n` +
-      `- nextWeekFocus：下週建議紀錄重點（鼓勵持續記錄哪些項目；3～6 點）\n` +
-      `嚴禁診斷、病因、開藥、醫療結論、檢查處方、急診建議。只做照護觀察與提醒。`
+      `- weekSummary：本週總覽（飲食、飲水、排泄、備註與照片摘要；5～10 行）\n` +
+      `- completionRate：照護完成度（依勾選與紀錄天數估算感覺；條列 3～6 點）\n` +
+      `- trends：本週趨勢（飲食／飲水／排泄等；條列 4～8 點）\n` +
+      `- abnormalTimeline：異常時間線（有異常備註或照片的日期與摘要；若無請說明）\n` +
+      `- weightChange：體重變化（依紀錄描述；若無資料請說明）\n` +
+      `- vsLastWeek：與上週比較（對照「上週」區塊；若上週資料少請說明）\n` +
+      `- nextWeekFocus：下週照護與紀錄重點（3～6 點）\n` +
+      `嚴禁診斷、開藥、醫療結論、檢查處方、急診建議。`
     );
   }
   return (
     `${context}\n\n` +
-    `From the **last 7 days** of records above, return **only one JSON object** (no markdown) with three non-empty string keys:\n` +
-    `"weekSummary", "watchItems", "nextWeekFocus"\n\n` +
-    `- weekSummary: weekly recap (food, water, litter/elimination, abnormal notes, weight, photos/notes trends; 6–14 lines, English)\n` +
-    `- watchItems: what to watch (care observations only — not diagnosis; 4–8 bullet-style points)\n` +
-    `- nextWeekFocus: what to keep logging next week (3–6 points)\n` +
+    `Write a **formal weekly care report** (much fuller than a quick snapshot). Return **only one JSON object** (no markdown) with these non-empty string keys:\n` +
+    `"weekSummary", "completionRate", "trends", "abnormalTimeline", "weightChange", "vsLastWeek", "nextWeekFocus"\n\n` +
+    `- weekSummary: week overview (food, water, litter, notes/photos; 5–10 lines)\n` +
+    `- completionRate: logging completion feel (3–6 bullet points)\n` +
+    `- trends: this week's trends (4–8 bullets)\n` +
+    `- abnormalTimeline: abnormal notes/photos by date (or state none)\n` +
+    `- weightChange: weight trend from logs (or note missing data)\n` +
+    `- vsLastWeek: compare to previous week block (or note sparse data)\n` +
+    `- nextWeekFocus: care & logging priorities next week (3–6 bullets)\n` +
     `No diagnosis, prescriptions, medical conclusions, or invented symptoms.`
   );
 }
