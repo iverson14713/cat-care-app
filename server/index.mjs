@@ -7,6 +7,7 @@ import {
   assistCareBundlePOST,
   assistHealthGET,
   assistQaPOST,
+  assistVetReportPOST,
 } from './assistant-routes.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -99,6 +100,12 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/assistant/qa') {
       const { status, json } = await assistQaPOST(body);
+      sendJson(res, status, json);
+      return;
+    }
+
+    if (url.pathname === '/api/assistant/vet-report') {
+      const { status, json } = await assistVetReportPOST(body);
       sendJson(res, status, json);
       return;
     }

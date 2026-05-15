@@ -1,4 +1,4 @@
-import { systemBase, careBundleUserPrompt, qaUserPrompt } from './prompts.mjs';
+import { systemBase, careBundleUserPrompt, qaUserPrompt, vetReportUserPrompt } from './prompts.mjs';
 import { openAiChatCompletion } from './openai.mjs';
 import {
   assertDailyQuota,
@@ -14,6 +14,7 @@ export const MAX_CONTEXT_CHARS = 48_000;
 export const MAX_QUESTION_CHARS = 8_000;
 export const CARE_MAX_TOKENS = 1200;
 export const QA_MAX_TOKENS = 600;
+export const VET_REPORT_MAX_TOKENS = 900;
 
 const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
@@ -476,4 +477,144 @@ export async function assistQaPOST(body) {
       return { answer, usage };
     },
   });
+}
+
+function normalizeVetReportFromParsed(parsed, lang) {
+  const defaults = {
+    watchItems: lang === 'zh' ? '目前無法整理需注意事項。' : 'Could not summarize watch items.',
+    observeDirections:
+      lang === 'zh' ? '目前無法整理觀察方向。' : 'Could not summarize observation directions.',
+    vetHandoff: lang === 'zh' ? '目前無法整理獸醫重點。' : 'Could not summarize vet handoff.',
+  };
+  const obj =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? /** @type {Record<string, unknown>} */ (parsed)
+      : {};
+  const watchItems =
+    typeof obj.watchItems === 'string' && obj.watchItems.trim()
+      ? obj.watchItems.trim()
+      : defaults.watchItems;
+  const observeDirections =
+    typeof obj.observeDirections === 'string' && obj.observeDirections.trim()
+      ? obj.observeDirections.trim()
+      : defaults.observeDirections;
+  const vetHandoff =
+    typeof obj.vetHandoff === 'string' && obj.vetHandoff.trim()
+      ? obj.vetHandoff.trim()
+      : defaults.vetHandoff;
+  return { watchItems, observeDirections, vetHandoff };
+}
+
+async function handleVetReport(lang, recordContext) {
+  const { content, usage } = await openAiChatCompletion({
+    messages: [
+      { role: 'system', content: systemBase(lang) },
+      { role: 'user', content: vetReportUserPrompt(lang, recordContext) },
+    ],
+    temperature: 0.25,
+    maxTokens: VET_REPORT_MAX_TOKENS,
+    jsonMode: true,
+  });
+  let summary;
+  try {
+    summary = normalizeVetReportFromParsed(tryParseJsonObject(content), lang);
+  } catch {
+    summary = normalizeVetReportFromParsed({}, lang);
+    summary.watchItems = content.trim().slice(0, 1200) || summary.watchItems;
+  }
+  return { ...summary, usage };
+}
+
+/**
+ * Vet report AI — does NOT increment main daily AI quota (client tracks vet-report AI separately).
+ * @param {unknown} body
+ * @returns {Promise<{ status: number, json: object }>}
+ */
+export async function assistVetReportPOST(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const clientId = typeof b.clientId === 'string' ? b.clientId.trim() : '';
+  const catId = typeof b.catId === 'string' ? b.catId.trim() : '';
+  const usageDate = typeof b.usageDate === 'string' ? b.usageDate.trim() : '';
+
+  if (!isClientId(clientId)) {
+    return { status: 400, json: { error: 'Invalid or missing clientId', code: 'BAD_REQUEST' } };
+  }
+  if (!isCatId(catId)) {
+    return { status: 400, json: { error: 'Invalid or missing catId', code: 'BAD_REQUEST' } };
+  }
+  if (!isYmd(usageDate)) {
+    return {
+      status: 400,
+      json: { error: 'Invalid or missing usageDate (YYYY-MM-DD)', code: 'BAD_REQUEST' },
+    };
+  }
+
+  const lang = b.lang;
+  const recordContext = b.recordContext;
+  if (lang !== 'zh' && lang !== 'en') {
+    return { status: 400, json: { error: 'Invalid lang', code: 'BAD_REQUEST' } };
+  }
+  if (typeof recordContext !== 'string' || !recordContext.trim()) {
+    return { status: 400, json: { error: 'Missing recordContext', code: 'BAD_REQUEST' } };
+  }
+  if (recordContext.length > MAX_CONTEXT_CHARS) {
+    return { status: 400, json: { error: 'recordContext too long', code: 'BAD_REQUEST' } };
+  }
+
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    return {
+      status: 503,
+      json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
+    };
+  }
+
+  const minute = assertMinuteRate(clientId);
+  if (!minute.ok) {
+    return {
+      status: 429,
+      json: {
+        error: 'Too many AI requests in a short time. Please wait about a minute and try again.',
+        code: 'RATE',
+      },
+    };
+  }
+
+  try {
+    const { usage, ...summary } = await handleVetReport(lang, recordContext);
+    const estUsd = estUsdFromUsage(usage);
+    logLine({
+      userId: clientId,
+      catId,
+      feature: 'vet-report',
+      ok: true,
+      statusCode: 200,
+      promptTokens: usage?.prompt_tokens ?? null,
+      completionTokens: usage?.completion_tokens ?? null,
+      totalTokens: usage?.total_tokens ?? null,
+      estUsd,
+    });
+    return { status: 200, json: summary };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logLine({
+      userId: clientId,
+      catId,
+      feature: 'vet-report',
+      ok: false,
+      statusCode: 502,
+      error: msg.slice(0, 500),
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      estUsd: null,
+    });
+    return {
+      status: 502,
+      json: {
+        error: 'The AI service returned an error. Please try again later.',
+        code: 'OPENAI',
+        detail: msg.slice(0, 300),
+      },
+    };
+  }
 }

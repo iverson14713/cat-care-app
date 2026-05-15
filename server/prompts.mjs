@@ -53,3 +53,28 @@ export function qaUserPrompt(lang, context, question) {
   }
   return `${context}\n\nUser question:\n${question.trim()}\n\nAnswer briefly in English using only the records above; no diagnosis, no medical advice, no prescriptions, no invented symptoms.`;
 }
+
+/** Advanced vet handoff report — separate from care-bundle quota on server. */
+export function vetReportUserPrompt(lang, context) {
+  if (lang === 'zh') {
+    return (
+      `${context}\n\n` +
+      `請依上述照護紀錄，輸出**僅一個 JSON 物件**（不要 markdown），必含三個鍵（皆為非空字串）：\n` +
+      `"watchItems", "observeDirections", "vetHandoff"\n\n` +
+      `欄位說明：\n` +
+      `- watchItems：最近需注意事項（條列式，繁體中文，3～8 點）\n` +
+      `- observeDirections：建議在家觀察方向（非醫療處置，3～6 點）\n` +
+      `- vetHandoff：建議帶給獸醫溝通的重點（紀錄摘要式，3～8 點）\n` +
+      `嚴禁診斷、病因斷言、開藥、檢查處方、急診建議。僅整理紀錄與觀察。`
+    );
+  }
+  return (
+    `${context}\n\n` +
+    `From the records above, return **only one JSON object** (no markdown) with three non-empty string keys:\n` +
+    `"watchItems", "observeDirections", "vetHandoff"\n\n` +
+    `- watchItems: what to watch lately (bullet-style, 3–8 items)\n` +
+    `- observeDirections: home observation ideas only — not medical orders (3–6 items)\n` +
+    `- vetHandoff: factual points to tell the vet from logs (3–8 items)\n` +
+    `No diagnosis, no prescriptions, no medical advice.`
+  );
+}

@@ -77,6 +77,7 @@ import {
   type ReminderKind,
   type ReminderRepeatType,
 } from './reminders';
+import { VetReportPage } from './VetReportPage';
 
 type Lang = 'zh' | 'en';
 
@@ -1339,20 +1340,6 @@ export default function App() {
     return getAllDailyHistory(selectedCat.id);
   }, [historyRefreshKey, selectedCat]);
 
-  const reportHistory = useMemo(() => {
-    historyRefreshKey;
-    if (!selectedCat) return [];
-    return getAbnormalHistory(selectedCat.id);
-  }, [historyRefreshKey, selectedCat]);
-
-  const abnormalOnlyHistory = useMemo(
-    () =>
-      reportHistory.filter(
-        (record) => record.abnormalNote || record.abnormalPhotos.length > 0
-      ),
-    [reportHistory]
-  );
-
   const historyMonthGroups = useMemo(() => {
     const groups: { monthKey: string; records: { date: string; data: DailyRecord }[] }[] = [];
     for (const record of history) {
@@ -2290,67 +2277,6 @@ export default function App() {
     }
   };
 
-  const copyVetReport = async () => {
-    if (!selectedCat) return;
-
-    const hasProfile = Boolean(
-      selectedCat.name || selectedCat.birthday || selectedCat.breed || selectedCat.chronicNote
-    );
-    const hasReport = hasProfile || weightRecords.length > 0 || reportHistory.length > 0;
-
-    if (!hasReport) {
-      alert(tr.noReport);
-      return;
-    }
-
-    const ageText = calculateAgeText(selectedCat.birthday, lang, tr.yearsOld, tr.unknown);
-    const weightLines = weightRecords.slice(0, 10).map((record) => {
-      const noteText = record.note ? `｜${record.note}` : '';
-      return `${record.date}：${record.weight} kg${noteText}`;
-    });
-
-    const abnormalLines = reportHistory.slice(0, 20).map((record) => {
-      const abnormalText = record.abnormalNote || '-';
-      const dailyText = record.dailyNote ? `\n${tr.todayNoteTitle}：${record.dailyNote}` : '';
-      const photoCount = record.abnormalPhotos.length + record.dailyPhotos.length;
-      const photoText = photoCount > 0 ? `\n${tr.photo}：${photoCount}` : '';
-      return `【${record.date}】\n${abnormalText}${dailyText}${photoText}`;
-    });
-
-    const report = [
-      `${lang === 'zh' ? '貓咪' : 'Cat'}：${selectedCat.name}`,
-      `${tr.date}：${today}`,
-      '',
-      `【${tr.vetBasicInfo}】`,
-      `${tr.age}：${ageText}`,
-      `${tr.birthday}：${selectedCat.birthday || tr.unknown}`,
-      `${tr.gender}：${selectedCat.gender || tr.unknown}`,
-      `${tr.breed}：${selectedCat.breed || tr.unknown}`,
-      `${tr.neutered}：${selectedCat.neutered || tr.unknown}`,
-      `${tr.chipNo}：${selectedCat.chipNo || tr.unknown}`,
-      `${tr.chronicNote}：${selectedCat.chronicNote || tr.unknown}`,
-      `${tr.allergyNote}：${selectedCat.allergyNote || tr.unknown}`,
-      `${tr.vetClinic}：${selectedCat.vetClinic || tr.unknown}`,
-      `${tr.profileNote}：${selectedCat.profileNote || tr.unknown}`,
-      '',
-      `【${tr.vetWeightInfo}】`,
-      latestWeight ? `${tr.latestWeight}：${latestWeight.weight} kg（${latestWeight.date}）` : tr.noWeight,
-      weightLines.length > 0 ? weightLines.join('\n') : '',
-      '',
-      `【${tr.vetAbnormalInfo}】`,
-      abnormalLines.length > 0 ? abnormalLines.join('\n\n') : tr.noAbnormalHistory,
-      '',
-      tr.photoCannotCopy,
-    ].join('\n');
-
-    try {
-      await navigator.clipboard.writeText(report);
-      alert(tr.copied);
-    } catch {
-      alert(tr.copyFailed);
-    }
-  };
-
   const renderPhotoSection = (
     title: string,
     desc: string,
@@ -3093,131 +3019,18 @@ export default function App() {
   };
 
   const renderVetPage = () => (
-    <>
-      {renderCatSwitcher()}
-
-      <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="text-4xl">🏥</div>
-        <h1 className="mt-2 text-2xl font-bold">{tr.vetReport}</h1>
-        <p className="mt-1 text-sm text-stone-500">{tr.vetReportDesc}</p>
-      </div>
-
-      <div className="mb-5 grid grid-cols-2 gap-3">
-        <button onClick={copyVetReport} className="rounded-2xl bg-orange-400 py-4 font-bold text-white shadow-sm">
-          {tr.copyForVet}
-        </button>
-        <button onClick={() => window.print()} className="rounded-2xl bg-stone-800 py-4 font-bold text-white shadow-sm">
-          {tr.printPdf}
-        </button>
-      </div>
-
-      <div className="mb-5 rounded-2xl border border-dashed border-stone-300 bg-stone-50/90 p-4 shadow-sm">
-        <button
-          type="button"
-          disabled
-          className="w-full cursor-not-allowed text-left"
-        >
-          <span className="block text-sm font-bold text-stone-600">{tr.proTeaserAdvancedVet}</span>
-          <span className="mt-1 block text-xs text-stone-500">{tr.proTeaserRoadmap}</span>
-        </button>
-      </div>
-
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold">{tr.vetBasicInfo}</h2>
-        <div className="space-y-2 text-sm text-stone-700">
-          <p><b>{tr.name}：</b>{selectedCat?.name || tr.unknown}</p>
-          <p><b>{tr.age}：</b>{calculateAgeText(selectedCat?.birthday, lang, tr.yearsOld, tr.unknown)}</p>
-          <p><b>{tr.birthday}：</b>{selectedCat?.birthday || tr.unknown}</p>
-          <p><b>{tr.gender}：</b>{selectedCat?.gender || tr.unknown}</p>
-          <p><b>{tr.breed}：</b>{selectedCat?.breed || tr.unknown}</p>
-          <p><b>{tr.neutered}：</b>{selectedCat?.neutered || tr.unknown}</p>
-          <p><b>{tr.chipNo}：</b>{selectedCat?.chipNo || tr.unknown}</p>
-          <p><b>{tr.chronicNote}：</b>{selectedCat?.chronicNote || tr.unknown}</p>
-          <p><b>{tr.allergyNote}：</b>{selectedCat?.allergyNote || tr.unknown}</p>
-          <p><b>{tr.vetClinic}：</b>{selectedCat?.vetClinic || tr.unknown}</p>
-          <p><b>{tr.profileNote}：</b>{selectedCat?.profileNote || tr.unknown}</p>
-        </div>
-      </section>
-
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold">{tr.vetWeightInfo}</h2>
-        {latestWeight ? (
-          <>
-            <div className="mb-4 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-orange-50 p-4">
-                <p className="text-xs font-bold text-orange-700">{tr.latestWeight}</p>
-                <p className="mt-1 text-2xl font-bold text-orange-700">{latestWeight.weight} kg</p>
-                <p className="mt-1 text-xs text-stone-500">{latestWeight.date}</p>
-              </div>
-              <div className="rounded-2xl bg-stone-50 p-4">
-                <p className="text-xs font-bold text-stone-500">{tr.weightChange}</p>
-                <p className="mt-1 text-2xl font-bold text-stone-700">
-                  {weightRecords.length >= 2 ? `${recentWeightChange > 0 ? '+' : ''}${recentWeightChange.toFixed(2)} kg` : '--'}
-                </p>
-              </div>
-            </div>
-            {weightRecords.length >= 2 && <WeightLineChart records={weightRecords} />}
-          </>
-        ) : (
-          <p className="text-sm text-stone-500">{tr.noWeight}</p>
-        )}
-      </section>
-
-      <section className="mb-5">
-        <h2 className="mb-3 text-lg font-bold">{tr.vetAbnormalInfo}</h2>
-        {abnormalOnlyHistory.length === 0 ? (
-          <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.noAbnormalHistory}</div>
-        ) : (
-          <div className="space-y-4">
-            {abnormalOnlyHistory.map((record) => (
-              <div key={record.date} className="rounded-3xl border border-red-100 bg-white p-5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-red-700">{record.date}</h3>
-                  <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-bold text-red-600">{tr.vet}</span>
-                </div>
-                {record.abnormalNote && <p className="whitespace-pre-wrap text-sm leading-6 text-stone-700">{record.abnormalNote}</p>}
-                {record.abnormalPhotos.length > 0 && (
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    {record.abnormalPhotos.map((photo, index) => (
-                      <button key={`vet-abnormal-${record.date}-${index}`} onClick={() => setSelectedPhoto(photo)} className="aspect-square overflow-hidden rounded-2xl bg-red-50">
-                        <img src={photo} alt={`${tr.abnormalPhotos} ${index + 1}`} className="h-full w-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="mb-5">
-        <h2 className="mb-3 text-lg font-bold">{tr.vetDailyNotes}</h2>
-        {reportHistory.filter((record) => record.dailyNote || record.dailyPhotos.length > 0).length === 0 ? (
-          <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.noHistory}</div>
-        ) : (
-          <div className="space-y-4">
-            {reportHistory
-              .filter((record) => record.dailyNote || record.dailyPhotos.length > 0)
-              .map((record) => (
-                <div key={`vet-note-${record.date}`} className="rounded-3xl bg-white p-5 shadow-sm">
-                  <h3 className="mb-2 text-lg font-bold">{record.date}</h3>
-                  {record.dailyNote && <p className="whitespace-pre-wrap text-sm text-stone-700">{record.dailyNote}</p>}
-                  {record.dailyPhotos.length > 0 && (
-                    <div className="mt-4 grid grid-cols-3 gap-3">
-                      {record.dailyPhotos.map((photo, index) => (
-                        <button key={`vet-daily-${record.date}-${index}`} onClick={() => setSelectedPhoto(photo)} className="aspect-square overflow-hidden rounded-2xl bg-stone-50">
-                          <img src={photo} alt={`${tr.dailyPhotos} ${index + 1}`} className="h-full w-full object-cover" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-          </div>
-        )}
-      </section>
-    </>
+    <VetReportPage
+      lang={lang}
+      appPlan={appPlan}
+      cats={cats}
+      selectedCatId={selectedCatId}
+      onSelectCatId={selectCat}
+      today={today}
+      clientId={aiClientId}
+      onOpenPhoto={setSelectedPhoto}
+      onGoSettings={() => setPage('settings')}
+      catSwitcher={renderCatSwitcher()}
+    />
   );
 
   const renderProfileInput = (
