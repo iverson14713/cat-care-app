@@ -233,8 +233,7 @@ const text = {
     catFood: '本月貓糧 / 貓砂補貨確認',
     assistantNav: '照護',
     assistantTitle: 'AI 照護助理',
-    assistantLead:
-      '根據最近的照護紀錄，\n\n整理日常趨勢與觀察提醒。\n\n此功能僅提供照護參考，\n不能取代獸醫診斷。',
+    assistantLead: '依紀錄整理趨勢與提醒；僅供參考，不能取代獸醫。',
     assistantToday: '健康小結',
     assistantSeven: '照護感想',
     assistantVetAi: '給獸醫的重點',
@@ -245,9 +244,11 @@ const text = {
     assistantReplyLabel: '回覆',
     aiChecking: '稍等一下…',
     assistantLocalSevenTitle: '最近 7 天摘要',
+    assistantSevenExpandMore: '展開更多 ↓',
+    assistantSevenCollapse: '收合 ↑',
     assistantAnalysisCardTitle: '照護分析',
     aiGenerateWeek: '生成 AI 照護分析',
-    aiAnalysisCardSubtitle: '分析最近 7 天照護紀錄，\n並產生照護觀察與提醒。',
+    aiAnalysisCardSubtitle: '分析最近 7 天紀錄並產生觀察與提醒。',
     aiBundleCurrentHint: '已使用今日分析，可直接查看結果',
     aiDataStaleHint: '資料已更新，可重新生成分析',
     aiNeedServerEnvDev: '小幫手暫時醒不過來，請確認本機環境已依說明啟動後重新整理。',
@@ -412,8 +413,7 @@ const text = {
     catFood: 'Food / litter refill check',
     assistantNav: 'Care',
     assistantTitle: 'AI Care Assistant',
-    assistantLead:
-      'From your recent care logs,\n\nwe summarize everyday patterns and gentle reminders.\n\nThis is for care reference only —\nit cannot replace a veterinarian.',
+    assistantLead: 'Trends from your logs; reference only—not vet advice.',
     assistantToday: 'Health snapshot',
     assistantSeven: 'Care notes',
     assistantVetAi: 'For your vet',
@@ -424,10 +424,11 @@ const text = {
     assistantReplyLabel: 'Reply',
     aiChecking: 'One moment…',
     assistantLocalSevenTitle: 'Last 7 days summary',
+    assistantSevenExpandMore: 'Show more ↓',
+    assistantSevenCollapse: 'Show less ↑',
     assistantAnalysisCardTitle: 'Care analysis',
     aiGenerateWeek: 'Generate AI care analysis',
-    aiAnalysisCardSubtitle:
-      'Looks at the last week of care logs\nand turns them into observations and reminders.',
+    aiAnalysisCardSubtitle: 'Looks at the last week of logs and turns them into observations and reminders.',
     aiBundleCurrentHint: 'You already have today’s analysis — scroll down to read it.',
     aiDataStaleHint: 'Your logs changed — you can generate a fresh analysis.',
     aiNeedServerEnvDev: 'The companion is waking up — please start your local setup, then refresh.',
@@ -770,6 +771,53 @@ function WeightLineChart({ records }: { records: WeightRecord[] }) {
   );
 }
 
+/** Local 7-day summary → short lines for app-style bullets. */
+function splitSevenDaySummaryIntoLines(raw: string): string[] {
+  const text = raw.replace(/\r/g, '').trim();
+  if (!text) return [];
+  const out: string[] = [];
+  for (const block of text.split(/\n\s*\n/).map((b) => b.replace(/\n+/g, ' ').trim()).filter(Boolean)) {
+    const innerLines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (innerLines.length > 1 && innerLines.every((line) => /^[•‧·◦○\-\*]/.test(line))) {
+      innerLines.forEach((l) => {
+        const t = l.replace(/^[•‧·◦○\-\*]\s*/, '').trim();
+        if (t) out.push(t);
+      });
+      continue;
+    }
+    if (block.length <= 76) {
+      out.push(block);
+      continue;
+    }
+    if (/[。．]/.test(block)) {
+      block
+        .split(/[。．]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((s) => out.push(s));
+      continue;
+    }
+    const bits = block.split(/\.\s+/).map((s) => s.trim()).filter(Boolean);
+    if (bits.length >= 2) {
+      bits.forEach((b, i) => {
+        const t = i < bits.length - 1 && !b.endsWith('.') ? `${b}.` : b;
+        if (t) out.push(t);
+      });
+    } else {
+      out.push(block.length > 140 ? `${block.slice(0, 137)}…` : block);
+    }
+  }
+  return out.filter(Boolean);
+}
+
+function sevenDaySummaryNeedsExpand(lines: string[]): boolean {
+  if (lines.length >= 4) return true;
+  const total = lines.reduce((n, l) => n + l.length, 0);
+  if (total > 200) return true;
+  if (lines.some((l) => l.length > 96)) return true;
+  return false;
+}
+
 export default function App() {
   const today = todayKey();
   const month = monthKey();
@@ -913,6 +961,12 @@ export default function App() {
       monthlyCare: monthly,
     };
   }, [lang, today, month, selectedCat, cats.length, daily, assistantLast14, weightRecords, monthly]);
+
+  const [assistantSevenExpanded, setAssistantSevenExpanded] = useState(false);
+
+  useEffect(() => {
+    setAssistantSevenExpanded(false);
+  }, [assistantContext?.catId, assistantContext?.today, lang]);
 
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiReply, setAiReply] = useState('');
@@ -1145,7 +1199,6 @@ export default function App() {
     setMonthly(loadMonthlyRecord(catId, month));
     setWeightRecords(loadWeightRecords(catId));
     setHistoryRefreshKey((v) => v + 1);
-    setPage((p) => (p === 'assistant' ? 'assistant' : 'today'));
   };
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
@@ -2163,10 +2216,14 @@ export default function App() {
 
     const dataFreshBundle = Boolean(aiCareBundle && !dataStale);
 
+    const sevenDayLines = splitSevenDaySummaryIntoLines(buildSevenDayAnalysis(assistantContext));
+    const sevenDayExpandable = sevenDaySummaryNeedsExpand(sevenDayLines);
+    const sevenDayCollapsed = sevenDayExpandable && !assistantSevenExpanded;
+
     const renderAiBlock = (title: string, body: string) => (
-      <section className="mb-5 rounded-[1.75rem] border border-stone-100 border-l-4 border-l-orange-300 bg-white py-6 pl-5 pr-6 shadow-sm">
-        <h3 className="mb-4 text-base font-semibold tracking-tight text-stone-900">{title}</h3>
-        <div className="whitespace-pre-wrap text-[15px] leading-loose text-stone-700">{body}</div>
+      <section className="mb-4 rounded-2xl border border-stone-100 border-l-4 border-l-orange-300 bg-white px-4 py-3.5 shadow-sm">
+        <h3 className="mb-1.5 text-sm font-semibold text-stone-900">{title}</h3>
+        <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-stone-700">{body}</div>
       </section>
     );
 
@@ -2174,45 +2231,73 @@ export default function App() {
       <>
         {renderCatSwitcher()}
 
-        <section className="mb-6 rounded-[1.75rem] border border-orange-100/50 bg-white px-6 py-8 shadow-sm">
-          <div className="flex gap-5">
+        <section className="mb-3 rounded-xl border border-orange-100/80 bg-white px-2.5 py-1.5 shadow-sm">
+          <div className="flex items-center gap-2">
             <div
-              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-100 to-amber-50 text-2xl shadow-inner"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-orange-100 to-amber-50 text-base leading-none shadow-inner"
               aria-hidden
             >
               {assistantContext.cat.emoji?.trim() || '🐾'}
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="text-[1.35rem] font-semibold tracking-tight text-stone-900">{tr.assistantTitle}</h1>
-              <p className="mt-5 whitespace-pre-line text-[15px] leading-[1.75] text-stone-600">
-                {tr.assistantLead}
-              </p>
+              <h1 className="text-xs font-bold leading-tight text-stone-900">{tr.assistantTitle}</h1>
+              <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{tr.assistantLead}</p>
             </div>
           </div>
         </section>
 
-        <section className="mb-6 rounded-[1.75rem] border border-stone-100 bg-white px-6 py-8 shadow-sm">
-          <div className="mb-6 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-100 text-lg" aria-hidden>
+        <section className="mb-4 rounded-2xl border border-stone-100 bg-white px-3.5 py-3.5 shadow-sm">
+          <div className="mb-2.5 flex items-center gap-2">
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-base"
+              aria-hidden
+            >
               📋
             </span>
-            <h2 className="text-lg font-semibold text-stone-900">{tr.assistantLocalSevenTitle}</h2>
+            <h2 className="text-[15px] font-semibold text-stone-900">{tr.assistantLocalSevenTitle}</h2>
           </div>
-          <div className="whitespace-pre-line text-[15px] leading-[1.75] text-stone-700">
-            {buildSevenDayAnalysis(assistantContext)}
+          <div className={sevenDayCollapsed ? 'relative max-h-[5.35rem] overflow-hidden' : 'relative'}>
+            <ul className="m-0 list-none space-y-2 p-0">
+              {sevenDayLines.map((line, i) => (
+                <li key={i} className="flex gap-2 text-[13px] leading-snug text-stone-700">
+                  <span className="mt-0.5 shrink-0 text-orange-400" aria-hidden>
+                    •
+                  </span>
+                  <span className="min-w-0 flex-1">{line}</span>
+                </li>
+              ))}
+            </ul>
+            {sevenDayCollapsed ? (
+              <div
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white via-white/90 to-transparent"
+                aria-hidden
+              />
+            ) : null}
           </div>
+          {sevenDayExpandable ? (
+            <button
+              type="button"
+              onClick={() => setAssistantSevenExpanded((prev) => !prev)}
+              className="mt-2 w-full rounded-lg py-1.5 text-[13px] font-medium text-orange-600 transition hover:bg-orange-50/80 active:scale-[0.99]"
+            >
+              {assistantSevenExpanded ? tr.assistantSevenCollapse : tr.assistantSevenExpandMore}
+            </button>
+          ) : null}
         </section>
 
-        <section className="mb-6 rounded-[1.75rem] border border-orange-100/60 bg-gradient-to-b from-white via-white to-orange-50/40 px-6 py-8 shadow-sm">
-          <div className="mb-5 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 text-lg" aria-hidden>
+        <section className="mb-4 rounded-2xl border border-orange-100/60 bg-gradient-to-b from-white via-white to-orange-50/35 px-3.5 py-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-base"
+              aria-hidden
+            >
               ✨
             </span>
-            <h2 className="text-lg font-semibold text-stone-900">{tr.assistantAnalysisCardTitle}</h2>
+            <h2 className="text-[15px] font-semibold text-stone-900">{tr.assistantAnalysisCardTitle}</h2>
           </div>
 
           {apiChecking || !apiReady ? (
-            <p className="mb-5 text-sm leading-relaxed text-stone-500">
+            <p className="mb-3 text-sm leading-snug text-stone-500">
               {apiChecking ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400" aria-hidden />
@@ -2228,85 +2313,85 @@ export default function App() {
             type="button"
             disabled={!apiReady || aiBundleLoading}
             onClick={runOpenAiCareBundle}
-            className="w-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 py-3.5 text-[15px] font-semibold text-white shadow-md shadow-orange-200/50 transition hover:from-orange-500 hover:to-orange-600 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[220px] sm:px-10"
+            className="w-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 py-3 text-[14px] font-semibold text-white shadow-md shadow-orange-200/50 transition hover:from-orange-500 hover:to-orange-600 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[200px] sm:px-8"
           >
             {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
           </button>
 
-          <p className="mt-5 whitespace-pre-line text-sm leading-relaxed text-stone-500">{tr.aiAnalysisCardSubtitle}</p>
+          <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiAnalysisCardSubtitle}</p>
 
           {dataStale && !aiBundleLoading ? (
-            <p className="mt-5 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm leading-relaxed text-amber-950">
+            <p className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-[13px] leading-snug text-amber-950">
               {tr.aiDataStaleHint}
             </p>
           ) : null}
 
           {!dataStale && dataFreshBundle && !aiBundleLoading ? (
-            <p className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm leading-relaxed text-emerald-900">
+            <p className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2.5 text-[13px] leading-snug text-emerald-900">
               {tr.aiBundleCurrentHint}
             </p>
           ) : null}
 
           {apiReady && !aiCareBundle && !aiBundleLoading && !dataStale ? (
-            <p className="mt-5 text-sm leading-relaxed text-stone-500">{tr.aiEmptyHint}</p>
+            <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiEmptyHint}</p>
           ) : null}
 
           {quotaLine ? (
-            <p className="mt-5 text-[11px] leading-relaxed text-stone-400">{quotaLine}</p>
+            <p className="mt-3 text-[11px] leading-snug text-stone-400">{quotaLine}</p>
           ) : null}
 
           {openAiErr ? (
-            <p className="mt-4 rounded-2xl border border-red-100 bg-red-50/90 px-4 py-3 text-sm leading-relaxed text-red-900">
+            <p className="mt-3 rounded-xl border border-red-100 bg-red-50/90 px-3 py-2.5 text-[13px] leading-snug text-red-900">
               {openAiErr}
             </p>
           ) : null}
         </section>
 
         {apiReady && aiBundleLoading ? (
-          <section className="mb-6 flex items-center gap-3 rounded-[1.75rem] border border-orange-100 bg-orange-50/50 px-6 py-4 text-sm text-stone-700">
+          <section className="mb-4 flex items-center gap-2.5 rounded-2xl border border-orange-100 bg-orange-50/50 px-3.5 py-3 text-[13px] leading-snug text-stone-700">
             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" aria-hidden />
             {tr.aiOpenAiBusy}
           </section>
         ) : null}
 
         {aiCareBundle ? (
-          <div className="mb-6">
+          <div className="mb-4">
             {renderAiBlock(tr.assistantToday, aiCareBundle.healthSummary.trim())}
             {renderAiBlock(tr.assistantSeven, aiCareBundle.sevenDayAnalysis.trim())}
             {renderAiBlock(tr.assistantVetAi, aiCareBundle.vetReport.trim())}
-            <p className="mx-auto max-w-md whitespace-pre-line px-2 text-center text-[12px] leading-relaxed text-stone-400">
+            <p className="mx-auto max-w-md px-1 text-center text-[11px] leading-snug text-stone-400">
               {tr.aiDisclaimerFoot}
             </p>
           </div>
         ) : null}
 
-        <section className="mb-6 rounded-[1.75rem] border border-stone-100 bg-white px-6 py-8 shadow-sm">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-100 text-lg" aria-hidden>
+        <section className="mb-4 rounded-2xl border border-stone-100 bg-white px-3.5 py-4 shadow-sm">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-base" aria-hidden>
               💬
             </span>
-            <h2 className="text-lg font-semibold text-stone-900">{tr.assistantAsk}</h2>
+            <h2 className="text-[15px] font-semibold text-stone-900">{tr.assistantAsk}</h2>
           </div>
-          <p className="mb-5 text-sm leading-relaxed text-stone-500">{tr.assistantAskHint}</p>
+          <p className="mb-3 text-[13px] leading-snug text-stone-500">{tr.assistantAskHint}</p>
           <textarea
             value={aiQuestion}
             onChange={(e) => setAiQuestion(e.target.value)}
             placeholder={tr.assistantAskPlaceholder}
             disabled={qaBusy || !apiReady}
-            className="min-h-[6.5rem] w-full resize-none rounded-2xl border border-stone-200 bg-stone-50/50 p-4 text-[15px] leading-relaxed text-stone-800 outline-none transition focus:border-orange-300 focus:bg-white disabled:opacity-60"
+            className="min-h-[5.5rem] w-full resize-none rounded-xl border border-stone-200 bg-stone-50/50 p-3 text-[13px] leading-snug text-stone-800 outline-none transition focus:border-orange-300 focus:bg-white disabled:opacity-60"
           />
           <button
             type="button"
             disabled={qaBusy || !apiReady}
             onClick={runOpenAiQa}
-            className="mt-4 w-full rounded-full border border-orange-200 bg-white py-3.5 text-[15px] font-semibold text-orange-600 shadow-sm transition hover:bg-orange-50 disabled:opacity-60"
+            className="mt-3 w-full rounded-full border border-orange-200 bg-white py-3 text-[14px] font-semibold text-orange-600 shadow-sm transition hover:bg-orange-50 disabled:opacity-60"
           >
             {aiQaLoading ? tr.assistantSendBusy : tr.assistantSend}
           </button>
           {aiReply ? (
-            <div className="mt-6 rounded-2xl border border-stone-100 bg-stone-50/80 p-5">
-              <p className="mb-3 text-xs font-medium text-stone-500">{tr.assistantReplyLabel}</p>
-              <div className="whitespace-pre-line text-[15px] leading-loose text-stone-800">{aiReply}</div>
+            <div className="mt-4 rounded-xl border border-stone-100 bg-stone-50/80 p-3.5">
+              <p className="mb-2 text-[11px] font-medium text-stone-500">{tr.assistantReplyLabel}</p>
+              <div className="whitespace-pre-line text-[13px] leading-relaxed text-stone-800">{aiReply}</div>
             </div>
           ) : null}
         </section>
