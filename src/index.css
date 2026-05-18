@@ -47,3 +47,20 @@
     transform: translateY(0);
   }
 }
+
+/*
+ * Native-like iOS / PWA: form fields ≥16px to avoid Safari focus auto-zoom.
+ * After all Tailwind + @layer so this wins over utilities like text-sm on inputs.
+ */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='range']):not(
+    [type='color']
+  ),
+textarea,
+select {
+  font-size: max(16px, 1rem) !important;
+}
