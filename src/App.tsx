@@ -94,6 +94,14 @@ import {
   saveWeeklyReport,
 } from './weeklyReportStorage';
 import { normalizeWeeklyReport } from './weeklyReportModel';
+import {
+  safeGetItem,
+  safeLoadJson,
+  safeParseJson,
+  safeRemoveItem,
+  safeSetItem,
+  storageError,
+} from './safeStorage';
 
 type Lang = 'zh' | 'en';
 
@@ -927,91 +935,76 @@ function dedupeWeightRecordsByDate(records: WeightRecord[]): WeightRecord[] {
   return Array.from(byDate.values()).sort((a, b) => b.date.localeCompare(a.date));
 }
 
+const DEFAULT_CATS: Cat[] = [
+  { id: 'default-cat', name: '我的貓咪', emoji: '🐱' },
+];
+
+function mapStoredCat(cat: unknown): Cat {
+  const c = (cat && typeof cat === 'object' ? cat : {}) as Record<string, unknown>;
+  return {
+    id: typeof c.id === 'string' ? c.id : makeId(),
+    name: typeof c.name === 'string' ? c.name : '我的貓咪',
+    emoji: typeof c.emoji === 'string' ? c.emoji : '🐱',
+    profilePhoto: typeof c.profilePhoto === 'string' ? c.profilePhoto : '',
+    birthday: typeof c.birthday === 'string' ? c.birthday : '',
+    gender: typeof c.gender === 'string' ? c.gender : '',
+    breed: typeof c.breed === 'string' ? c.breed : '',
+    neutered: typeof c.neutered === 'string' ? c.neutered : '',
+    chipNo: typeof c.chipNo === 'string' ? c.chipNo : '',
+    chronicNote: typeof c.chronicNote === 'string' ? c.chronicNote : '',
+    allergyNote: typeof c.allergyNote === 'string' ? c.allergyNote : '',
+    vetClinic: typeof c.vetClinic === 'string' ? c.vetClinic : '',
+    profileNote: typeof c.profileNote === 'string' ? c.profileNote : '',
+  };
+}
+
 function loadLang(): Lang {
-  const saved = localStorage.getItem(LANG_KEY);
+  const saved = safeGetItem(LANG_KEY);
   return saved === 'en' ? 'en' : 'zh';
 }
 
 function loadCats(): Cat[] {
-  const saved = localStorage.getItem(CATS_KEY);
-
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((cat) => ({
-          id: typeof cat.id === 'string' ? cat.id : makeId(),
-          name: typeof cat.name === 'string' ? cat.name : '我的貓咪',
-          emoji: typeof cat.emoji === 'string' ? cat.emoji : '🐱',
-          profilePhoto: typeof cat.profilePhoto === 'string' ? cat.profilePhoto : '',
-          birthday: typeof cat.birthday === 'string' ? cat.birthday : '',
-          gender: typeof cat.gender === 'string' ? cat.gender : '',
-          breed: typeof cat.breed === 'string' ? cat.breed : '',
-          neutered: typeof cat.neutered === 'string' ? cat.neutered : '',
-          chipNo: typeof cat.chipNo === 'string' ? cat.chipNo : '',
-          chronicNote: typeof cat.chronicNote === 'string' ? cat.chronicNote : '',
-          allergyNote: typeof cat.allergyNote === 'string' ? cat.allergyNote : '',
-          vetClinic: typeof cat.vetClinic === 'string' ? cat.vetClinic : '',
-          profileNote: typeof cat.profileNote === 'string' ? cat.profileNote : '',
-        }));
-      }
-    } catch {
-      // ignore broken data
+  const parsed = safeLoadJson<unknown>(CATS_KEY, null, 'cats');
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    if (parsed !== null) {
+      storageError('loadCats: resetting invalid cat list', new Error('invalid array'), CATS_KEY);
+      safeSetItem(CATS_KEY, JSON.stringify(DEFAULT_CATS));
     }
+    return [...DEFAULT_CATS];
   }
-
-  return [
-    {
-      id: 'default-cat',
-      name: '我的貓咪',
-      emoji: '🐱',
-    },
-  ];
+  return parsed.map(mapStoredCat);
 }
 
 function loadDailyRecord(catId: string, date: string): DailyRecord {
-  const saved = localStorage.getItem(dailyStorageKey(catId, date));
-  if (!saved) return {};
-
-  try {
-    return JSON.parse(saved);
-  } catch {
-    return {};
-  }
+  const key = dailyStorageKey(catId, date);
+  const parsed = safeLoadJson<DailyRecord>(key, {}, `daily ${date}`);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 function loadMonthlyRecord(catId: string, month: string): MonthlyRecord {
-  const saved = localStorage.getItem(monthlyStorageKey(catId, month));
-  if (!saved) return {};
-
-  try {
-    return JSON.parse(saved);
-  } catch {
-    return {};
-  }
+  const key = monthlyStorageKey(catId, month);
+  const parsed = safeLoadJson<MonthlyRecord>(key, {}, `monthly ${month}`);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 function loadWeightRecords(catId: string): WeightRecord[] {
-  const saved = localStorage.getItem(weightStorageKey(catId));
-  if (!saved) return [];
+  const key = weightStorageKey(catId);
+  const parsed = safeLoadJson<unknown>(key, [], 'weights');
+  if (!Array.isArray(parsed)) return [];
 
-  try {
-    const parsed = JSON.parse(saved);
-    if (!Array.isArray(parsed)) return [];
-
-    return dedupeWeightRecordsByDate(
-      parsed
-        .map((item) => ({
-          id: typeof item.id === 'string' ? item.id : makeId(),
-          date: typeof item.date === 'string' ? item.date : todayKey(),
-          weight: Number(item.weight),
-          note: typeof item.note === 'string' ? item.note : '',
-        }))
-        .filter((item) => Number.isFinite(item.weight) && item.weight > 0)
-    );
-  } catch {
-    return [];
-  }
+  return dedupeWeightRecordsByDate(
+    parsed
+      .map((item) => {
+        const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        return {
+          id: typeof row.id === 'string' ? row.id : makeId(),
+          date: typeof row.date === 'string' ? row.date : todayKey(),
+          weight: Number(row.weight),
+          note: typeof row.note === 'string' ? row.note : '',
+        };
+      })
+      .filter((item) => Number.isFinite(item.weight) && item.weight > 0)
+  );
 }
 
 function getPhotoList(value: unknown): string[] {
@@ -1025,21 +1018,22 @@ function getAllDailyHistory(catId: string) {
   const records: { date: string; data: DailyRecord }[] = [];
   const prefix = `cat-calendar-daily-${catId}-`;
 
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-
-    if (key?.startsWith(prefix)) {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix)) continue;
       const date = key.replace(prefix, '');
-      const raw = localStorage.getItem(key);
-
-      if (raw) {
-        try {
-          records.push({ date, data: JSON.parse(raw) });
-        } catch {
-          // ignore broken records
-        }
+      const raw = safeGetItem(key);
+      if (!raw) continue;
+      const data = safeParseJson<DailyRecord>(raw, {}, `daily history ${date}`);
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        records.push({ date, data });
+      } else {
+        safeRemoveItem(key);
       }
     }
+  } catch (err) {
+    storageError('getAllDailyHistory', err);
   }
 
   return records.sort((a, b) => b.date.localeCompare(a.date));
@@ -1278,16 +1272,24 @@ export default function App() {
 
   const [selectedCatId, setSelectedCatId] = useState<string>(() => {
     const savedCats = loadCats();
-    const savedSelectedId = localStorage.getItem(SELECTED_CAT_KEY);
-
+    const savedSelectedId = safeGetItem(SELECTED_CAT_KEY);
     if (savedSelectedId && savedCats.some((cat) => cat.id === savedSelectedId)) {
       return savedSelectedId;
     }
-
-    return savedCats[0]?.id ?? 'default-cat';
+    return savedCats[0]?.id ?? DEFAULT_CATS[0].id;
   });
 
-  const selectedCat = cats.find((cat) => cat.id === selectedCatId) ?? cats[0];
+  const selectedCat = cats.find((cat) => cat.id === selectedCatId) ?? cats[0] ?? DEFAULT_CATS[0];
+
+  useEffect(() => {
+    if (cats.length > 0) return;
+    const fallback = loadCats();
+    setCats(fallback);
+    const nextId = fallback[0]?.id ?? DEFAULT_CATS[0].id;
+    setSelectedCatId(nextId);
+    safeSetItem(CATS_KEY, JSON.stringify(fallback));
+    safeSetItem(SELECTED_CAT_KEY, nextId);
+  }, [cats.length]);
 
   const useCloudDaily = useMemo(
     () =>
@@ -1895,11 +1897,11 @@ export default function App() {
   }, [lang, catNameById]);
 
   useEffect(() => {
-    localStorage.setItem(LANG_KEY, lang);
+    safeSetItem(LANG_KEY, lang);
   }, [lang]);
 
   useEffect(() => {
-    localStorage.setItem(CATS_KEY, JSON.stringify(cats));
+    safeSetItem(CATS_KEY, JSON.stringify(cats));
   }, [cats]);
 
   useEffect(() => {
@@ -1953,15 +1955,12 @@ export default function App() {
   }, [supabaseAuth.authReady, supabaseAuth.user?.id, supabaseAuth.supabase]);
 
   useEffect(() => {
-    localStorage.setItem(SELECTED_CAT_KEY, selectedCatId);
+    safeSetItem(SELECTED_CAT_KEY, selectedCatId);
   }, [selectedCatId]);
 
   useEffect(() => {
     if (!selectedCat) return;
-    localStorage.setItem(
-      dailyStorageKey(selectedCat.id, today),
-      JSON.stringify(daily)
-    );
+    safeSetItem(dailyStorageKey(selectedCat.id, today), JSON.stringify(daily));
     setHistoryRefreshKey((v) => v + 1);
   }, [daily, selectedCat, today]);
 
@@ -2053,10 +2052,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedCat) return;
-    localStorage.setItem(
-      monthlyStorageKey(selectedCat.id, month),
-      JSON.stringify(monthly)
-    );
+    safeSetItem(monthlyStorageKey(selectedCat.id, month), JSON.stringify(monthly));
   }, [monthly, selectedCat, month]);
 
   useEffect(() => {
@@ -2065,7 +2061,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedCat) return;
-    localStorage.setItem(weightStorageKey(selectedCat.id), JSON.stringify(weightRecords));
+    safeSetItem(weightStorageKey(selectedCat.id), JSON.stringify(weightRecords));
   }, [weightRecords, selectedCat]);
 
   const toggleLanguage = () => {
@@ -2383,7 +2379,8 @@ export default function App() {
 
         alert(tr.importDone);
         window.location.reload();
-      } catch {
+      } catch (err) {
+        console.error('[backup] import failed:', err);
         alert(tr.importFailed);
       }
     };

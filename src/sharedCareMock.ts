@@ -20,47 +20,35 @@ export type SharedCareCatState = {
   activities: SharedCareActivity[];
 };
 
+import { safeGetItem, safeLoadJson, safeRemoveItem, safeSetItem } from './safeStorage';
+
 const STORAGE_KEY = 'cat-shared-care-mock-v1';
 
 const DEMO_MEMBER_NAME = 'Amy';
 
 export function getCareDisplayName(): string {
-  try {
-    const v = localStorage.getItem('cat-care-display-name')?.trim();
-    if (v) return v;
-  } catch {
-    /* ignore */
-  }
-  return '';
+  const v = safeGetItem('cat-care-display-name')?.trim();
+  return v || '';
 }
 
 export function setCareDisplayName(name: string): void {
-  try {
-    const t = name.trim();
-    if (t) localStorage.setItem('cat-care-display-name', t);
-    else localStorage.removeItem('cat-care-display-name');
-  } catch {
-    /* ignore */
-  }
+  const t = name.trim();
+  if (t) safeSetItem('cat-care-display-name', t);
+  else safeRemoveItem('cat-care-display-name');
 }
 
 export function loadSharedCareMock(): Record<string, SharedCareCatState> {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, SharedCareCatState>;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
+  const parsed = safeLoadJson<Record<string, SharedCareCatState>>(
+    STORAGE_KEY,
+    {},
+    'shared care mock',
+    sessionStorage
+  );
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 export function saveSharedCareMock(data: Record<string, SharedCareCatState>): void {
-  try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    /* ignore */
-  }
+  safeSetItem(STORAGE_KEY, JSON.stringify(data), sessionStorage);
 }
 
 export function defaultOwnerName(lang: 'zh' | 'en'): string {

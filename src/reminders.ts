@@ -1,4 +1,5 @@
 import { getAiPlan } from './aiClient';
+import { safeGetItem, safeLoadJson, safeSetItem, storageError } from './safeStorage';
 
 export const REMINDER_LIMIT_FREE = 3;
 export const REMINDER_LIMIT_PRO = 30;
@@ -49,22 +50,14 @@ export function getReminderLimit(plan?: 'free' | 'pro'): number {
 }
 
 export function loadReminders(): Reminder[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeReminder).filter(Boolean) as Reminder[];
-  } catch {
-    return [];
-  }
+  const parsed = safeLoadJson<unknown[]>(STORAGE_KEY, [], 'reminders');
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(normalizeReminder).filter(Boolean) as Reminder[];
 }
 
 export function saveReminders(list: Reminder[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // ignore quota
+  if (!safeSetItem(STORAGE_KEY, JSON.stringify(list))) {
+    storageError('saveReminders failed', new Error('write failed'), STORAGE_KEY);
   }
 }
 

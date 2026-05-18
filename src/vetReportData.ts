@@ -1,5 +1,7 @@
 /** Build vet handoff report from localStorage only (no Supabase daily_records). */
 
+import { safeLoadJson } from './safeStorage';
+
 export type VetReportCatProfile = {
   id: string;
   name: string;
@@ -63,31 +65,22 @@ function getPhotoList(value: unknown): string[] {
 }
 
 function loadDailyRecord(catId: string, date: string): Record<string, unknown> {
-  try {
-    const raw = localStorage.getItem(`cat-calendar-daily-${catId}-${date}`);
-    if (!raw) return {};
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
+  const key = `cat-calendar-daily-${catId}-${date}`;
+  const parsed = safeLoadJson<Record<string, unknown>>(key, {}, `vet daily ${date}`);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 function loadWeightRecords(catId: string): VetReportWeightPoint[] {
-  try {
-    const raw = localStorage.getItem(`cat-calendar-weights-${catId}`);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item: { date?: string; weight?: number; note?: string }) => ({
-        date: typeof item.date === 'string' ? item.date : '',
-        weight: Number(item.weight),
-        note: typeof item.note === 'string' ? item.note.trim() : '',
-      }))
-      .filter((w) => w.date && Number.isFinite(w.weight) && w.weight > 0);
-  } catch {
-    return [];
-  }
+  const key = `cat-calendar-weights-${catId}`;
+  const parsed = safeLoadJson<unknown[]>(key, [], 'vet weights');
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((item: { date?: string; weight?: number; note?: string }) => ({
+      date: typeof item.date === 'string' ? item.date : '',
+      weight: Number(item.weight),
+      note: typeof item.note === 'string' ? item.note.trim() : '',
+    }))
+    .filter((w) => w.date && Number.isFinite(w.weight) && w.weight > 0);
 }
 
 export function formatDateLocal(d: Date): string {

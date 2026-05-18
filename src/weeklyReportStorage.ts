@@ -1,5 +1,6 @@
 import type { AssistantWeeklyReportJson } from './aiCareAssistant';
 import { normalizeWeeklyReport, weeklySectionText, type Lang } from './weeklyReportModel';
+import { safeLoadJson, safeSetItem, storageError } from './safeStorage';
 
 export type SavedWeeklyReport = {
   catId: string;
@@ -13,16 +14,16 @@ function storageKey(catId: string, weekEnd: string): string {
 }
 
 export function loadSavedWeeklyReport(catId: string, weekEnd: string): SavedWeeklyReport | null {
+  const key = storageKey(catId, weekEnd);
   try {
-    const raw = localStorage.getItem(storageKey(catId, weekEnd));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as SavedWeeklyReport;
+    const parsed = safeLoadJson<SavedWeeklyReport | null>(key, null, 'weekly report', localStorage);
     if (!parsed?.report || parsed.catId !== catId) return null;
     return {
       ...parsed,
       report: normalizeWeeklyReport(parsed.report),
     };
-  } catch {
+  } catch (err) {
+    storageError('loadSavedWeeklyReport', err, key);
     return null;
   }
 }
@@ -39,7 +40,10 @@ export function saveWeeklyReport(
     savedAt: new Date().toISOString(),
     report: normalizeWeeklyReport(report, lang),
   };
-  localStorage.setItem(storageKey(catId, weekEnd), JSON.stringify(payload));
+  const key = storageKey(catId, weekEnd);
+  if (!safeSetItem(key, JSON.stringify(payload))) {
+    storageError('saveWeeklyReport: write failed', new Error('quota or private mode'), key);
+  }
 }
 
 export function formatWeeklyReportPlainText(

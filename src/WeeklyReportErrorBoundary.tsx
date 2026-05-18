@@ -16,7 +16,7 @@ export class WeeklyReportErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('[AI weekly report] render crash', error, info.componentStack);
+    console.error('[AI weekly report] render crash:', error.message, error, info.componentStack);
     this.props.onError?.(error, info);
   }
 

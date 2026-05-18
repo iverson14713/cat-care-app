@@ -480,7 +480,8 @@ export function peekCareBundleCache(
   try {
     const parsed = JSON.parse(cachedRaw) as Record<string, unknown>;
     return normalizeCareBundlePayload(parsed, ctx.lang);
-  } catch {
+  } catch (err) {
+    console.error('[AI care bundle] corrupt session cache', err);
     return null;
   }
 }

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { safeSetItem } from '../safeStorage';
 
 type ProfileProps = {
   profile?: {
@@ -36,7 +37,7 @@ export function Profile({ profile, onSave }: ProfileProps) {
       goal,
     };
 
-    localStorage.setItem('health_profile', JSON.stringify(nextProfile));
+    safeSetItem('health_profile', JSON.stringify(nextProfile));
 
     if (onSave) {
       onSave(nextProfile);
