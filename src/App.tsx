@@ -36,8 +36,9 @@ import {
 } from './sharedCareMock';
 import { useSupabaseAuth } from './useSupabaseAuth';
 import {
-  deleteCatForOwner,
+  archiveCatForOwner,
   fetchCatsForUser,
+  restoreCatForOwner,
   insertCatForOwner,
   isCloudCatId,
   mergeCloudCatsWithLocal,
@@ -134,6 +135,7 @@ type Cat = {
   allergyNote?: string;
   vetClinic?: string;
   profileNote?: string;
+  isArchived?: boolean;
 };
 
 type CheckItem = {
@@ -301,8 +303,16 @@ const text = {
     photoCannotCopy: '照片無法直接複製到文字訊息，請在獸醫報告頁面截圖或列印給獸醫。',
     needCatName: '請先輸入貓咪名字',
     keepOneCat: '至少要保留一隻貓咪',
-    confirmDeleteCat: '確定要刪除',
-    deleteCatNote: '已保存的紀錄不會自動刪除，但畫面上不會再顯示這隻貓。',
+    confirmArchiveCat: '確定要封存',
+    archiveCatNote:
+      '此貓咪將從主畫面隱藏，\n歷史紀錄與照片仍會保留，\n之後可於封存貓咪中恢復。',
+    archive: '封存',
+    restoreCat: '恢復',
+    archivedCatsSection: '封存貓咪',
+    archivedCatsEmpty: '目前沒有封存的貓咪',
+    archivedCatsHint: '封存的貓咪不會出現在主畫面，資料仍保留在雲端與本機。',
+    catsCloudArchiveErr: '無法封存至雲端：',
+    catsCloudRestoreErr: '無法恢復至雲端：',
     confirmClearToday: '確定要清除今天的紀錄嗎？',
     confirmClearMonth: '確定要清除本月定期照顧紀錄嗎？',
     photoTooMany: '照片最多只能放 3 張',
@@ -652,8 +662,16 @@ const text = {
     photoCannotCopy: 'Photos cannot be copied into plain text. Please screenshot or print the Vet report page.',
     needCatName: 'Please enter a cat name first',
     keepOneCat: 'At least one cat is required',
-    confirmDeleteCat: 'Delete',
-    deleteCatNote: 'Saved records will not be removed automatically, but this cat will no longer appear.',
+    confirmArchiveCat: 'Archive',
+    archiveCatNote:
+      'This cat will be hidden from the main screen.\nHistory and photos are kept.\nYou can restore it from Archived cats.',
+    archive: 'Archive',
+    restoreCat: 'Restore',
+    archivedCatsSection: 'Archived cats',
+    archivedCatsEmpty: 'No archived cats',
+    archivedCatsHint: 'Archived cats are hidden from the main screen; data stays in the cloud and on this device.',
+    catsCloudArchiveErr: 'Could not archive in the cloud: ',
+    catsCloudRestoreErr: 'Could not restore in the cloud: ',
     confirmClearToday: 'Clear today’s record?',
     confirmClearMonth: 'Clear this month’s periodic care record?',
     photoTooMany: 'You can add up to 3 photos',
@@ -995,6 +1013,7 @@ function mapStoredCat(cat: unknown): Cat {
     allergyNote: typeof c.allergyNote === 'string' ? c.allergyNote : '',
     vetClinic: typeof c.vetClinic === 'string' ? c.vetClinic : '',
     profileNote: typeof c.profileNote === 'string' ? c.profileNote : '',
+    isArchived: Boolean(c.isArchived),
   };
 }
 
@@ -1311,7 +1330,7 @@ export default function App() {
   }, [supabaseAuth.user, supabaseAuth.profile]);
 
   const [selectedCatId, setSelectedCatId] = useState<string>(() => {
-    const savedCats = loadCats();
+    const savedCats = loadCats().filter((c) => !c.isArchived);
     const savedSelectedId = safeGetItem(SELECTED_CAT_KEY);
     if (savedSelectedId && savedCats.some((cat) => cat.id === savedSelectedId)) {
       return savedSelectedId;
@@ -1319,13 +1338,24 @@ export default function App() {
     return savedCats[0]?.id ?? DEFAULT_CATS[0].id;
   });
 
-  const selectedCat = cats.find((cat) => cat.id === selectedCatId) ?? cats[0] ?? DEFAULT_CATS[0];
+  const activeCats = useMemo(() => cats.filter((c) => !c.isArchived), [cats]);
+  const archivedCats = useMemo(() => cats.filter((c) => c.isArchived), [cats]);
+  const selectedCat =
+    activeCats.find((cat) => cat.id === selectedCatId) ?? activeCats[0] ?? DEFAULT_CATS[0];
+
+  useEffect(() => {
+    if (activeCats.length === 0) return;
+    if (!activeCats.some((c) => c.id === selectedCatId)) {
+      setSelectedCatId(activeCats[0].id);
+    }
+  }, [activeCats, selectedCatId]);
 
   useEffect(() => {
     if (cats.length > 0) return;
     const fallback = loadCats();
     setCats(fallback);
-    const nextId = fallback[0]?.id ?? DEFAULT_CATS[0].id;
+    const nextActive = fallback.filter((c) => !c.isArchived);
+    const nextId = nextActive[0]?.id ?? fallback[0]?.id ?? DEFAULT_CATS[0].id;
     setSelectedCatId(nextId);
     safeSetItem(CATS_KEY, JSON.stringify(fallback));
     safeSetItem(SELECTED_CAT_KEY, nextId);
@@ -2021,9 +2051,9 @@ export default function App() {
 
   useEffect(() => {
     setCustomReminderCatId((prev) =>
-      cats.some((c) => c.id === prev) ? prev : selectedCatId
+      activeCats.some((c) => c.id === prev) ? prev : selectedCatId
     );
-  }, [selectedCatId, cats]);
+  }, [selectedCatId, activeCats]);
 
   useEffect(() => {
     const tick = () => {
@@ -2084,10 +2114,15 @@ export default function App() {
       const merged = mergeCloudCatsWithLocal(cloudList, localCats);
       setCats(merged);
       setCloudSyncPhase('loading');
+      const activeMerged = merged.filter((c) => !c.isArchived);
       let nextCatId = migratedIdMap[selectedCatId] ?? selectedCatId;
       setSelectedCatId((prev) => {
         const remapped = migratedIdMap[prev] ?? prev;
-        nextCatId = merged.some((c) => c.id === remapped) ? remapped : merged[0]?.id ?? remapped;
+        if (activeMerged.some((c) => c.id === remapped)) {
+          nextCatId = remapped;
+          return remapped;
+        }
+        nextCatId = activeMerged[0]?.id ?? merged[0]?.id ?? remapped;
         return nextCatId;
       });
       setCatsCloudBusy(false);
@@ -2367,7 +2402,7 @@ export default function App() {
       return;
     }
 
-    if (appPlan === 'free' && cats.length >= 1) {
+    if (appPlan === 'free' && activeCats.length >= 1) {
       setMultiCatHint(tr.planMultiCatUpgrade);
       return;
     }
@@ -2418,39 +2453,56 @@ export default function App() {
     setPage('cats');
   };
 
-  const deleteCat = async (catId: string) => {
+  const archiveCat = async (catId: string) => {
     const target = cats.find((cat) => cat.id === catId);
-    if (!target) return;
+    if (!target || target.isArchived) return;
 
-    if (cats.length <= 1) {
+    if (activeCats.length <= 1) {
       alert(tr.keepOneCat);
       return;
     }
 
-    if (!confirm(`${tr.confirmDeleteCat}「${target.name}」？\n${tr.deleteCatNote}`)) {
+    if (!confirm(`${tr.confirmArchiveCat}「${target.name}」？\n${tr.archiveCatNote}`)) {
       return;
     }
 
     if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
-      const { error } = await deleteCatForOwner(supabaseAuth.supabase, catId);
+      const { error } = await archiveCatForOwner(supabaseAuth.supabase, catId);
       if (error) {
-        alert(`${tr.catsCloudDeleteErr}${error.message}`);
+        alert(`${tr.catsCloudArchiveErr}${error.message}`);
         return;
       }
     }
 
-    const nextCats = cats.filter((cat) => cat.id !== catId);
-    const nextSelected = selectedCatId === catId ? nextCats[0] : selectedCat;
-
+    const nextCats = cats.map((cat) => (cat.id === catId ? { ...cat, isArchived: true } : cat));
     setCats(nextCats);
 
-    if (nextSelected) {
-      setSelectedCatId(nextSelected.id);
-      setDaily(loadDailyRecord(nextSelected.id, today));
-      setMonthly(loadMonthlyRecord(nextSelected.id, month));
-      setWeightRecords(loadWeightRecords(nextSelected.id));
-      setHistoryRefreshKey((v) => v + 1);
+    if (selectedCatId === catId) {
+      const nextActive = nextCats.filter((c) => !c.isArchived);
+      const next = nextActive[0];
+      if (next) {
+        setSelectedCatId(next.id);
+        setDaily(loadDailyRecord(next.id, today));
+        setMonthly(loadMonthlyRecord(next.id, month));
+        setWeightRecords(loadWeightRecords(next.id));
+        setHistoryRefreshKey((v) => v + 1);
+      }
     }
+  };
+
+  const restoreCat = async (catId: string) => {
+    const target = cats.find((cat) => cat.id === catId);
+    if (!target || !target.isArchived) return;
+
+    if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
+      const { error } = await restoreCatForOwner(supabaseAuth.supabase, catId);
+      if (error) {
+        alert(`${tr.catsCloudRestoreErr}${error.message}`);
+        return;
+      }
+    }
+
+    setCats((prev) => prev.map((cat) => (cat.id === catId ? { ...cat, isArchived: false } : cat)));
   };
 
   const toggleDaily = (id: string) => {
@@ -2778,7 +2830,7 @@ export default function App() {
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {cats.map((cat) => (
+        {activeCats.map((cat) => (
           <button
             key={cat.id}
             onClick={() => selectCat(cat.id)}
@@ -3433,7 +3485,7 @@ export default function App() {
     <VetReportPage
       lang={lang}
       appPlan={appPlan}
-      cats={cats}
+      cats={activeCats}
       selectedCatId={selectedCatId}
       onSelectCatId={selectCat}
       today={today}
@@ -4264,7 +4316,7 @@ export default function App() {
               onChange={(e) => setCustomReminderCatId(e.target.value)}
               className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-300"
             >
-              {cats.map((c) => (
+              {activeCats.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.emoji} {c.name}
                 </option>
@@ -4329,7 +4381,7 @@ export default function App() {
                 onChange={(e) => setCustomReminderCatId(e.target.value)}
                 className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
               >
-                {cats.map((c) => (
+                {activeCats.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.emoji} {c.name}
                   </option>
@@ -4565,7 +4617,7 @@ export default function App() {
         ) : null}
       </section>
 
-      {appPlan === 'free' && cats.length > 1 ? (
+      {appPlan === 'free' && activeCats.length > 1 ? (
         <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950 shadow-sm">
           {tr.planFreeMultiCatBanner}
         </div>
@@ -4587,7 +4639,7 @@ export default function App() {
       <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.catList}</h2>
         <div className="space-y-2">
-          {cats.map((cat) => (
+          {activeCats.map((cat) => (
             <div
               key={cat.id}
               className={`rounded-2xl border p-2.5 shadow-sm ${selectedCat?.id === cat.id ? 'border-orange-200 bg-orange-50' : 'border-stone-100 bg-white'}`}
@@ -4619,10 +4671,10 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={() => deleteCat(cat.id)}
+                  onClick={() => archiveCat(cat.id)}
                   className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1.5 text-xs font-bold text-stone-500"
                 >
-                  {tr.delete}
+                  {tr.archive}
                 </button>
               </div>
             </div>
@@ -4645,16 +4697,51 @@ export default function App() {
           <button
             type="button"
             onClick={addCat}
-            disabled={appPlan === 'free' && cats.length >= 1}
+            disabled={appPlan === 'free' && activeCats.length >= 1}
             className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-45"
           >
             {tr.add}
           </button>
         </div>
-        {appPlan === 'free' && cats.length >= 1 ? (
+        {appPlan === 'free' && activeCats.length >= 1 ? (
           <p className="mt-2 text-[12px] leading-snug text-amber-900">{tr.planMultiCatUpgrade}</p>
         ) : null}
         {multiCatHint ? <p className="mt-2 text-[12px] leading-snug text-red-800">{multiCatHint}</p> : null}
+      </section>
+
+      <section className="mb-4 rounded-2xl border border-stone-200 bg-stone-50/80 p-3 shadow-sm">
+        <h2 className="mb-1 text-base font-bold text-stone-900">{tr.archivedCatsSection}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.archivedCatsHint}</p>
+        {archivedCats.length === 0 ? (
+          <p className="text-sm text-stone-500">{tr.archivedCatsEmpty}</p>
+        ) : (
+          <div className="space-y-2">
+            {archivedCats.map((cat) => (
+              <div
+                key={cat.id}
+                className="flex items-center justify-between gap-2 rounded-2xl border border-stone-200 bg-white p-2.5"
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  {cat.profilePhoto ? (
+                    <span className="h-9 w-9 shrink-0 overflow-hidden rounded-xl bg-stone-100 opacity-80">
+                      <img src={cat.profilePhoto} alt={cat.name} className="h-full w-full object-cover" />
+                    </span>
+                  ) : (
+                    <span className="text-xl leading-none opacity-70">{cat.emoji}</span>
+                  )}
+                  <span className="truncate text-sm font-bold text-stone-700">{cat.name}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void restoreCat(cat.id)}
+                  className="shrink-0 rounded-full bg-orange-100 px-3 py-1.5 text-xs font-bold text-orange-800"
+                >
+                  {tr.restoreCat}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="mb-3 flex items-center gap-2.5 rounded-2xl bg-white px-3 py-2 shadow-sm">
@@ -4843,22 +4930,20 @@ export default function App() {
           </div>
         ) : null}
 
-        {supabaseAuth.user && supabaseAuth.supabase && cloudSyncPhase !== 'idle' ? (
+        {supabaseAuth.user &&
+        supabaseAuth.supabase &&
+        (cloudSyncPhase === 'loading' || cloudSyncPhase === 'syncing' || cloudSyncPhase === 'failed') ? (
           <div
             className={`mb-3 rounded-xl border px-3 py-2 text-[11px] leading-snug shadow-sm ${
               cloudSyncPhase === 'failed'
                 ? 'border-red-200 bg-red-50 text-red-900'
-                : cloudSyncPhase === 'ready'
-                  ? 'border-emerald-200 bg-emerald-50/90 text-emerald-900'
-                  : 'border-orange-200 bg-orange-50/90 text-orange-900'
+                : 'border-orange-200 bg-orange-50/90 text-orange-900'
             }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span>
                 {cloudSyncPhase === 'loading' && tr.cloudSyncLoading}
                 {cloudSyncPhase === 'syncing' && tr.cloudSyncSyncing}
-                {cloudSyncPhase === 'ready' && tr.cloudSyncReady}
-                {cloudSyncPhase === 'empty' && tr.cloudSyncEmpty}
                 {cloudSyncPhase === 'failed' && `${tr.cloudSyncFailed}${cloudSyncError ? `：${cloudSyncError}` : ''}`}
               </span>
               {cloudSyncPhase === 'failed' ? (
@@ -4871,7 +4956,6 @@ export default function App() {
                 </button>
               ) : null}
             </div>
-            <p className="mt-1 text-[10px] opacity-80">{tr.cloudSyncPhotosNote}</p>
           </div>
         ) : null}
 
