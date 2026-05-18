@@ -75,7 +75,6 @@ import {
   repeatTypeLabel,
   requestNotificationPermission,
   saveReminders,
-  wasNotificationPermissionAsked,
   type Reminder,
   type ReminderKind,
   type ReminderRepeatType,
@@ -421,9 +420,9 @@ const text = {
     remindersBack: '返回設定',
     remindersLead: '本機瀏覽器通知（PWA / 開啟分頁時有效）。',
     remindersNotifyDenied: '尚未開啟通知權限',
-    remindersNotifyEnable: '開啟通知',
+    remindersNotifyEnable: '啟用提醒',
     remindersNotifyGranted: '通知已開啟',
-    remindersNotifyUnsupported: '此瀏覽器不支援通知',
+    remindersNotifyUnsupported: '此裝置暫不支援通知',
     remindersCount: '提醒數量',
     remindersAdd: '新增提醒',
     remindersAddCustom: '自訂提醒',
@@ -762,9 +761,9 @@ const text = {
     remindersBack: 'Back to settings',
     remindersLead: 'Local browser notifications (works in PWA while the app is open).',
     remindersNotifyDenied: 'Notification permission is off',
-    remindersNotifyEnable: 'Enable notifications',
+    remindersNotifyEnable: 'Enable reminders',
     remindersNotifyGranted: 'Notifications enabled',
-    remindersNotifyUnsupported: 'Notifications are not supported here',
+    remindersNotifyUnsupported: 'Notifications are not supported on this device',
     remindersCount: 'Reminders',
     remindersAdd: 'Add reminder',
     remindersAddCustom: 'Custom reminder',
@@ -1877,15 +1876,6 @@ export default function App() {
       cats.some((c) => c.id === prev) ? prev : selectedCatId
     );
   }, [selectedCatId, cats]);
-
-  useEffect(() => {
-    if (!getNotificationSupport()) return;
-    if (!wasNotificationPermissionAsked()) {
-      void requestNotificationPermission().then(() => {
-        setNotificationPerm(getNotificationPermission());
-      });
-    }
-  }, []);
 
   useEffect(() => {
     const tick = () => {
@@ -3890,12 +3880,14 @@ export default function App() {
             <p className="text-sm font-medium text-emerald-700">{tr.remindersNotifyGranted}</p>
           ) : (
             <>
-              <p className="text-sm font-medium text-amber-800">{tr.remindersNotifyDenied}</p>
+              {perm === 'denied' ? (
+                <p className="text-sm font-medium text-amber-800">{tr.remindersNotifyDenied}</p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
-                  void requestNotificationPermission().then(() => {
-                    setNotificationPerm(getNotificationPermission());
+                  void requestNotificationPermission().then((next) => {
+                    setNotificationPerm(next);
                   });
                 }}
                 className="mt-3 w-full rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white"

@@ -135,13 +135,41 @@ export function createCustomReminder(catId: string, partial: Partial<Reminder>):
 
 export type NotificationPermissionState = 'unsupported' | 'default' | 'granted' | 'denied';
 
+/**
+ * Safe Notification constructor — never reference bare `Notification` (iOS Safari / PWA throws
+ * ReferenceError: Can't find variable: Notification). Always use window.Notification.
+ */
+function getBrowserNotification(): typeof Notification | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    if ('Notification' in window) {
+      const wn = window.Notification;
+      if (wn != null && typeof wn === 'function') return wn;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
 export function getNotificationSupport(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  return getBrowserNotification() != null;
+}
+
+function readNotificationPermission(): NotificationPermissionState {
+  const N = getBrowserNotification();
+  if (!N) return 'unsupported';
+  try {
+    const p = N.permission;
+    if (p === 'granted' || p === 'denied' || p === 'default') return p;
+    return 'default';
+  } catch {
+    return 'unsupported';
+  }
 }
 
 export function getNotificationPermission(): NotificationPermissionState {
-  if (!getNotificationSupport()) return 'unsupported';
-  return Notification.permission as NotificationPermissionState;
+  return readNotificationPermission();
 }
 
 export function wasNotificationPermissionAsked(): boolean {
@@ -162,12 +190,19 @@ export function markNotificationPermissionAsked(): void {
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
   if (!getNotificationSupport()) return 'unsupported';
+  const N = getBrowserNotification();
+  if (!N) return 'unsupported';
   markNotificationPermissionAsked();
   try {
-    const result = await Notification.requestPermission();
-    return result as NotificationPermissionState;
+    if (typeof N.requestPermission === 'function') {
+      const result = await N.requestPermission();
+      if (result === 'granted' || result === 'denied' || result === 'default') {
+        return result;
+      }
+    }
+    return readNotificationPermission();
   } catch {
-    return getNotificationPermission();
+    return readNotificationPermission();
   }
 }
 
@@ -258,13 +293,15 @@ export function showReminderNotification(
   reminder: Reminder,
   lang: 'zh' | 'en'
 ): boolean {
-  if (!getNotificationSupport() || Notification.permission !== 'granted') return false;
+  if (readNotificationPermission() !== 'granted') return false;
+  const N = getBrowserNotification();
+  if (!N) return false;
   const { title, body } = buildNotificationBody(catName, reminder, lang);
   try {
-    const n = new Notification(title, {
+    const n = new N(title, {
       body,
       tag: `cat-reminder-${reminder.id}`,
-      icon: '/favicon.ico',
+      icon: '/favicon.png',
     });
     n.onclick = () => {
       window.focus();
@@ -287,7 +324,7 @@ export function processDueReminders(
   lang: 'zh' | 'en',
   now: Date = new Date()
 ): Reminder[] {
-  if (Notification.permission !== 'granted') return reminders;
+  if (readNotificationPermission() !== 'granted') return reminders;
   let changed = false;
   const next = reminders.map((r) => {
     if (!shouldTriggerReminder(r, now)) return r;
