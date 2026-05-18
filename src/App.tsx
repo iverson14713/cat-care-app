@@ -1963,9 +1963,17 @@ export default function App() {
   }, []);
 
   const runFullCloudSync = useCallback(
-    async (mergedCats: Cat[], sb: NonNullable<typeof supabaseAuth.supabase>, userId: string) => {
+    async (
+      mergedCats: Cat[],
+      accessibleCloudCatIds: string[],
+      sb: NonNullable<typeof supabaseAuth.supabase>,
+      userId: string
+    ) => {
       const runId = ++cloudSyncRunRef.current;
-      const cloudIds = mergedCats.filter((c) => isCloudCatId(c.id)).map((c) => c.id);
+      const accessible = new Set(accessibleCloudCatIds);
+      const cloudIds = mergedCats
+        .filter((c) => isCloudCatId(c.id) && accessible.has(c.id))
+        .map((c) => c.id);
       cloudDailyHydratedRef.current = false;
       if (cloudIds.length === 0) {
         setCloudSyncPhase('empty');
@@ -2111,7 +2119,10 @@ export default function App() {
         setCatsCloudBusy(false);
         return;
       }
+      const cloudIdSet = new Set(cloudList.map((c) => c.id));
+      localCats = localCats.filter((c) => !isCloudCatId(c.id) || cloudIdSet.has(c.id));
       const merged = mergeCloudCatsWithLocal(cloudList, localCats);
+      safeSetItem(CATS_KEY, JSON.stringify(merged));
       setCats(merged);
       setCloudSyncPhase('loading');
       const activeMerged = merged.filter((c) => !c.isArchived);
@@ -2127,7 +2138,7 @@ export default function App() {
       });
       setCatsCloudBusy(false);
       if (!cancelled) {
-        await runFullCloudSync(merged, sb, uid);
+        await runFullCloudSync(merged, cloudList.map((c) => c.id), sb, uid);
         if (!cancelled) {
           reloadSelectedCatFromLocal(nextCatId);
         }
@@ -2143,7 +2154,8 @@ export default function App() {
     const sb = supabaseAuth.supabase;
     const uid = supabaseAuth.user?.id;
     if (!sb || !uid) return;
-    void runFullCloudSync(cats, sb, uid).then(() => reloadSelectedCatFromLocal(selectedCatId));
+    const accessibleIds = cats.filter((c) => isCloudCatId(c.id)).map((c) => c.id);
+    void runFullCloudSync(cats, accessibleIds, sb, uid).then(() => reloadSelectedCatFromLocal(selectedCatId));
   }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id, runFullCloudSync, reloadSelectedCatFromLocal, selectedCatId]);
 
   useEffect(() => {

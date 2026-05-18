@@ -15,7 +15,7 @@ export type CatRow = {
   allergy_note: string;
   vet_clinic: string;
   profile_note: string;
-  is_archived: boolean;
+  is_archived?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -39,8 +39,22 @@ export type AppCat = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const CAT_SELECT =
-  'id, owner_id, name, emoji, profile_photo, birthday, gender, breed, neutered, chip_no, chronic_note, allergy_note, vet_clinic, profile_note, is_archived, created_at, updated_at';
+const CAT_SELECT_BASE =
+  'id, owner_id, name, emoji, profile_photo, birthday, gender, breed, neutered, chip_no, chronic_note, allergy_note, vet_clinic, profile_note, created_at, updated_at';
+
+const CAT_SELECT = `${CAT_SELECT_BASE}, is_archived`;
+
+/** Shown when DB migration 20260519120000_cats_is_archived.sql has not been applied yet. */
+export const CATS_ARCHIVE_MIGRATION_HINT =
+  '請在 Supabase → SQL Editor 執行專案內 supabase/migrations/20260519120000_cats_is_archived.sql（新增 is_archived 欄位），完成後重新整理 App。';
+
+function isArchivedColumnError(message: string): boolean {
+  return /is_archived/i.test(message) && /(does not exist|schema cache|column)/i.test(message);
+}
+
+function archiveMigrationError(): Error {
+  return new Error(CATS_ARCHIVE_MIGRATION_HINT);
+}
 
 export function isCloudCatId(id: string): boolean {
   return UUID_RE.test(id);
@@ -90,11 +104,20 @@ export function mergeCloudCatsWithLocal(cloud: AppCat[], local: AppCat[]): AppCa
 export async function fetchCatsForUser(
   supabase: SupabaseClient
 ): Promise<{ data: AppCat[]; error: Error | null }> {
-  const { data, error } = await supabase.from('cats').select(CAT_SELECT).order('created_at', { ascending: true });
+  let { data, error } = await supabase.from('cats').select(CAT_SELECT).order('created_at', { ascending: true });
+
+  if (error && isArchivedColumnError(error.message)) {
+    const legacy = await supabase.from('cats').select(CAT_SELECT_BASE).order('created_at', { ascending: true });
+    data = legacy.data;
+    error = legacy.error;
+  }
 
   if (error) return { data: [], error: new Error(error.message) };
   const rows = (data ?? []) as CatRow[];
-  return { data: rows.map(rowToAppCat), error: null };
+  return {
+    data: rows.map((r) => rowToAppCat({ ...r, is_archived: r.is_archived ?? false })),
+    error: null,
+  };
 }
 
 export async function insertCatForOwner(
@@ -103,7 +126,7 @@ export async function insertCatForOwner(
   cat: AppCat
 ): Promise<{ data: AppCat | null; error: Error | null }> {
   const id = isCloudCatId(cat.id) ? cat.id : crypto.randomUUID();
-  const payload = {
+  const base = {
     id,
     owner_id: ownerId,
     name: cat.name,
@@ -118,12 +141,22 @@ export async function insertCatForOwner(
     allergy_note: cat.allergyNote ?? '',
     vet_clinic: cat.vetClinic ?? '',
     profile_note: cat.profileNote ?? '',
-    is_archived: false,
   };
 
-  const { data, error } = await supabase.from('cats').insert(payload).select(CAT_SELECT).single();
+  let { data, error } = await supabase
+    .from('cats')
+    .insert({ ...base, is_archived: false })
+    .select(CAT_SELECT)
+    .single();
+
+  if (error && isArchivedColumnError(error.message)) {
+    const legacy = await supabase.from('cats').insert(base).select(CAT_SELECT_BASE).single();
+    data = legacy.data;
+    error = legacy.error;
+  }
+
   if (error) return { data: null, error: new Error(error.message) };
-  return { data: rowToAppCat(data as CatRow), error: null };
+  return { data: rowToAppCat({ ...(data as CatRow), is_archived: false }), error: null };
 }
 
 export async function updateCatForOwner(
@@ -157,7 +190,10 @@ export async function archiveCatForOwner(
 ): Promise<{ error: Error | null }> {
   if (!isCloudCatId(catId)) return { error: null };
   const { error } = await supabase.from('cats').update({ is_archived: true }).eq('id', catId);
-  if (error) return { error: new Error(error.message) };
+  if (error) {
+    if (isArchivedColumnError(error.message)) return { error: archiveMigrationError() };
+    return { error: new Error(error.message) };
+  }
   return { error: null };
 }
 
@@ -168,7 +204,10 @@ export async function restoreCatForOwner(
 ): Promise<{ error: Error | null }> {
   if (!isCloudCatId(catId)) return { error: null };
   const { error } = await supabase.from('cats').update({ is_archived: false }).eq('id', catId);
-  if (error) return { error: new Error(error.message) };
+  if (error) {
+    if (isArchivedColumnError(error.message)) return { error: archiveMigrationError() };
+    return { error: new Error(error.message) };
+  }
   return { error: null };
 }
 
