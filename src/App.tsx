@@ -4852,6 +4852,7 @@ export default function App() {
                     {tr.permanentlyDelete}
                   </button>
                 </div>
+              </div>
             ))}
           </div>
         )}
