@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Calendar,
+  Clock,
+  Scale,
+  Settings,
+  Sparkles,
+  Stethoscope,
+  type LucideIcon,
+} from 'lucide-react';
+import {
   type AssistantContext,
   type AssistantCareBundleJson,
   type AssistantWeeklyReportJson,
@@ -154,6 +163,21 @@ type CheckItem = {
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
 type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings' | 'sharedCare' | 'reminders';
+
+type MainTabId = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant';
+
+const MAIN_TAB_ROWS: { id: MainTabId; labelKey: 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistantNav'; Icon: LucideIcon }[][] = [
+  [
+    { id: 'today', labelKey: 'today', Icon: Calendar },
+    { id: 'weight', labelKey: 'weight', Icon: Scale },
+    { id: 'vet', labelKey: 'vet', Icon: Stethoscope },
+  ],
+  [
+    { id: 'history', labelKey: 'history', Icon: Clock },
+    { id: 'cats', labelKey: 'cats', Icon: Settings },
+    { id: 'assistant', labelKey: 'assistantNav', Icon: Sparkles },
+  ],
+];
 type AppPlan = 'free' | 'pro';
 
 type AbnormalRecord = {
@@ -404,10 +428,9 @@ const text = {
     aiQuotaExhaustedTitle: '今日 AI 次數已用完',
     aiQuotaExhaustedUpgradeFree: '升級 Pro 可獲得更多 AI 次數',
     settingsTitle: '方案與設定',
-    settingsBack: '返回貓咪',
-    authAccountSection: '帳號與登入（Supabase）',
-    authNotConfigured:
-      '尚未設定雲端帳號：請在 `.env` 或部署環境加入 VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY，並在 Supabase 執行 `supabase/migrations` 內的 SQL，然後重新啟動前端。',
+    settingsBack: '返回系統',
+    authAccountSection: '帳號與登入',
+    authNotConfigured: '雲端登入尚未開放。請確認伺服器已完成雲端連線設定後，重新整理此頁面。',
     authLoggedInStrip: '已登入',
     authOpenSettingsToSignIn: '到「方案與設定」可註冊或登入。',
     authCurrentAccount: '目前帳號',
@@ -420,7 +443,7 @@ const text = {
     authSwitchToSignUp: '還沒帳號？改為註冊',
     authSwitchToSignIn: '已有帳號？改為登入',
     authProcessing: '處理中…',
-    authErrNotConfigured: '尚未連線 Supabase。',
+    authErrNotConfigured: '尚未連線雲端服務。',
     authErrInvalid: '帳號或密碼不正確。',
     authErrEmailNotConfirmed: '請先到信箱完成驗證，再登入。',
     authErrAlreadyReg: '此信箱已註冊，請改為登入。',
@@ -773,10 +796,10 @@ const text = {
     aiQuotaExhaustedTitle: "Today's AI quota is used up.",
     aiQuotaExhaustedUpgradeFree: 'Upgrade to Pro for more daily AI uses.',
     settingsTitle: 'Plan & settings',
-    settingsBack: 'Back to cats',
-    authAccountSection: 'Account (Supabase)',
+    settingsBack: 'Back to system',
+    authAccountSection: 'Account',
     authNotConfigured:
-      'Cloud sign-in is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to `.env` or your host, run the SQL in `supabase/migrations` on your Supabase project, then restart the dev server.',
+      'Cloud sign-in is not available yet. Make sure cloud connection is set up on the server, then refresh this page.',
     authLoggedInStrip: 'Signed in',
     authOpenSettingsToSignIn: 'Open Plan & settings to sign in or register.',
     authCurrentAccount: 'Account',
@@ -789,7 +812,7 @@ const text = {
     authSwitchToSignUp: 'No account? Switch to sign up',
     authSwitchToSignIn: 'Have an account? Switch to sign in',
     authProcessing: 'Working…',
-    authErrNotConfigured: 'Supabase is not configured.',
+    authErrNotConfigured: 'Cloud service is not connected.',
     authErrInvalid: 'Invalid email or password.',
     authErrEmailNotConfirmed: 'Please confirm your email from the inbox, then sign in.',
     authErrAlreadyReg: 'This email is already registered — try signing in.',
@@ -4632,6 +4655,99 @@ export default function App() {
     );
   };
 
+  const renderAuthAccountSection = () => (
+    <section className="mb-4 rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-sm">
+      <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
+      {!supabaseAuth.configured ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+          <p className="text-xs leading-relaxed text-amber-950">{tr.authNotConfigured}</p>
+        </div>
+      ) : !supabaseAuth.authReady ? (
+        <p className="text-sm text-stone-500">{tr.authProcessing}</p>
+      ) : supabaseAuth.user ? (
+        <>
+          <p className="text-sm text-stone-700">
+            <span className="font-bold text-stone-500">{tr.authCurrentAccount}</span>{' '}
+            <span className="font-semibold text-orange-700">{authDisplayLabel}</span>
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+          <button
+            type="button"
+            onClick={() => void handleAuthSignOut()}
+            className="mt-3 w-full rounded-xl border border-stone-300 bg-white py-2.5 text-sm font-bold text-stone-700"
+          >
+            {tr.authSignOut}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="mb-3 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+          <div className="mb-3 flex gap-2">
+            <button
+              type="button"
+              className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition ${authMode === 'signIn' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
+              onClick={() => {
+                setAuthMode('signIn');
+                setAuthFormError(null);
+                setAuthMessage(null);
+              }}
+            >
+              {tr.authSignIn}
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition ${authMode === 'signUp' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
+              onClick={() => {
+                setAuthMode('signUp');
+                setAuthFormError(null);
+                setAuthMessage(null);
+              }}
+            >
+              {tr.authSignUp}
+            </button>
+          </div>
+          <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authEmail}</label>
+          <input
+            type="email"
+            autoComplete="email"
+            value={authEmail}
+            onChange={(e) => setAuthEmail(e.target.value)}
+            className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
+          />
+          <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authPassword}</label>
+          <input
+            type="password"
+            autoComplete={authMode === 'signIn' ? 'current-password' : 'new-password'}
+            value={authPassword}
+            onChange={(e) => setAuthPassword(e.target.value)}
+            className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
+          />
+          {authMode === 'signUp' ? (
+            <>
+              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authDisplayNameOptional}</label>
+              <input
+                type="text"
+                value={authDisplayNameReg}
+                onChange={(e) => setAuthDisplayNameReg(e.target.value)}
+                className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
+              />
+            </>
+          ) : null}
+          {authFormError ? <p className="mb-2 text-[13px] font-medium text-red-600">{authFormError}</p> : null}
+          {authMessage ? <p className="mb-2 text-[13px] font-medium text-green-700">{authMessage}</p> : null}
+          <button
+            type="button"
+            disabled={authBusy}
+            onClick={() => void handleAuthSubmit()}
+            className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-55"
+          >
+            {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
+          </button>
+        </>
+      )}
+    </section>
+  );
+
   const renderSettingsPage = () => (
     <>
       <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
@@ -4660,94 +4776,7 @@ export default function App() {
         ) : null}
       </section>
 
-      <section className="mb-4 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
-        {!supabaseAuth.configured ? (
-          <p className="text-xs leading-relaxed text-stone-600">{tr.authNotConfigured}</p>
-        ) : !supabaseAuth.authReady ? (
-          <p className="text-sm text-stone-500">{tr.authProcessing}</p>
-        ) : supabaseAuth.user ? (
-          <>
-            <p className="text-sm text-stone-700">
-              <span className="font-bold text-stone-500">{tr.authCurrentAccount}</span>{' '}
-              <span className="font-semibold text-orange-700">{authDisplayLabel}</span>
-            </p>
-            <p className="mt-2 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
-            <button
-              type="button"
-              onClick={() => void handleAuthSignOut()}
-              className="mt-3 w-full rounded-xl border border-stone-300 bg-white py-2.5 text-sm font-bold text-stone-700"
-            >
-              {tr.authSignOut}
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="mb-3 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
-            <div className="mb-3 flex gap-2">
-              <button
-                type="button"
-                className={`flex-1 rounded-xl py-2 text-xs font-bold transition ${authMode === 'signIn' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
-                onClick={() => {
-                  setAuthMode('signIn');
-                  setAuthFormError(null);
-                  setAuthMessage(null);
-                }}
-              >
-                {tr.authSignIn}
-              </button>
-              <button
-                type="button"
-                className={`flex-1 rounded-xl py-2 text-xs font-bold transition ${authMode === 'signUp' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
-                onClick={() => {
-                  setAuthMode('signUp');
-                  setAuthFormError(null);
-                  setAuthMessage(null);
-                }}
-              >
-                {tr.authSignUp}
-              </button>
-            </div>
-            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authEmail}</label>
-            <input
-              type="email"
-              autoComplete="email"
-              value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-              className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
-            />
-            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authPassword}</label>
-            <input
-              type="password"
-              autoComplete={authMode === 'signIn' ? 'current-password' : 'new-password'}
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
-            />
-            {authMode === 'signUp' ? (
-              <>
-                <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authDisplayNameOptional}</label>
-                <input
-                  type="text"
-                  value={authDisplayNameReg}
-                  onChange={(e) => setAuthDisplayNameReg(e.target.value)}
-                  className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
-                />
-              </>
-            ) : null}
-            {authFormError ? <p className="mb-2 text-[13px] font-medium text-red-600">{authFormError}</p> : null}
-            {authMessage ? <p className="mb-2 text-[13px] font-medium text-green-700">{authMessage}</p> : null}
-            <button
-              type="button"
-              disabled={authBusy}
-              onClick={() => void handleAuthSubmit()}
-              className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-55"
-            >
-              {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
-            </button>
-          </>
-        )}
-      </section>
+      {renderAuthAccountSection()}
 
       <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.settingsPlanSection}</h2>
@@ -4801,25 +4830,17 @@ export default function App() {
 
   const renderCatsPage = () => (
     <>
-      <section className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setPage('settings')}
-            className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 shadow-sm"
-          >
-            ⚙ {tr.openSettings}
-          </button>
-        </div>
-        {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
-          <div className="max-w-[58%] text-right text-[11px] leading-snug text-stone-600">
-            <span className="font-bold text-stone-500">{tr.authLoggedInStrip}</span>{' '}
-            <span className="font-semibold text-orange-700">{authDisplayLabel}</span>
-          </div>
-        ) : supabaseAuth.configured && supabaseAuth.authReady && !supabaseAuth.user ? (
-          <p className="max-w-[58%] text-right text-[10px] leading-snug text-stone-400">{tr.authOpenSettingsToSignIn}</p>
-        ) : null}
+      <section className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPage('settings')}
+          className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 shadow-sm"
+        >
+          ⚙ {tr.openSettings}
+        </button>
       </section>
+
+      {renderAuthAccountSection()}
 
       {appPlan === 'free' && activeCats.length > 1 ? (
         <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950 shadow-sm">
@@ -5130,48 +5151,65 @@ export default function App() {
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       <div className="mx-auto max-w-md pb-24">
         <nav
-          className="mb-4 grid grid-cols-6 gap-0.5 rounded-2xl border border-orange-100/80 bg-white/95 p-1 shadow-sm backdrop-blur-sm"
-          aria-label="Main"
+          className="mb-5 select-none rounded-3xl border border-orange-100/90 bg-white p-3.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"
+          aria-label={lang === 'zh' ? '主要功能' : 'Main'}
         >
-          {(
-            [
-              { id: 'today' as Page, label: tr.today, icon: '📅' },
-              { id: 'weight' as Page, label: tr.weight, icon: '⚖️' },
-              { id: 'vet' as Page, label: tr.vet, icon: '🩺' },
-              { id: 'history' as Page, label: tr.history, icon: '🕘' },
-              { id: 'cats' as Page, label: tr.cats, icon: '⚙️' },
-              { id: 'assistant' as Page, label: tr.assistantNav, icon: '✨' },
-            ] as const
-          ).map((tab) => {
-            const systemActive =
-              tab.id === 'cats' &&
-              (page === 'cats' || page === 'settings' || page === 'sharedCare' || page === 'reminders');
-            const active = tab.id === 'cats' ? systemActive : page === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setPage(tab.id)}
-                className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 transition-all duration-200 active:scale-95 ${
-                  active
-                    ? 'bg-orange-100 text-orange-800 shadow-sm ring-1 ring-orange-200/70'
-                    : 'text-stone-500 hover:bg-orange-50/60'
-                }`}
+          <div className="flex flex-col gap-3.5">
+            {MAIN_TAB_ROWS.map((row, rowIndex) => (
+              <div
+                key={rowIndex}
+                className={`grid grid-cols-3 gap-2.5 ${rowIndex > 0 ? 'border-t border-orange-100/90 pt-3.5' : ''}`}
               >
-                <span
-                  className={`text-[16px] leading-none transition-transform duration-200 ${active ? 'scale-110' : 'opacity-60'}`}
-                  aria-hidden
-                >
-                  {tab.icon}
-                </span>
-                <span className={`text-[9px] leading-tight ${active ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
-                <span
-                  className={`h-0.5 rounded-full transition-all duration-200 ${active ? 'mt-0.5 w-4 bg-orange-500' : 'w-0 bg-transparent'}`}
-                  aria-hidden
-                />
-              </button>
-            );
-          })}
+              {row.map((tab) => {
+                const systemActive =
+                  tab.id === 'cats' &&
+                  (page === 'cats' ||
+                    page === 'settings' ||
+                    page === 'sharedCare' ||
+                    page === 'reminders');
+                const active = tab.id === 'cats' ? systemActive : page === tab.id;
+                const TabIcon = tab.Icon;
+                const label = tr[tab.labelKey];
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setPage(tab.id)}
+                    aria-current={active ? 'page' : undefined}
+                    aria-label={label}
+                    className={`relative flex min-h-[5.75rem] touch-manipulation flex-col items-center justify-center gap-2 rounded-2xl px-1 pb-4 pt-3 transition-all duration-200 ease-out active:scale-[0.97] ${
+                      active
+                        ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/40 ring-2 ring-orange-300/70'
+                        : 'border border-stone-200/90 bg-stone-50 text-stone-800 shadow-sm hover:border-orange-200 hover:bg-orange-50/80'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition-colors ${
+                        active ? 'bg-white/20 text-white' : 'bg-white text-orange-600 shadow-sm ring-1 ring-orange-100/80'
+                      }`}
+                      aria-hidden
+                    >
+                      <TabIcon className="h-7 w-7" strokeWidth={active ? 2.5 : 2.15} />
+                    </span>
+                    <span
+                      className={`max-w-full px-0.5 text-center text-[15px] leading-tight tracking-wide ${
+                        active ? 'font-extrabold text-white' : 'font-bold text-stone-800'
+                      }`}
+                    >
+                      {label}
+                    </span>
+                    <span
+                      className={`absolute inset-x-5 bottom-2 h-1 rounded-full transition-all duration-200 ${
+                        active ? 'bg-white/95 shadow-sm' : 'h-0 opacity-0'
+                      }`}
+                      aria-hidden
+                    />
+                  </button>
+                );
+              })}
+              </div>
+            ))}
+          </div>
         </nav>
 
         {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (

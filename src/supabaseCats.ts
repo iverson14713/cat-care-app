@@ -47,7 +47,7 @@ const CAT_SELECT = `${CAT_SELECT_BASE}, is_archived, pet_type`;
 
 /** Shown when DB migration 20260519120000_cats_is_archived.sql has not been applied yet. */
 export const CATS_ARCHIVE_MIGRATION_HINT =
-  '請在 Supabase → SQL Editor 執行專案內 supabase/migrations/20260519120000_cats_is_archived.sql（新增 is_archived 欄位），完成後重新整理 App。';
+  '雲端資料庫需要更新才能使用封存功能。請聯絡管理員完成伺服器更新後，重新整理 App。';
 
 function isArchivedColumnError(message: string): boolean {
   return /is_archived/i.test(message) && /(does not exist|schema cache|column)/i.test(message);
