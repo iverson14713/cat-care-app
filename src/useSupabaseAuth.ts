@@ -114,6 +114,22 @@ export function useSupabaseAuth() {
     return supabase.auth.signOut();
   }, [supabase]);
 
+  const updateDisplayName = useCallback(
+    async (displayName: string): Promise<{ error: Error | null }> => {
+      if (!supabase || !session?.user) return { error: new Error('not_authenticated') };
+      const trimmed = displayName.trim();
+      const { error } = await supabase
+        .from('profiles')
+        .update({ display_name: trimmed || null })
+        .eq('id', session.user.id);
+      if (error) return { error: new Error(error.message) };
+      const p = await loadProfile(session.user.id);
+      if (p) setProfile(p);
+      return { error: null };
+    },
+    [supabase, session?.user, loadProfile]
+  );
+
   return {
     supabase,
     configured: supabase !== null,
@@ -122,6 +138,7 @@ export function useSupabaseAuth() {
     profile,
     authReady: ready,
     loadProfile,
+    updateDisplayName,
     signInWithEmail,
     signUpWithEmail,
     signOut,

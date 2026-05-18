@@ -21,19 +21,17 @@ import {
   mergeAssistantQuotaFromSnapshot,
   peekCareBundleCache,
 } from './openaiAssistant';
+import type { SharedCareMember } from './sharedCareTypes';
 import {
-  createDefaultSharedCareState,
-  defaultOwnerName,
-  DEMO_MEMBER_NAME,
-  generateInviteCode,
-  getCareDisplayName,
-  loadSharedCareMock,
-  makeActivityId,
-  nowTimeLabel,
-  saveSharedCareMock,
-  setCareDisplayName,
-  type SharedCareCatState,
-} from './sharedCareMock';
+  acceptCatInvite,
+  createInviteCodeForCat,
+  fetchActiveInviteCodeForCat,
+  fetchCatMembersWithProfiles,
+  fetchMyCatRolesMap,
+  fetchMyRoleForCat,
+  removeCatMember,
+  type CatAccessRole,
+} from './supabaseSharedCare';
 import { useSupabaseAuth } from './useSupabaseAuth';
 import {
   archiveCatForOwner,
@@ -62,7 +60,6 @@ import {
   purgeCatLocalStorage,
   pushAiUsageSnapshot,
   pushLocalDataToCloud,
-  pushSharedCareForCat,
   pushWeeklyReportToCloud,
 } from './cloudDataSync';
 import { permanentlyDeleteCatForOwner } from './supabaseCatPermanentDelete';
@@ -492,13 +489,14 @@ const text = {
     remindersTypeVet: '看獸醫',
     remindersTypeCustom: '自訂',
     sharedCareTitle: '共同照護',
-    sharedCareNavHint: '與家人／室友共享同一隻貓的紀錄（示範流程）',
+    sharedCareNavHint: '與家人／室友共享同一隻貓的紀錄，資料同步於雲端。',
     sharedCareBack: '返回',
-    sharedCareDemoBanner:
-      '示範模式：尚未連接雲端。邀請碼與成員僅存在此瀏覽器，重新整理後仍會保留（同一分頁工作階段內）。正式版將使用 Supabase 同步。',
+    sharedCareCloudRequired: '請先登入並選擇已同步至雲端的貓咪，才能使用共同照護。',
     sharedCareMembersTitle: '共享成員',
+    sharedCareMembersEmpty: '目前尚無共同照護成員',
     sharedCareRoleOwner: '主人',
     sharedCareRoleMember: '成員',
+    sharedCareRemoveMember: '移除',
     sharedCareInviteSection: '邀請',
     sharedCareGenerateInvite: '產生邀請碼',
     sharedCareInviteCodeLabel: '邀請碼',
@@ -509,24 +507,21 @@ const text = {
     sharedCareJoinSection: '使用邀請碼加入',
     sharedCareJoinPlaceholder: '輸入邀請碼，例如 ABC123',
     sharedCareJoinSubmit: '加入',
-    sharedCareJoinOk: '已加入（示範）',
-    sharedCareJoinNeedCode: '請先由主人產生邀請碼。',
-    sharedCareJoinWrong: '邀請碼不正確或已失效（示範）。',
-    sharedCareJoinDuplicate: '你已經在成員列表中。',
+    sharedCareJoinOk: '已成功加入共同照護',
+    sharedCareJoinWrong: '邀請碼不正確或已失效。',
+    sharedCareJoinDuplicate: '你已經是此貓咪的成員。',
+    sharedCareJoinNeedLogin: '請先登入後再輸入邀請碼。',
     sharedCareActivityTitle: '最近動態',
-    sharedCareActivityEmpty: '尚無動態。產生邀請碼或加入後會顯示在此。',
-    sharedCareActivityGenerated: '產生了新的邀請碼',
-    sharedCareActivityJoined: '透過邀請碼加入',
-    sharedCareDisplayNameHint: '在共同照護頁顯示的名稱（儲存在本機）',
+    sharedCareActivityEmpty: '目前尚無照護動態',
+    sharedCareDisplayNameHint: '在共同照護與動態中顯示的名稱（同步至雲端帳號）',
     sharedCareDisplayNameLabel: '我的稱呼',
     sharedCareSaveName: '儲存',
+    sharedCareOwnerOnly: '僅主人可執行此操作',
     sharedCareTodayFeedTitle: '今日照護動態',
-    sharedCareTodayFeedDemo: '以下為示範文案；連接雲端後會顯示真實紀錄。',
+    sharedCareTodayFeedEmpty: '目前尚無照護動態',
     sharedCareTodayFeedTap: '點開查看',
     sharedCareTodayFeedCollapse: '收合',
     sharedCareTodayFeedCount: '則動態',
-    sharedCareDemoLine1: 'Wayne 於 21:30 記錄了晚餐',
-    sharedCareDemoLine2: 'Amy 上傳了異常照片',
     proTeaserHistorySearch: '歷史篩選與搜尋',
     proTeaserComing: '即將推出',
     proTeaserAdvancedWeekly: '進階 AI 週報',
@@ -861,13 +856,14 @@ const text = {
     remindersTypeVet: 'Vet',
     remindersTypeCustom: 'Custom',
     sharedCareTitle: 'Shared care',
-    sharedCareNavHint: 'Share one cat’s log with family or roommates (demo flow).',
+    sharedCareNavHint: 'Share one cat’s log with family or roommates. Data syncs via the cloud.',
     sharedCareBack: 'Back',
-    sharedCareDemoBanner:
-      'Demo mode: not connected to the cloud yet. Invite codes and members stay in this browser (sessionStorage). A future version will sync via Supabase.',
+    sharedCareCloudRequired: 'Sign in and select a cloud-synced cat to use shared care.',
     sharedCareMembersTitle: 'Members',
+    sharedCareMembersEmpty: 'No shared care members yet',
     sharedCareRoleOwner: 'Owner',
     sharedCareRoleMember: 'Member',
+    sharedCareRemoveMember: 'Remove',
     sharedCareInviteSection: 'Invite',
     sharedCareGenerateInvite: 'Generate invite code',
     sharedCareInviteCodeLabel: 'Invite code',
@@ -878,24 +874,21 @@ const text = {
     sharedCareJoinSection: 'Join with a code',
     sharedCareJoinPlaceholder: 'Enter code, e.g. ABC123',
     sharedCareJoinSubmit: 'Join',
-    sharedCareJoinOk: 'Joined (demo)',
-    sharedCareJoinNeedCode: 'Ask the owner to generate an invite code first.',
-    sharedCareJoinWrong: 'Code doesn’t match (demo).',
-    sharedCareJoinDuplicate: 'You’re already in the member list.',
+    sharedCareJoinOk: 'Joined shared care successfully',
+    sharedCareJoinWrong: 'Invalid or expired invite code.',
+    sharedCareJoinDuplicate: 'You are already a member of this cat.',
+    sharedCareJoinNeedLogin: 'Sign in before entering an invite code.',
     sharedCareActivityTitle: 'Recent activity',
-    sharedCareActivityEmpty: 'No activity yet. Generate a code or join to see entries here.',
-    sharedCareActivityGenerated: 'generated a new invite code',
-    sharedCareActivityJoined: 'joined with an invite code',
-    sharedCareDisplayNameHint: 'Name shown on shared care (stored locally)',
+    sharedCareActivityEmpty: 'No care activity yet',
+    sharedCareDisplayNameHint: 'Name shown in shared care and activity (saved to your account)',
     sharedCareDisplayNameLabel: 'My display name',
     sharedCareSaveName: 'Save',
+    sharedCareOwnerOnly: 'Only the owner can do this',
     sharedCareTodayFeedTitle: 'Today’s care feed',
-    sharedCareTodayFeedDemo: 'Sample lines below; real entries will appear after cloud sync.',
+    sharedCareTodayFeedEmpty: 'No care activity yet',
     sharedCareTodayFeedTap: 'Tap to expand',
     sharedCareTodayFeedCollapse: 'Collapse',
     sharedCareTodayFeedCount: 'updates',
-    sharedCareDemoLine1: 'Wayne logged dinner at 21:30',
-    sharedCareDemoLine2: 'Amy uploaded an abnormal photo',
     proTeaserHistorySearch: 'History filter & search',
     proTeaserComing: 'Coming soon',
     proTeaserAdvancedWeekly: 'Advanced AI weekly report',
@@ -1426,29 +1419,63 @@ export default function App() {
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
 
-  const [sharedCareMap, setSharedCareMap] = useState<Record<string, SharedCareCatState>>(() => loadSharedCareMock());
+  const [catRolesMap, setCatRolesMap] = useState<Record<string, CatAccessRole>>({});
+  const [sharedCareMembers, setSharedCareMembers] = useState<SharedCareMember[]>([]);
+  const [sharedCareInviteCode, setSharedCareInviteCode] = useState<string | null>(null);
+  const [selectedCatRole, setSelectedCatRole] = useState<CatAccessRole>(null);
+  const [sharedCareBusy, setSharedCareBusy] = useState(false);
   const [sharedCareJoinInput, setSharedCareJoinInput] = useState('');
   const [sharedCareFeedback, setSharedCareFeedback] = useState<string | null>(null);
   const [sharedCareCopied, setSharedCareCopied] = useState(false);
-  const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState(() => getCareDisplayName());
+  const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState('');
+  const inviteUrlHandledRef = useRef(false);
   const [todayCareFeedOpen, setTodayCareFeedOpen] = useState(false);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Cat | null>(null);
   const [permanentDeleteBusy, setPermanentDeleteBusy] = useState(false);
   const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const patchSharedCare = useCallback(
-    (catId: string, updater: (prev: SharedCareCatState) => SharedCareCatState) => {
-      setSharedCareMap((map) => {
-        const prev = map[catId] ?? createDefaultSharedCareState(lang);
-        const next = updater(prev);
-        const merged = { ...map, [catId]: next };
-        saveSharedCareMock(merged);
-        const sb = supabaseAuth.supabase;
-        if (sb && isCloudCatId(catId)) void pushSharedCareForCat(sb, catId, next);
-        return merged;
-      });
+  const reloadCatsFromCloud = useCallback(async (): Promise<Cat[]> => {
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (!sb || !uid) return cats;
+    const { data: cloudList, error } = await fetchCatsForUser(sb);
+    if (error) {
+      console.warn('[cats refresh]', error.message);
+      return cats;
+    }
+    const localCats = loadCats().filter((c) => !isCloudCatId(c.id) || cloudList.some((x) => x.id === c.id));
+    const merged = mergeCloudCatsWithLocal(cloudList, localCats);
+    safeSetItem(CATS_KEY, JSON.stringify(merged));
+    setCats(merged);
+    const { data: roles } = await fetchMyCatRolesMap(sb, uid);
+    setCatRolesMap(roles);
+    return merged;
+  }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id]);
+
+  const refreshSharedCareForCat = useCallback(
+    async (catId: string) => {
+      const sb = supabaseAuth.supabase;
+      const uid = supabaseAuth.user?.id;
+      if (!sb || !uid || !isCloudCatId(catId)) {
+        setSharedCareMembers([]);
+        setSharedCareInviteCode(null);
+        setSelectedCatRole(null);
+        return;
+      }
+      setSharedCareBusy(true);
+      const [membersRes, codeRes, roleRes, eventsRes] = await Promise.all([
+        fetchCatMembersWithProfiles(sb, catId),
+        fetchActiveInviteCodeForCat(sb, catId),
+        fetchMyRoleForCat(sb, catId, uid),
+        fetchCareEventsForCat(sb, catId),
+      ]);
+      setSharedCareBusy(false);
+      if (!membersRes.error) setSharedCareMembers(membersRes.data);
+      if (!codeRes.error) setSharedCareInviteCode(codeRes.code);
+      if (!roleRes.error) setSelectedCatRole(roleRes.role);
+      if (!eventsRes.error) setCloudCareEvents(eventsRes.data);
     },
-    [lang, supabaseAuth.supabase]
+    [supabaseAuth.supabase, supabaseAuth.user?.id]
   );
 
   const flashSharedCareCopied = useCallback(() => {
@@ -1456,6 +1483,11 @@ export default function App() {
     if (sharedCareCopyTimerRef.current) clearTimeout(sharedCareCopyTimerRef.current);
     sharedCareCopyTimerRef.current = setTimeout(() => setSharedCareCopied(false), 2000);
   }, []);
+
+  const canManageCatLifecycle = useCallback(
+    (catId: string) => !isCloudCatId(catId) || catRolesMap[catId] === 'owner',
+    [catRolesMap]
+  );
 
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -2008,7 +2040,6 @@ export default function App() {
       const pushErrs = await pushLocalDataToCloud(sb, userId, cloudIds, loadReminders(), usageDate);
       if (runId !== cloudSyncRunRef.current) return;
       setReminders(loadReminders());
-      setSharedCareMap(loadSharedCareMock());
       setAppPlan(getAiPlan());
       setAssistantQuota((prev) => applyLocalAssistantQuota(getAiPlan(), aiClientId, usageDate, prev));
       const errs = [...pull.errors, ...pushErrs].filter(Boolean);
@@ -2143,6 +2174,8 @@ export default function App() {
       const merged = mergeCloudCatsWithLocal(cloudList, localCats);
       safeSetItem(CATS_KEY, JSON.stringify(merged));
       setCats(merged);
+      const { data: roles } = await fetchMyCatRolesMap(sb, uid);
+      if (!cancelled) setCatRolesMap(roles);
       setCloudSyncPhase('loading');
       const activeMerged = merged.filter((c) => !c.isArchived);
       let nextCatId = migratedIdMap[selectedCatId] ?? selectedCatId;
@@ -2232,7 +2265,57 @@ export default function App() {
     void fetchCareEventsForCat(supabaseAuth.supabase, selectedCat.id).then(({ data, error }) => {
       if (!error) setCloudCareEvents(data);
     });
-  }, [useCloudDaily, selectedCat?.id, supabaseAuth.supabase]);
+  }, [useCloudDaily, selectedCat?.id, supabaseAuth.supabase, cloudSyncTick]);
+
+  useEffect(() => {
+    const name = supabaseAuth.profile?.display_name?.trim() ?? '';
+    setSharedCareDisplayNameInput(name);
+  }, [supabaseAuth.profile?.display_name]);
+
+  useEffect(() => {
+    if (!selectedCat || page !== 'sharedCare') return;
+    void refreshSharedCareForCat(selectedCat.id);
+  }, [selectedCat?.id, page, refreshSharedCareForCat, cloudSyncTick]);
+
+  useEffect(() => {
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (!sb || !uid || inviteUrlHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('invite')?.trim();
+    if (!code) return;
+    inviteUrlHandledRef.current = true;
+    void (async () => {
+      const { catId, error } = await acceptCatInvite(sb, code);
+      if (error) {
+        setSharedCareFeedback(text[lang].sharedCareJoinWrong);
+        return;
+      }
+      if (!catId) return;
+      const merged = await reloadCatsFromCloud();
+      const active = merged.filter((c) => !c.isArchived);
+      const joined = active.find((c) => c.id === catId) ?? active[0];
+      if (joined) {
+        setSelectedCatId(joined.id);
+        setDaily(loadDailyRecord(joined.id, today));
+        setMonthly(loadMonthlyRecord(joined.id, month));
+        setWeightRecords(loadWeightRecords(joined.id));
+      }
+      setSharedCareFeedback(text[lang].sharedCareJoinOk);
+      setPage('sharedCare');
+      params.delete('invite');
+      const qs = params.toString();
+      const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', nextUrl);
+    })();
+  }, [
+    supabaseAuth.supabase,
+    supabaseAuth.user?.id,
+    lang,
+    reloadCatsFromCloud,
+    today,
+    month,
+  ]);
 
   useEffect(() => {
     if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
@@ -2566,7 +2649,6 @@ export default function App() {
         }
         setHistoryRefreshKey((v) => v + 1);
       }
-      setSharedCareMap(loadSharedCareMock());
     },
     [
       cats,
@@ -2951,14 +3033,10 @@ export default function App() {
   );
 
   const renderTodayPage = () => {
-    const sharedCareToday = selectedCat
-      ? sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang)
-      : null;
     const todayCloudFeed = useCloudDaily
       ? cloudCareEvents.filter((e) => careEventCreatedOnLocalDate(e.created_at, today)).slice(0, 12)
       : [];
-    const todayActivityCount =
-      todayCloudFeed.length + (sharedCareToday?.activities?.length ?? 0);
+    const todayActivityCount = todayCloudFeed.length;
     const hasRealTodayFeed = todayActivityCount > 0;
 
     return (
@@ -2992,30 +3070,18 @@ export default function App() {
         {todayCareFeedOpen ? (
           <div className="border-t border-amber-100/80 px-4 pb-4 pt-1">
             {!hasRealTodayFeed ? (
-              <p className="mb-2 text-xs text-stone-500">{tr.sharedCareTodayFeedDemo}</p>
-            ) : null}
-            <ul className="space-y-2 text-sm text-stone-700">
-              {todayCloudFeed.map((e) => (
-                <li key={e.id}>
-                  <span className="font-semibold text-stone-900">{e.actor}</span>
-                  <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
-                  <span> — {e.summary}</span>
-                </li>
-              ))}
-              {(sharedCareToday?.activities ?? []).slice(0, 8).map((a) => (
-                <li key={a.id}>
-                  <span className="font-semibold text-stone-900">{a.actor}</span>
-                  <span className="text-stone-400"> · {a.timeLabel}</span>
-                  <span> — {a.summary}</span>
-                </li>
-              ))}
-              {!hasRealTodayFeed ? (
-                <>
-                  <li>{tr.sharedCareDemoLine1}</li>
-                  <li>{tr.sharedCareDemoLine2}</li>
-                </>
-              ) : null}
-            </ul>
+              <p className="text-sm text-stone-500">{tr.sharedCareTodayFeedEmpty}</p>
+            ) : (
+              <ul className="space-y-2 text-sm text-stone-700">
+                {todayCloudFeed.map((e) => (
+                  <li key={e.id}>
+                    <span className="font-semibold text-stone-900">{e.actor}</span>
+                    <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
+                    <span> — {e.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         ) : null}
       </section>
@@ -4045,35 +4111,29 @@ export default function App() {
   const renderSharedCarePage = () => {
     if (!selectedCat) return null;
     const t = text[lang];
-    const sc = sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang);
-    const ownerName = sc.members.find((m) => m.role === 'owner')?.name ?? defaultOwnerName(lang);
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    const cloudReady = Boolean(useCloudDaily && sb && uid && isCloudCatId(selectedCat.id));
+    const isOwner = selectedCatRole === 'owner';
 
-    const onGenerateInvite = () => {
-      const code = generateInviteCode();
-      const timeLabel = nowTimeLabel();
-      patchSharedCare(selectedCat.id, (prev) => {
-        const on = prev.members.find((m) => m.role === 'owner')?.name ?? defaultOwnerName(lang);
-        return {
-          ...prev,
-          inviteCode: code,
-          activities: [
-            {
-              id: makeActivityId(),
-              actor: on,
-              summary: `${t.sharedCareActivityGenerated} · ${code}`,
-              timeLabel,
-            },
-            ...prev.activities,
-          ].slice(0, 50),
-        };
-      });
+    const onGenerateInvite = async () => {
+      if (!cloudReady || !sb || !uid || !isOwner) return;
+      setSharedCareBusy(true);
+      const { code, error } = await createInviteCodeForCat(sb, selectedCat.id, uid);
+      setSharedCareBusy(false);
+      if (error || !code) {
+        setSharedCareFeedback(error?.message ?? t.sharedCareJoinWrong);
+        return;
+      }
+      setSharedCareInviteCode(code);
       setSharedCareFeedback(null);
+      void refreshSharedCareForCat(selectedCat.id);
     };
 
     const onCopyCode = async () => {
-      if (!sc.inviteCode) return;
+      if (!sharedCareInviteCode) return;
       try {
-        await navigator.clipboard.writeText(sc.inviteCode);
+        await navigator.clipboard.writeText(sharedCareInviteCode);
         flashSharedCareCopied();
       } catch {
         setSharedCareFeedback(t.sharedCareCopyFail);
@@ -4081,10 +4141,10 @@ export default function App() {
     };
 
     const onCopyLink = async () => {
-      if (!sc.inviteCode) return;
+      if (!sharedCareInviteCode) return;
       try {
         const u = new URL(typeof window !== 'undefined' ? window.location.href : 'http://localhost');
-        u.searchParams.set('invite', sc.inviteCode);
+        u.searchParams.set('invite', sharedCareInviteCode);
         await navigator.clipboard.writeText(u.toString());
         flashSharedCareCopied();
       } catch {
@@ -4092,50 +4152,56 @@ export default function App() {
       }
     };
 
-    const onJoin = () => {
-      const code = sharedCareJoinInput.trim().toUpperCase();
-      const cur = sharedCareMap[selectedCat.id] ?? createDefaultSharedCareState(lang);
-      if (!cur.inviteCode) {
-        setSharedCareFeedback(t.sharedCareJoinNeedCode);
+    const onJoin = async () => {
+      const code = sharedCareJoinInput.trim();
+      if (!code) return;
+      if (!sb || !uid) {
+        setSharedCareFeedback(t.sharedCareJoinNeedLogin);
         return;
       }
-      if (code !== cur.inviteCode) {
+      setSharedCareBusy(true);
+      const { catId, error } = await acceptCatInvite(sb, code);
+      setSharedCareBusy(false);
+      if (error) {
+        const msg = error.message.toLowerCase().includes('invalid') ? t.sharedCareJoinWrong : error.message;
+        setSharedCareFeedback(msg);
+        return;
+      }
+      if (!catId) {
         setSharedCareFeedback(t.sharedCareJoinWrong);
         return;
       }
-      if (cur.members.some((m) => m.id === 'demo-guest-mvp')) {
-        setSharedCareFeedback(t.sharedCareJoinDuplicate);
-        return;
+      const merged = await reloadCatsFromCloud();
+      const active = merged.filter((c) => !c.isArchived);
+      const joined = active.find((c) => c.id === catId) ?? active[0];
+      if (joined) {
+        setSelectedCatId(joined.id);
+        setDaily(loadDailyRecord(joined.id, today));
+        setMonthly(loadMonthlyRecord(joined.id, month));
+        setWeightRecords(loadWeightRecords(joined.id));
       }
-      const timeLabel = nowTimeLabel();
-      patchSharedCare(selectedCat.id, (prev) => ({
-        ...prev,
-        members: [
-          ...prev.members,
-          { id: 'demo-guest-mvp', name: DEMO_MEMBER_NAME, role: 'member' },
-        ],
-        activities: [
-          {
-            id: makeActivityId(),
-            actor: DEMO_MEMBER_NAME,
-            summary: t.sharedCareActivityJoined,
-            timeLabel,
-          },
-          ...prev.activities,
-        ].slice(0, 50),
-      }));
       setSharedCareFeedback(t.sharedCareJoinOk);
       setSharedCareJoinInput('');
+      if (joined) void refreshSharedCareForCat(joined.id);
     };
 
-    const onSaveDisplayName = () => {
-      const raw = sharedCareDisplayNameInput.trim();
-      setCareDisplayName(raw);
-      const display = raw || defaultOwnerName(lang);
-      patchSharedCare(selectedCat.id, (prev) => ({
-        ...prev,
-        members: prev.members.map((m) => (m.id === 'local-owner' ? { ...m, name: display } : m)),
-      }));
+    const onRemoveMember = async (memberUserId: string) => {
+      if (!cloudReady || !sb || !isOwner) return;
+      setSharedCareBusy(true);
+      const { error } = await removeCatMember(sb, selectedCat.id, memberUserId);
+      setSharedCareBusy(false);
+      if (error) {
+        setSharedCareFeedback(error.message);
+        return;
+      }
+      setSharedCareFeedback(null);
+      void refreshSharedCareForCat(selectedCat.id);
+    };
+
+    const onSaveDisplayName = async () => {
+      const { error } = await supabaseAuth.updateDisplayName(sharedCareDisplayNameInput);
+      if (error) setSharedCareFeedback(error.message);
+      else setSharedCareFeedback(null);
     };
 
     return (
@@ -4154,10 +4220,13 @@ export default function App() {
           <p className="mt-2 text-[12px] leading-relaxed text-amber-800">{t.sharedCareNavHint}</p>
         </section>
 
-        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950">
-          {t.sharedCareDemoBanner}
-        </div>
+        {!cloudReady ? (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950">
+            {t.sharedCareCloudRequired}
+          </div>
+        ) : null}
 
+        {supabaseAuth.user ? (
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <label className="mb-1 block text-[11px] font-bold text-stone-500">{t.sharedCareDisplayNameLabel}</label>
           <p className="mb-2 text-[11px] text-stone-400">{t.sharedCareDisplayNameHint}</p>
@@ -4166,74 +4235,95 @@ export default function App() {
               value={sharedCareDisplayNameInput}
               onChange={(e) => setSharedCareDisplayNameInput(e.target.value)}
               className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
-              placeholder={defaultOwnerName(lang)}
+              placeholder={supabaseAuth.user?.email ?? ''}
             />
             <button
               type="button"
-              onClick={onSaveDisplayName}
+              onClick={() => void onSaveDisplayName()}
               className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white"
             >
               {t.sharedCareSaveName}
             </button>
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : null}
 
+        {cloudReady ? (
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-base font-bold text-stone-900">{t.sharedCareMembersTitle}</h2>
-          <ul className="space-y-2">
-            {sc.members.map((m) => (
-              <li
-                key={m.id}
-                className="flex items-center justify-between rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2"
-              >
-                <span className="font-semibold text-stone-900">{m.name}</span>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                    m.role === 'owner' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'
-                  }`}
+          {sharedCareMembers.length === 0 ? (
+            <p className="text-sm text-stone-500">{t.sharedCareMembersEmpty}</p>
+          ) : (
+            <ul className="space-y-2">
+              {sharedCareMembers.map((m) => (
+                <li
+                  key={m.userId}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2"
                 >
-                  {m.role === 'owner' ? t.sharedCareRoleOwner : t.sharedCareRoleMember}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-[11px] text-stone-400">
-            {t.sharedCareRoleOwner}：{ownerName}
-          </p>
+                  <span className="min-w-0 truncate font-semibold text-stone-900">{m.displayName}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                        m.role === 'owner' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
+                      {m.role === 'owner' ? t.sharedCareRoleOwner : t.sharedCareRoleMember}
+                    </span>
+                    {isOwner && m.role === 'member' ? (
+                      <button
+                        type="button"
+                        disabled={sharedCareBusy}
+                        onClick={() => void onRemoveMember(m.userId)}
+                        className="rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700"
+                      >
+                        {t.sharedCareRemoveMember}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
+        ) : null}
 
+        {cloudReady && isOwner ? (
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-base font-bold text-stone-900">{t.sharedCareInviteSection}</h2>
           <button
             type="button"
-            onClick={onGenerateInvite}
-            className="mb-3 w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm"
+            disabled={sharedCareBusy}
+            onClick={() => void onGenerateInvite()}
+            className="mb-3 w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
           >
             {t.sharedCareGenerateInvite}
           </button>
           <div className="mb-2">
             <span className="text-[11px] font-bold text-stone-500">{t.sharedCareInviteCodeLabel}</span>
-            <p className="mt-1 font-mono text-lg font-bold tracking-widest text-stone-900">{sc.inviteCode ?? '—'}</p>
+            <p className="mt-1 font-mono text-lg font-bold tracking-widest text-stone-900">{sharedCareInviteCode ?? '—'}</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              disabled={!sc.inviteCode}
-              onClick={onCopyCode}
+              disabled={!sharedCareInviteCode}
+              onClick={() => void onCopyCode()}
               className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-700 disabled:opacity-45"
             >
               {sharedCareCopied ? t.sharedCareCopied : t.sharedCareCopyCode}
             </button>
             <button
               type="button"
-              disabled={!sc.inviteCode}
-              onClick={onCopyLink}
+              disabled={!sharedCareInviteCode}
+              onClick={() => void onCopyLink()}
               className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-700 disabled:opacity-45"
             >
               {sharedCareCopied ? t.sharedCareCopied : t.sharedCareCopyLink}
             </button>
           </div>
         </section>
+        ) : cloudReady && !isOwner ? (
+          <p className="mb-4 text-[12px] text-stone-500">{t.sharedCareOwnerOnly}</p>
+        ) : null}
 
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-2 text-base font-bold text-stone-900">{t.sharedCareJoinSection}</h2>
@@ -4242,12 +4332,14 @@ export default function App() {
               value={sharedCareJoinInput}
               onChange={(e) => setSharedCareJoinInput(e.target.value.toUpperCase())}
               placeholder={t.sharedCareJoinPlaceholder}
-              className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-[13px] uppercase outline-none focus:border-orange-300"
+              disabled={sharedCareBusy}
+              className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-[13px] uppercase outline-none focus:border-orange-300 disabled:opacity-60"
             />
             <button
               type="button"
-              onClick={onJoin}
-              className="shrink-0 rounded-xl bg-stone-800 px-4 py-2 text-sm font-bold text-white"
+              disabled={sharedCareBusy}
+              onClick={() => void onJoin()}
+              className="shrink-0 rounded-xl bg-stone-800 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
             >
               {t.sharedCareJoinSubmit}
             </button>
@@ -4258,8 +4350,8 @@ export default function App() {
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-2 text-base font-bold text-stone-900">{t.sharedCareActivityTitle}</h2>
           {useCloudDaily && cloudCareEvents.length > 0 ? (
-            <ul className="mb-3 space-y-2">
-              {cloudCareEvents.map((e) => (
+            <ul className="space-y-2">
+              {cloudCareEvents.slice(0, 30).map((e) => (
                 <li key={e.id} className="text-[13px] leading-snug text-stone-700">
                   <span className="font-semibold text-stone-900">{e.actor}</span>
                   <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
@@ -4267,20 +4359,9 @@ export default function App() {
                 </li>
               ))}
             </ul>
-          ) : null}
-          {sc.activities.length === 0 && !(useCloudDaily && cloudCareEvents.length > 0) ? (
+          ) : (
             <p className="text-sm text-stone-500">{t.sharedCareActivityEmpty}</p>
-          ) : sc.activities.length > 0 ? (
-            <ul className="space-y-2">
-              {sc.activities.map((a) => (
-                <li key={a.id} className="text-[13px] leading-snug text-stone-700">
-                  <span className="font-semibold text-stone-900">{a.actor}</span>
-                  <span className="text-stone-400"> · {a.timeLabel}</span>
-                  <span> — {a.summary}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          )}
         </section>
       </>
     );
@@ -4775,12 +4856,14 @@ export default function App() {
                   {tr.sharedCareTitle}
                 </button>
 
-                <button
-                  onClick={() => archiveCat(cat.id)}
-                  className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1.5 text-xs font-bold text-stone-500"
-                >
-                  {tr.archive}
-                </button>
+                {canManageCatLifecycle(cat.id) ? (
+                  <button
+                    onClick={() => archiveCat(cat.id)}
+                    className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1.5 text-xs font-bold text-stone-500"
+                  >
+                    {tr.archive}
+                  </button>
+                ) : null}
               </div>
             </div>
           ))}
@@ -4836,22 +4919,24 @@ export default function App() {
                   )}
                   <span className="truncate text-sm font-bold text-stone-700">{cat.name}</span>
                 </div>
-                <div className="flex shrink-0 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void restoreCat(cat.id)}
-                    className="rounded-full bg-orange-100 px-3 py-1.5 text-xs font-bold text-orange-800"
-                  >
-                    {tr.restoreCat}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPermanentDeleteTarget(cat)}
-                    className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
-                  >
-                    {tr.permanentlyDelete}
-                  </button>
-                </div>
+                {canManageCatLifecycle(cat.id) ? (
+                  <div className="flex shrink-0 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void restoreCat(cat.id)}
+                      className="rounded-full bg-orange-100 px-3 py-1.5 text-xs font-bold text-orange-800"
+                    >
+                      {tr.restoreCat}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPermanentDeleteTarget(cat)}
+                      className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
+                    >
+                      {tr.permanentlyDelete}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

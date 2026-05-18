@@ -28,7 +28,6 @@ import {
   mergeUsageCounts,
   upsertUserAiUsage,
 } from './supabaseAiUsage';
-import { fetchSharedCareForCat, mergeSharedCareState, upsertSharedCareForCat } from './supabaseSharedCare';
 import { fetchUserAiPlan, mergeAiPlan, upsertUserAiPlan, type AiPlan } from './supabaseUserPrefs';
 import {
   getOrCreateClientId,
@@ -42,7 +41,6 @@ import {
   type SavedWeeklyReport,
   weeklyReportStorageKey,
 } from './weeklyReportStorage';
-import { loadSharedCareMock, saveSharedCareMock, type SharedCareCatState } from './sharedCareMock';
 import { getAiPlan, setAiPlan } from './aiClient';
 
 export function dailyStorageKey(catId: string, date: string): string {
@@ -150,11 +148,6 @@ export function purgeCatLocalStorage(catId: string): void {
   } catch {
     // ignore
   }
-  const mock = loadSharedCareMock();
-  if (mock[catId]) {
-    delete mock[catId];
-    saveSharedCareMock(mock);
-  }
 }
 
 /** Rewrite localStorage keys when an offline cat receives a cloud UUID. */
@@ -197,12 +190,6 @@ export function rewriteCatStorageKeys(oldId: string, newId: string): void {
     }
   } catch {
     // ignore
-  }
-  const mock = loadSharedCareMock();
-  if (mock[oldId]) {
-    mock[newId] = mock[oldId];
-    delete mock[oldId];
-    saveSharedCareMock(mock);
   }
 }
 
@@ -333,14 +320,6 @@ export async function pullCloudDataIntoLocal(
       }
     }
 
-    const { data: cloudShared, error: sharedErr } = await fetchSharedCareForCat(supabase, catId);
-    if (sharedErr) errors.push(`shared care ${catId}: ${sharedErr.message}`);
-    else if (cloudShared) {
-      const mock = loadSharedCareMock();
-      const local = mock[catId];
-      mock[catId] = mergeSharedCareState(cloudShared, local ?? cloudShared);
-      saveSharedCareMock(mock);
-    }
   }
 
   const { data: cloudReminders, error: remErr } = await fetchUserReminders(supabase, userId);
@@ -470,12 +449,6 @@ export async function pushLocalDataToCloud(
       if (error) errors.push(`weekly upsert ${catId} ${saved.weekEnd}: ${error.message}`);
     }
 
-    const mock = loadSharedCareMock();
-    const state = mock[catId];
-    if (state) {
-      const { error } = await upsertSharedCareForCat(supabase, catId, state);
-      if (error) errors.push(`shared care ${catId}: ${error.message}`);
-    }
   }
 
   const { error: remUpErr } = await upsertUserReminders(supabase, userId, localReminders);
@@ -492,17 +465,6 @@ export async function pushLocalDataToCloud(
   if (planUpErr) errors.push(`ai plan upsert: ${planUpErr.message}`);
 
   return errors;
-}
-
-/** Push shared care state for one cat (after local edit). */
-export async function pushSharedCareForCat(
-  supabase: SupabaseClient,
-  catId: string,
-  state: SharedCareCatState
-): Promise<void> {
-  if (!isCloudCatId(catId)) return;
-  const { error } = await upsertSharedCareForCat(supabase, catId, state);
-  if (error) console.warn('[shared_care_states upsert]', error.message);
 }
 
 /** Push one weekly report after save. */
