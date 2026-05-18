@@ -2,7 +2,8 @@ import { getAiPlan } from './aiClient';
 import { safeGetItem, safeLoadJson, safeSetItem, storageError } from './safeStorage';
 
 export const REMINDER_LIMIT_FREE = 3;
-export const REMINDER_LIMIT_PRO = 30;
+/** Effectively unlimited for Pro (test flow; no real billing yet). */
+export const REMINDER_LIMIT_PRO = 100_000;
 
 const STORAGE_KEY = 'cat-calendar-reminders';
 const PERMISSION_ASKED_KEY = 'cat-calendar-notification-asked';

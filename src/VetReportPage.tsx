@@ -42,8 +42,8 @@ const copy = {
     title: '進階獸醫報告',
     lead: '整理照護紀錄給獸醫參考，非醫療診斷。',
     proBadge: 'Pro',
-    freeBanner: '免費版：僅預覽最近 7 天，不可匯出 PDF／圖片；AI 整理每日 1 次。',
-    upgrade: '升級 Pro 測試版解鎖完整功能',
+    freeBanner: '免費版：可預覽最近 30 天內容；不可匯出 PDF／圖片；AI 整理每日 1 次。',
+    upgrade: '升級 Pro',
     openSettings: '方案與設定',
     cat: '貓咪',
     range: '日期範圍',
@@ -102,8 +102,8 @@ const copy = {
     title: 'Advanced vet report',
     lead: 'Care log handoff for your vet — not a medical diagnosis.',
     proBadge: 'Pro',
-    freeBanner: 'Free: preview last 7 days only; no PDF/image export; 1 AI summary per day.',
-    upgrade: 'Upgrade to Pro (test) for full access',
+    freeBanner: 'Free: preview up to 30 days; no PDF/image export; 1 AI summary per day.',
+    upgrade: 'Upgrade to Pro',
     openSettings: 'Plan & settings',
     cat: 'Cat',
     range: 'Date range',
@@ -223,6 +223,8 @@ export type VetReportPageProps = {
   clientId: string;
   onOpenPhoto: (url: string) => void;
   onGoSettings: () => void;
+  /** When user taps PDF / Pro-only affordance while on free plan. */
+  onRequestPro?: () => void;
   onAiUsageChanged?: () => void;
   catSwitcher: React.ReactNode;
 };
@@ -237,6 +239,7 @@ export function VetReportPage({
   clientId,
   onOpenPhoto,
   onGoSettings,
+  onRequestPro,
   onAiUsageChanged,
   catSwitcher,
 }: VetReportPageProps) {
@@ -356,7 +359,7 @@ export function VetReportPage({
   const weightDelta =
     latestW && oldestW && latestW.date !== oldestW.date ? latestW.weight - oldestW.weight : 0;
 
-  const showFreeLock = !isPro && report != null;
+  const showFreeLock = false;
 
   return (
     <>
@@ -411,11 +414,17 @@ export function VetReportPage({
               <button
                 key={id}
                 type="button"
-                disabled={!isPro && id !== '7d'}
-                onClick={() => setPreset(id)}
+                disabled={!isPro && id === 'custom'}
+                onClick={() => {
+                  if (!isPro && id === 'custom') {
+                    onRequestPro?.();
+                    return;
+                  }
+                  setPreset(id);
+                }}
                 className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
                   preset === id ? 'bg-orange-500 text-white' : 'bg-orange-50 text-stone-600 ring-1 ring-orange-100'
-                } ${!isPro && id !== '7d' ? 'cursor-not-allowed opacity-50' : ''}`}
+                } ${!isPro && id === 'custom' ? 'opacity-80' : ''}`}
               >
                 {label}
               </button>
@@ -685,11 +694,10 @@ export function VetReportPage({
           <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
-              disabled={!canExportVetPdf(appPlan)}
               onClick={async () => {
                 if (!reportRef.current) return;
                 if (!canExportVetPdf(appPlan)) {
-                  setExportMsg(t.exportProOnly);
+                  onRequestPro?.();
                   return;
                 }
                 await exportReportElementAsPdf(
@@ -697,17 +705,16 @@ export function VetReportPage({
                   `vet-report-${report.cat.name}-${report.endDate}.pdf`
                 );
               }}
-              className="rounded-xl bg-stone-900 py-2.5 text-xs font-bold text-white disabled:opacity-45"
+              className="rounded-xl bg-stone-900 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-stone-800 active:scale-[0.99]"
             >
               {t.exportPdf}
             </button>
             <button
               type="button"
-              disabled={!canExportVetPdf(appPlan)}
               onClick={async () => {
                 if (!reportRef.current) return;
                 if (!canExportVetPdf(appPlan)) {
-                  setExportMsg(t.exportProOnly);
+                  onRequestPro?.();
                   return;
                 }
                 await exportReportElementAsPng(
@@ -715,7 +722,7 @@ export function VetReportPage({
                   `vet-report-${report.cat.name}-${report.endDate}.png`
                 );
               }}
-              className="rounded-xl border border-stone-300 bg-white py-2.5 text-xs font-bold text-stone-700 disabled:opacity-45"
+              className="rounded-xl border border-stone-300 bg-white py-2.5 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-stone-50 active:scale-[0.99]"
             >
               {t.exportPng}
             </button>

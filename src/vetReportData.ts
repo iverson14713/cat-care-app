@@ -119,7 +119,7 @@ export function clampRangeForFree(
 ): { start: string; end: string; clamped: boolean } {
   if (isPro) return { start, end, clamped: false };
   const d = new Date(`${today}T12:00:00`);
-  d.setDate(d.getDate() - 6);
+  d.setDate(d.getDate() - 29);
   const freeStart = formatDateLocal(d);
   if (start >= freeStart) return { start, end, clamped: false };
   return { start: freeStart, end, clamped: true };

@@ -52,5 +52,5 @@ export function canExportVetPdf(plan?: 'free' | 'pro'): boolean {
 }
 
 export function maxVetReportDays(plan?: 'free' | 'pro'): number {
-  return (plan ?? getAiPlan()) === 'pro' ? 365 : 7;
+  return (plan ?? getAiPlan()) === 'pro' ? 365 : 30;
 }

@@ -16,6 +16,13 @@ import {
 } from './aiCareAssistant';
 import { buildLocalAiQuota, getOrCreateClientId, getAiPlan, setAiPlan } from './aiClient';
 import {
+  FREE_MAX_ACTIVE_PETS,
+  getFreeHistorySearchDateFloor,
+  getMaxDailyPhotos,
+  type AppPlan,
+} from './planLimits';
+import { PremiumUpsellSheet, type PremiumUpsellReason } from './components/PremiumUpsellSheet';
+import {
   AssistantApiError,
   type AssistantHealthPayload,
   buildAssistantHealthFromLocal,
@@ -173,7 +180,6 @@ const MAIN_TAB_ROWS: { id: MainTabId; labelKey: 'today' | 'weight' | 'vet' | 'hi
     { id: 'assistant', labelKey: 'assistantNav', Icon: Sparkles },
   ],
 ];
-type AppPlan = 'free' | 'pro';
 
 type AbnormalRecord = {
   date: string;
@@ -193,12 +199,12 @@ type WeightRecord = {
 const CATS_KEY = 'cat-calendar-cats';
 const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const LANG_KEY = 'cat-calendar-lang';
-const MAX_PHOTOS = 3;
 
 const text = {
   zh: {
     appTitle: '寵物日曆',
     appSubtitle: 'Pet Calendar',
+    navProBadge: 'Pro 會員',
     today: '今日',
     weight: '體重',
     history: '歷史',
@@ -240,7 +246,7 @@ const text = {
     historyPickDateFirst: '請先選擇日期',
     historyJumpNoMatch: '找不到此日期的紀錄',
     historyBackLatest: '回到最新',
-    historyRoadmap: '快速跳轉仍可使用；下方可篩選、搜尋（Pro）。',
+    historyRoadmap: '快速跳轉仍可使用；下方可篩選與搜尋（免費版限最近 30 天）。',
     historySearchTitle: '篩選與搜尋',
     historyAdvancedFilters: '進階篩選',
     historyHideFilters: '收合篩選',
@@ -260,7 +266,8 @@ const text = {
     historyTagNote: '備註',
     historyTagWeight: '體重',
     historyNoResults: '找不到符合條件的紀錄',
-    historyProUpgrade: '歷史篩選與搜尋為 Pro 功能。請到「方案與設定」切換 Pro 測試版。',
+    historyFreeSearchNote: '免費版歷史搜尋限最近 30 天；升級 Pro 可搜尋完整紀錄。',
+    historyUnlockFullSearch: '解鎖完整歷史搜尋',
     historyClearFilters: '清除篩選',
     noHistory: '目前還沒有這隻寵物的歷史紀錄',
     completed: '完成',
@@ -455,19 +462,19 @@ const text = {
     catsCloudSaveErr: '無法寫入雲端：',
     catsCloudDeleteErr: '無法從雲端刪除：',
     careEventDailyUpdated: '更新了今日照護紀錄',
-    settingsPlanSection: '訂閱方案（測試）',
+    settingsPlanSection: '訂閱方案',
     settingsPlanCurrent: '目前方案',
     settingsPlanFree: '免費版',
-    settingsPlanProTest: 'Pro 測試版',
-    settingsPlanHint: '此處僅供開發測試，不會連結 App Store 或刷卡付款。',
-    settingsSwitchPro: '切換成 Pro 測試版',
+    settingsPlanPro: 'Pro',
+    settingsPlanHint: '正式上架後將透過 App Store 訂閱；目前可先在此開通 Pro，體驗完整功能。',
+    settingsSwitchPro: '升級 Pro',
     settingsSwitchFree: '切回免費版',
-    settingsPlanServerHint:
-      '若切換為 Pro 後 AI 每日上限仍顯示 3 次，請在助理伺服器設定 AI_TRUST_CLIENT_PLAN=1（測試用），或將裝置 ID 加入 AI_PRO_CLIENT_IDS。',
-    settingsPaymentNote: '目前未串接金流，不會實際收費。',
-    settingsClientIdCaption: '本裝置 ID（加入伺服器 AI_PRO_CLIENT_IDS 時使用）',
-    planMultiCatUpgrade: '多寵物照護是 Pro 功能。升級後可管理多隻寵物，並獲得更多 AI 分析次數。',
-    planFreeMultiCatBanner: '免費版僅支援 1 隻寵物。你目前有超過 1 隻，請刪減寵物或切換至 Pro 測試版。',
+    settingsPlanServerHint: '若畫面上顯示的方案狀態異常，可嘗試重新整理或重新登入帳號。',
+    settingsPaymentNote: '目前未串接金流，不會實際扣款。',
+    settingsClientIdCaption: '裝置識別（排除問題時可能會請你提供）',
+    planMultiCatUpgrade: '免費版最多可新增 3 隻寵物。升級 Pro 可管理更多寵物，並享有更多 AI 次數與進階功能。',
+    planFreeMultiCatBanner:
+      '免費版最多支援 3 隻寵物。你目前的寵物數超過上限，請封存部分寵物或升級 Pro。',
     openSettings: '方案與設定',
     remindersTitle: '提醒設定',
     remindersBack: '返回設定',
@@ -488,7 +495,7 @@ const text = {
     remindersDelete: '刪除',
     remindersSave: '儲存',
     remindersQuickAdd: '快速新增',
-    remindersLimitFree: '免費版最多 3 則提醒。升級 Pro 測試版可設定最多 30 則。',
+    remindersLimitFree: '免費版最多 3 則提醒；升級 Pro 可設定更多提醒。',
     remindersLimitReached: '已達提醒上限',
     remindersRepeatDaily: '每天',
     remindersRepeatWeekly: '每週',
@@ -559,8 +566,8 @@ const text = {
     weeklySectionEmpty: '此區塊尚無資料',
     weeklyBoundaryFail: '週報顯示發生錯誤，請重新生成或稍後再試。',
     weeklyFreePreview:
-      '免費版可預覽功能說明。升級 Pro 測試版後，可一鍵產生完整 AI 週報（會使用 1 次今日 AI 次數）。',
-    weeklyUpgrade: '升級 Pro 測試版',
+      '免費版可在此預覽週報功能說明。升級 Pro 後可一鍵產生完整 AI 週報（會使用 1 次今日 AI 次數）。',
+    weeklyUpgrade: '升級 Pro 解鎖週報',
     proTeaserRoadmap: 'Pro 功能規劃中',
     proTeaserAdvancedVet: '進階獸醫報告',
     aiErrRate: '問得太快啦，休息一下再試。',
@@ -571,6 +578,7 @@ const text = {
   en: {
     appTitle: 'Pet Calendar',
     appSubtitle: '',
+    navProBadge: 'Pro',
     today: 'Today',
     weight: 'Weight',
     history: 'History',
@@ -612,7 +620,7 @@ const text = {
     historyPickDateFirst: 'Pick a date first',
     historyJumpNoMatch: 'No saved record for that date',
     historyBackLatest: 'Back to latest',
-    historyRoadmap: 'Jump-to-date still works; filter and search below (Pro).',
+    historyRoadmap: 'Jump-to-date still works; filter and search below (free plan: last 30 days).',
     historySearchTitle: 'Filter & search',
     historyAdvancedFilters: 'Advanced filters',
     historyHideFilters: 'Hide filters',
@@ -632,7 +640,8 @@ const text = {
     historyTagNote: 'Note',
     historyTagWeight: 'Weight',
     historyNoResults: 'No records match your filters',
-    historyProUpgrade: 'History filter & search is a Pro feature. Switch to Pro (test) in Plan & settings.',
+    historyFreeSearchNote: 'Free plan: history search covers the last 30 days. Upgrade to Pro for full search.',
+    historyUnlockFullSearch: 'Unlock full history search',
     historyClearFilters: 'Clear filters',
     noHistory: 'No history for this pet yet',
     completed: 'Completed',
@@ -829,21 +838,20 @@ const text = {
     catsCloudSaveErr: 'Could not save to the cloud: ',
     catsCloudDeleteErr: 'Could not delete from the cloud: ',
     careEventDailyUpdated: 'Updated today’s care log',
-    settingsPlanSection: 'Plan (test mode)',
+    settingsPlanSection: 'Subscription',
     settingsPlanCurrent: 'Current plan',
     settingsPlanFree: 'Free',
-    settingsPlanProTest: 'Pro (test)',
-    settingsPlanHint: 'For development testing only — no App Store or card checkout.',
-    settingsSwitchPro: 'Switch to Pro (test)',
+    settingsPlanPro: 'Pro',
+    settingsPlanHint: 'After App Store launch, billing will go through Apple. For now you can enable Pro here to try all features.',
+    settingsSwitchPro: 'Upgrade to Pro',
     settingsSwitchFree: 'Switch back to Free',
-    settingsPlanServerHint:
-      'If the daily AI limit stays at 3 after switching to Pro, set AI_TRUST_CLIENT_PLAN=1 on your assistant server (testing), or add this device ID to AI_PRO_CLIENT_IDS.',
-    settingsPaymentNote: 'No billing is connected — nothing is charged.',
-    settingsClientIdCaption: 'This device ID (for AI_PRO_CLIENT_IDS on the server)',
+    settingsPlanServerHint: 'If your plan status looks wrong, try refreshing the page or signing in again.',
+    settingsPaymentNote: 'No billing is connected yet — nothing is charged.',
+    settingsClientIdCaption: 'Device ID (support may ask for this if something looks wrong)',
     planMultiCatUpgrade:
-      'Multiple pets are a Pro feature. Upgrade to manage more than one pet and get more daily AI analysis.',
+      'Free plan supports up to 3 pets. Upgrade to Pro to manage more pets and unlock higher AI limits and advanced tools.',
     planFreeMultiCatBanner:
-      'Free supports one pet only. You currently have more than one — delete extras or switch to Pro (test).',
+      'Free plan supports up to 3 pets. You currently exceed that limit — archive some pets or upgrade to Pro.',
     openSettings: 'Plan & settings',
     remindersTitle: 'Reminders',
     remindersBack: 'Back to settings',
@@ -864,7 +872,7 @@ const text = {
     remindersDelete: 'Delete',
     remindersSave: 'Save',
     remindersQuickAdd: 'Quick add',
-    remindersLimitFree: 'Free plan: up to 3 reminders. Pro (test) allows up to 30.',
+    remindersLimitFree: 'Free plan: up to 3 reminders. Upgrade to Pro for more.',
     remindersLimitReached: 'Reminder limit reached',
     remindersRepeatDaily: 'Daily',
     remindersRepeatWeekly: 'Weekly',
@@ -935,8 +943,8 @@ const text = {
     weeklySectionEmpty: 'No data for this section yet',
     weeklyBoundaryFail: 'Could not display the report. Please regenerate or try again later.',
     weeklyFreePreview:
-      'Free plan: preview only. Upgrade to Pro (test) to generate the full AI weekly report (uses 1 of today’s AI uses).',
-    weeklyUpgrade: 'Upgrade to Pro (test)',
+      'Free plan: you can read how the weekly report works here. Upgrade to Pro to generate the full AI weekly report (uses 1 of today’s AI uses).',
+    weeklyUpgrade: 'Upgrade to Pro for weekly report',
     proTeaserRoadmap: 'Planned for Pro',
     proTeaserAdvancedVet: 'Advanced vet report',
     aiErrRate: 'A little too fast — take a short break and try again.',
@@ -1403,8 +1411,8 @@ export default function App() {
 
   const [page, setPage] = useState<Page>('today');
   const [newCatName, setNewCatName] = useState('');
+  const [addCatNameError, setAddCatNameError] = useState<string | null>(null);
   const [newCatPetType, setNewCatPetType] = useState<PetType>('cat');
-  const [multiCatHint, setMultiCatHint] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [historyJumpDate, setHistoryJumpDate] = useState('');
   const [historyJumpHint, setHistoryJumpHint] = useState<string | null>(null);
@@ -1414,7 +1422,6 @@ export default function App() {
   const [historyDateStart, setHistoryDateStart] = useState('');
   const [historyDateEnd, setHistoryDateEnd] = useState('');
   const [historyDatePreset, setHistoryDatePreset] = useState<HistoryDatePreset>('none');
-  const [historyProHint, setHistoryProHint] = useState<string | null>(null);
   const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>(() => loadReminders());
   const [notificationPerm, setNotificationPerm] = useState(() => getNotificationPermission());
@@ -1427,6 +1434,13 @@ export default function App() {
   const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
   const [aiClientId] = useState(() => getOrCreateClientId());
   const [appPlan, setAppPlan] = useState<AppPlan>(() => getAiPlan());
+  const maxDailyPhotos = useMemo(() => getMaxDailyPhotos(appPlan), [appPlan]);
+  const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
+  const [premiumSheetReason, setPremiumSheetReason] = useState<PremiumUpsellReason>('general');
+  const openPremium = useCallback((reason: PremiumUpsellReason = 'general') => {
+    setPremiumSheetReason(reason);
+    setPremiumSheetOpen(true);
+  }, []);
   const applyLocalAssistantQuota = useCallback(
     (plan: AppPlan, clientId: string, usageDate: string, prev: AssistantHealthPayload | null) => {
       const q = buildLocalAiQuota(plan, clientId, usageDate);
@@ -1610,14 +1624,29 @@ export default function App() {
 
   const historySearchHits = useMemo((): HistorySearchHit[] => {
     if (!selectedCat || !historySearchMode) return [];
+    const floor = appPlan === 'free' ? getFreeHistorySearchDateFloor(today) : '';
+    let dateStart = historyDateStart.trim();
+    let dateEnd = historyDateEnd.trim();
+    if (appPlan === 'free') {
+      const explicit = Boolean(dateStart || dateEnd);
+      if (!explicit) {
+        dateStart = floor;
+        dateEnd = today;
+      } else {
+        if (!dateStart || dateStart < floor) dateStart = floor;
+        if (!dateEnd) dateEnd = today;
+        if (dateEnd > today) dateEnd = today;
+        if (dateStart > dateEnd) dateStart = floor;
+      }
+    }
     return searchHistory({
       catName: selectedCat.name,
       dailyRows: history,
       weightRows: weightRecords.map((w) => ({ date: w.date, weight: w.weight, note: w.note })),
       filter: historyFilter,
       keyword: historyKeyword,
-      dateStart: historyDateStart,
-      dateEnd: historyDateEnd,
+      dateStart,
+      dateEnd,
     });
   }, [
     selectedCat,
@@ -1628,6 +1657,8 @@ export default function App() {
     historyDateStart,
     historyDateEnd,
     historySearchMode,
+    appPlan,
+    today,
   ]);
 
   const historyHitDateSet = useMemo(
@@ -1852,7 +1883,11 @@ export default function App() {
     };
     const hasCache = peekCareBundleCache(ctx, meta) != null;
     if (isAssistantCareBundleNetworkBlocked(assistantQuota, hasCache)) {
-      setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
+      if (appPlan === 'free') {
+        openPremium('ai');
+      } else {
+        setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
+      }
       setAiBundleLoading(false);
       return;
     }
@@ -1871,8 +1906,10 @@ export default function App() {
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
-        else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
+        if (e.code === 'QUOTA') {
+          if (appPlan === 'free') openPremium('ai');
+          setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
+        } else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
         else if (e.code === 'OPENAI')
           setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
         else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
@@ -1892,6 +1929,7 @@ export default function App() {
     assistantQuota,
     appPlan,
     applyLocalAssistantQuota,
+    openPremium,
   ]);
 
   const runOpenAiQa = useCallback(async () => {
@@ -1911,6 +1949,7 @@ export default function App() {
       return;
     }
     if (isAssistantDailyQuotaExhausted(assistantQuota)) {
+      if (appPlan === 'free') openPremium('ai');
       setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
       setAiReply('');
       return;
@@ -1942,8 +1981,10 @@ export default function App() {
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
-        else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
+        if (e.code === 'QUOTA') {
+          if (appPlan === 'free') openPremium('ai');
+          setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
+        } else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
         else if (e.code === 'OPENAI')
           setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
         else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
@@ -1965,6 +2006,7 @@ export default function App() {
     appPlan,
     assistantQuota,
     applyLocalAssistantQuota,
+    openPremium,
   ]);
 
   const runOpenAiWeeklyReport = useCallback(async () => {
@@ -2123,16 +2165,18 @@ export default function App() {
   const tryAddReminder = useCallback(
     (r: Reminder) => {
       if (reminders.length >= reminderLimit) {
-        setReminderLimitHint(
-          appPlan === 'free' ? tr.remindersLimitFree : tr.remindersLimitReached
-        );
+        if (appPlan === 'free') {
+          openPremium('reminders');
+        } else {
+          setReminderLimitHint(tr.remindersLimitReached);
+        }
         return false;
       }
       setReminderLimitHint(null);
       persistReminders([r, ...reminders]);
       return true;
     },
-    [reminders, reminderLimit, appPlan, tr.remindersLimitFree, tr.remindersLimitReached, persistReminders]
+    [reminders, reminderLimit, appPlan, tr.remindersLimitReached, persistReminders, openPremium]
   );
 
   const updateReminder = useCallback(
@@ -2446,10 +2490,6 @@ export default function App() {
   }, [monthly, selectedCat, month]);
 
   useEffect(() => {
-    if (appPlan === 'pro') setMultiCatHint(null);
-  }, [appPlan]);
-
-  useEffect(() => {
     if (!selectedCat) return;
     safeSetItem(weightStorageKey(selectedCat.id), JSON.stringify(weightRecords));
   }, [weightRecords, selectedCat]);
@@ -2554,15 +2594,15 @@ export default function App() {
     const name = newCatName.trim();
 
     if (!name) {
-      alert(tr.needCatName);
+      setAddCatNameError(tr.needCatName);
       return;
     }
+    setAddCatNameError(null);
 
-    if (appPlan === 'free' && activeCats.length >= 1) {
-      setMultiCatHint(tr.planMultiCatUpgrade);
+    if (appPlan === 'free' && activeCats.length >= FREE_MAX_ACTIVE_PETS) {
+      openPremium('pets');
       return;
     }
-    setMultiCatHint(null);
 
     const base: Cat = {
       id: supabaseAuth.user && supabaseAuth.supabase ? crypto.randomUUID() : makeId(),
@@ -2756,10 +2796,11 @@ export default function App() {
     if (!files || files.length === 0) return;
 
     const currentPhotos = getPhotoList(daily[key]);
-    const availableSlots = MAX_PHOTOS - currentPhotos.length;
+    const availableSlots = maxDailyPhotos - currentPhotos.length;
 
     if (availableSlots <= 0) {
-      alert(tr.photoTooMany);
+      if (appPlan === 'free') openPremium('photos');
+      else alert(tr.photoTooMany);
       return;
     }
 
@@ -2774,7 +2815,7 @@ export default function App() {
 
       setDaily((prev) => ({
         ...prev,
-        [key]: [...getPhotoList(prev[key]), ...compressedPhotos].slice(0, MAX_PHOTOS),
+        [key]: [...getPhotoList(prev[key]), ...compressedPhotos].slice(0, maxDailyPhotos),
       }));
     } catch {
       alert(tr.photoLoadFail);
@@ -2967,7 +3008,7 @@ export default function App() {
             </div>
           ))}
 
-          {photos.length < MAX_PHOTOS && (
+          {photos.length < maxDailyPhotos && (
             <label className={`flex aspect-square cursor-pointer items-center justify-center rounded-2xl border-2 border-dashed p-3 text-center text-sm font-bold ${buttonClass}`}>
               + {tr.addPhoto}
               <input
@@ -2995,7 +3036,6 @@ export default function App() {
     setHistoryDateStart('');
     setHistoryDateEnd('');
     setHistoryDatePreset('none');
-    setHistoryProHint(null);
   }, [selectedCatId, historyRefreshKey]);
 
   useEffect(() => {
@@ -3354,16 +3394,20 @@ export default function App() {
   );
 
   const renderHistoryPage = () => {
-    const historyProLocked = appPlan !== 'pro';
+    const freeHistoryFloor = getFreeHistorySearchDateFloor(today);
+    const historyStartInputMin = appPlan === 'free' ? freeHistoryFloor : historyDateBounds.min;
+
     const applyHistoryDatePreset = (preset: HistoryDatePreset) => {
-      if (historyProLocked) {
-        setHistoryProHint(tr.historyProUpgrade);
-        return;
-      }
       setHistoryDatePreset(preset);
       const { start, end } = computeHistoryDateRange(preset, today);
-      setHistoryDateStart(start);
-      setHistoryDateEnd(end);
+      let startFinal = start;
+      let endFinal = end;
+      if (appPlan === 'free') {
+        if (startFinal < freeHistoryFloor) startFinal = freeHistoryFloor;
+        if (endFinal > today) endFinal = today;
+      }
+      setHistoryDateStart(startFinal);
+      setHistoryDateEnd(endFinal);
     };
     const clearHistorySearch = () => {
       setHistoryFilter('all');
@@ -3371,7 +3415,6 @@ export default function App() {
       setHistoryDateStart('');
       setHistoryDateEnd('');
       setHistoryDatePreset('none');
-      setHistoryProHint(null);
     };
     const historyTagLabel = (tag: HistorySearchHit['tags'][number]) => {
       if (tag === 'abnormal') return tr.historyTagAbnormal;
@@ -3515,14 +3558,10 @@ export default function App() {
                 type="search"
                 value={historyKeyword}
                 placeholder={tr.historySearchPlaceholder}
-                readOnly={historyProLocked}
                 onChange={(e) => {
-                  if (historyProLocked) return;
                   setHistoryKeyword(e.target.value);
-                  setHistoryProHint(null);
                 }}
-                onClick={historyProLocked ? () => setHistoryProHint(tr.historyProUpgrade) : undefined}
-                className={`w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none focus:border-orange-300 focus:bg-white ${historyProLocked ? 'cursor-not-allowed opacity-70' : ''}`}
+                className="w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none focus:border-orange-300 focus:bg-white"
               />
 
               <div className="flex items-center gap-1.5">
@@ -3536,11 +3575,11 @@ export default function App() {
                   }`}
                 >
                   {historyFiltersOpen ? tr.historyHideFilters : tr.historyAdvancedFilters}
-                  {historyProLocked ? (
-                    <span className="ml-1 rounded bg-stone-200/80 px-1 py-px text-[8px] font-bold text-stone-500">Pro</span>
+                  {appPlan === 'free' ? (
+                    <span className="ml-1 rounded bg-amber-100/90 px-1 py-px text-[8px] font-bold text-amber-900">30d</span>
                   ) : null}
                 </button>
-                {!historyProLocked && historySearchMode ? (
+                {historySearchMode ? (
                   <button type="button" onClick={clearHistorySearch} className="shrink-0 text-[10px] font-medium text-orange-600">
                     {tr.historyClearFilters}
                   </button>
@@ -3548,23 +3587,18 @@ export default function App() {
               </div>
 
               {historyFiltersOpen ? (
-              <div
-                className={`space-y-2 rounded-lg border px-2 py-2 ${historyProLocked ? 'border-dashed border-stone-200 bg-stone-50/80' : 'border-orange-100 bg-orange-50/40'}`}
-                onClick={historyProLocked ? (e) => { e.stopPropagation(); setHistoryProHint(tr.historyProUpgrade); } : undefined}
-              >
+              <div className="space-y-2 rounded-lg border border-orange-100 bg-orange-50/40 px-2 py-2">
                 <div className="flex flex-wrap gap-1">
                   {historyFilterChips.map((chip) => (
                     <button
                       key={chip.id}
                       type="button"
                       onClick={() => {
-                        if (historyProLocked) { setHistoryProHint(tr.historyProUpgrade); return; }
                         setHistoryFilter(chip.id);
-                        setHistoryProHint(null);
                       }}
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${
                         historyFilter === chip.id ? 'bg-orange-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-200/80'
-                      } ${historyProLocked ? 'cursor-not-allowed opacity-60' : ''}`}
+                      }`}
                     >
                       {chip.label}
                     </button>
@@ -3581,16 +3615,19 @@ export default function App() {
                       <input
                         type="date"
                         value={value}
-                        readOnly={historyProLocked}
-                        min={historyDateBounds.min}
-                        max={historyDateBounds.max || today}
+                        min={
+                          key === 'start'
+                            ? historyStartInputMin
+                            : historyDateStart && historyDateStart >= historyStartInputMin
+                              ? historyDateStart
+                              : historyStartInputMin
+                        }
+                        max={today}
                         onChange={(e) => {
-                          if (historyProLocked) return;
                           setter(e.target.value);
                           setHistoryDatePreset('none');
-                          setHistoryProHint(null);
                         }}
-                        className={`w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-[11px] outline-none focus:border-orange-300 ${historyProLocked ? 'cursor-not-allowed' : ''}`}
+                        className="w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-[11px] outline-none focus:border-orange-300"
                       />
                     </div>
                   ))}
@@ -3605,7 +3642,7 @@ export default function App() {
                         onClick={() => applyHistoryDatePreset(preset)}
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           historyDatePreset === preset ? 'bg-orange-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-200/80'
-                        } ${historyProLocked ? 'cursor-not-allowed opacity-60' : ''}`}
+                        }`}
                       >
                         {label}
                       </button>
@@ -3615,15 +3652,15 @@ export default function App() {
               </div>
               ) : null}
 
-              {historyProHint ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-950">
-                  <p className="m-0">{historyProHint}</p>
+              {appPlan === 'free' && history.length > 0 ? (
+                <div className="rounded-lg border border-orange-100/90 bg-gradient-to-r from-orange-50/90 to-amber-50/70 px-2.5 py-2 text-[11px] leading-snug text-stone-800">
+                  <p className="m-0">{tr.historyFreeSearchNote}</p>
                   <button
                     type="button"
-                    onClick={() => setPage('settings')}
+                    onClick={() => openPremium('history')}
                     className="mt-1.5 font-semibold text-orange-600 hover:underline"
                   >
-                    {tr.openSettings}
+                    {tr.historyUnlockFullSearch}
                   </button>
                 </div>
               ) : null}
@@ -3632,7 +3669,7 @@ export default function App() {
             <div id="history-latest-anchor" className="h-0 w-full scroll-mt-28" aria-hidden />
 
             {/* Results */}
-            {historySearchMode && appPlan === 'pro' ? (
+            {historySearchMode ? (
               historySearchHits.length === 0 ? (
                 <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.historyNoResults}</div>
               ) : (
@@ -3711,6 +3748,7 @@ export default function App() {
       onOpenPhoto={setSelectedPhoto}
       onGoSettings={() => setPage('settings')}
       onAiUsageChanged={pushAiUsageIfCloud}
+      onRequestPro={() => openPremium('pdf')}
       catSwitcher={renderCatSwitcher()}
     />
   );
@@ -3835,7 +3873,16 @@ export default function App() {
           <div className="mb-3 rounded-xl border border-amber-200/90 bg-amber-50/90 px-3 py-2.5 text-[12px] leading-snug text-amber-950">
             <p className="m-0 font-medium">{tr.aiQuotaExhaustedTitle}</p>
             {appPlan === 'free' ? (
-              <p className="mt-1.5 m-0 text-[11px] text-amber-900/90">{tr.aiQuotaExhaustedUpgradeFree}</p>
+              <>
+                <p className="mt-1.5 m-0 text-[11px] text-amber-900/90">{tr.aiQuotaExhaustedUpgradeFree}</p>
+                <button
+                  type="button"
+                  onClick={() => openPremium('ai')}
+                  className="mt-2 w-full rounded-xl bg-orange-500 py-2 text-[13px] font-bold text-white shadow-sm transition active:scale-[0.99]"
+                >
+                  {tr.settingsSwitchPro}
+                </button>
+              </>
             ) : null}
           </div>
         ) : null}
@@ -3905,8 +3952,14 @@ export default function App() {
 
           <button
             type="button"
-            disabled={!apiReady || aiBundleLoading || bundleNetBlocked}
-            onClick={runOpenAiCareBundle}
+            disabled={!apiReady || aiBundleLoading || (bundleNetBlocked && appPlan === 'pro')}
+            onClick={() => {
+              if (bundleNetBlocked && appPlan === 'free') {
+                openPremium('ai');
+                return;
+              }
+              void runOpenAiCareBundle();
+            }}
             className="w-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 py-3 text-[14px] font-semibold text-white shadow-md shadow-orange-200/50 transition hover:from-orange-500 hover:to-orange-600 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[200px] sm:px-8"
           >
             {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
@@ -3970,7 +4023,7 @@ export default function App() {
               </p>
               <button
                 type="button"
-                onClick={() => setPage('settings')}
+                onClick={() => openPremium('weekly')}
                 className="w-full rounded-full border border-violet-200 bg-white py-2.5 text-[13px] font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50"
               >
                 {tr.weeklyUpgrade}
@@ -4132,13 +4185,19 @@ export default function App() {
             value={aiQuestion}
             onChange={(e) => setAiQuestion(e.target.value)}
             placeholder={tr.assistantAskPlaceholder}
-            disabled={qaBusy || !apiReady || qaBlocked}
+            disabled={qaBusy || !apiReady || (qaBlocked && appPlan === 'pro')}
             className="min-h-[5.5rem] w-full resize-none rounded-xl border border-stone-200 bg-stone-50/50 p-3 text-[13px] leading-snug text-stone-800 outline-none transition focus:border-orange-300 focus:bg-white disabled:opacity-60"
           />
           <button
             type="button"
-            disabled={qaBusy || !apiReady || qaBlocked}
-            onClick={runOpenAiQa}
+            disabled={qaBusy || !apiReady || (qaBlocked && appPlan === 'pro')}
+            onClick={() => {
+              if (qaBlocked && appPlan === 'free') {
+                openPremium('ai');
+                return;
+              }
+              void runOpenAiQa();
+            }}
             className="mt-3 w-full rounded-full border border-orange-200 bg-white py-3 text-[14px] font-semibold text-orange-600 shadow-sm transition hover:bg-orange-50 disabled:opacity-60"
           >
             {aiQaLoading ? tr.assistantSendBusy : tr.assistantSend}
@@ -4789,7 +4848,7 @@ export default function App() {
         <p className="text-sm text-stone-700">
           {tr.settingsPlanCurrent}：
           <span className="font-bold text-orange-600">
-            {appPlan === 'pro' ? tr.settingsPlanProTest : tr.settingsPlanFree}
+            {appPlan === 'pro' ? tr.settingsPlanPro : tr.settingsPlanFree}
           </span>
         </p>
         <p className="mt-2 text-xs leading-relaxed text-stone-500">{tr.settingsPlanHint}</p>
@@ -4799,7 +4858,7 @@ export default function App() {
           {appPlan === 'free' ? (
             <button
               type="button"
-              onClick={() => persistAppPlan('pro')}
+              onClick={() => openPremium('general')}
               className="rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
             >
               {tr.settingsSwitchPro}
@@ -4848,9 +4907,16 @@ export default function App() {
 
       {renderAuthAccountSection()}
 
-      {appPlan === 'free' && activeCats.length > 1 ? (
+      {appPlan === 'free' && activeCats.length > FREE_MAX_ACTIVE_PETS ? (
         <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950 shadow-sm">
-          {tr.planFreeMultiCatBanner}
+          <p className="m-0">{tr.planFreeMultiCatBanner}</p>
+          <button
+            type="button"
+            onClick={() => openPremium('pets')}
+            className="mt-2 font-semibold text-orange-600 hover:underline"
+          >
+            {tr.settingsSwitchPro}
+          </button>
         </div>
       ) : null}
 
@@ -4939,24 +5005,29 @@ export default function App() {
             value={newCatName}
             onChange={(e) => {
               setNewCatName(e.target.value);
-              setMultiCatHint(null);
+              setAddCatNameError(null);
             }}
             placeholder={tr.catNamePlaceholder}
             className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
           />
           <button
             type="button"
-            onClick={addCat}
-            disabled={appPlan === 'free' && activeCats.length >= 1}
-            className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => {
+              if (appPlan === 'free' && activeCats.length >= FREE_MAX_ACTIVE_PETS) {
+                openPremium('pets');
+                return;
+              }
+              void addCat();
+            }}
+            className="shrink-0 rounded-xl bg-orange-400 px-4 py-2 text-sm font-bold text-white"
           >
             {tr.add}
           </button>
         </div>
-        {appPlan === 'free' && activeCats.length >= 1 ? (
+        {addCatNameError ? <p className="mt-2 text-[12px] leading-snug text-red-700">{addCatNameError}</p> : null}
+        {appPlan === 'free' && activeCats.length >= FREE_MAX_ACTIVE_PETS ? (
           <p className="mt-2 text-[12px] leading-snug text-amber-900">{tr.planMultiCatUpgrade}</p>
         ) : null}
-        {multiCatHint ? <p className="mt-2 text-[12px] leading-snug text-red-800">{multiCatHint}</p> : null}
       </section>
 
       <section className="mb-4 rounded-2xl border border-stone-200 bg-stone-50/80 p-3 shadow-sm">
@@ -5218,6 +5289,14 @@ export default function App() {
           </div>
         </nav>
 
+        {appPlan === 'pro' ? (
+          <div className="mb-3 flex justify-center">
+            <span className="rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 px-3.5 py-1 text-[11px] font-bold tracking-wide text-white shadow-md shadow-orange-300/40">
+              {tr.navProBadge}
+            </span>
+          </div>
+        ) : null}
+
         {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2.5 text-[12px] text-stone-700 shadow-sm">
             <span>
@@ -5323,6 +5402,14 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <PremiumUpsellSheet
+        open={premiumSheetOpen}
+        lang={lang}
+        reason={premiumSheetReason}
+        onClose={() => setPremiumSheetOpen(false)}
+        onUpgrade={() => persistAppPlan('pro')}
+      />
     </div>
   );
 }
