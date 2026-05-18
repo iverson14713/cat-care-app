@@ -223,6 +223,7 @@ export type VetReportPageProps = {
   clientId: string;
   onOpenPhoto: (url: string) => void;
   onGoSettings: () => void;
+  onAiUsageChanged?: () => void;
   catSwitcher: React.ReactNode;
 };
 
@@ -236,6 +237,7 @@ export function VetReportPage({
   clientId,
   onOpenPhoto,
   onGoSettings,
+  onAiUsageChanged,
   catSwitcher,
 }: VetReportPageProps) {
   const t = copy[lang];
@@ -307,7 +309,10 @@ export function VetReportPage({
         plan: appPlan,
       });
       setAiSummary(summary);
-      if (!isPro) recordVetAiUsedToday(today);
+      if (!isPro) {
+        recordVetAiUsedToday(today);
+        onAiUsageChanged?.();
+      }
     } catch (e) {
       if (e instanceof VetReportApiError) {
         setAiErr(e.message);
@@ -317,7 +322,7 @@ export function VetReportPage({
     } finally {
       setAiLoading(false);
     }
-  }, [report, selectedCat, sections, lang, clientId, today, appPlan, isPro, t.aiLimit]);
+  }, [report, selectedCat, sections, lang, clientId, today, appPlan, isPro, t.aiLimit, onAiUsageChanged]);
 
   const reportPlainText = useMemo(() => {
     if (!report) return '';

@@ -1,20 +1,54 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getPhotoList, mergePhotoArrays } from './supabasePhotos';
 
 export type DailyJson = Record<string, unknown>;
 
-/** Photos stay on device only; strip before saving to `daily_records.data`. */
+/** Strip before saving to `daily_records.data` (photos live in `daily_record_photos`). */
 export function stripPhotoFieldsFromDaily(daily: DailyJson): DailyJson {
   const { abnormalPhotos: _a, dailyPhotos: _d, ...rest } = daily;
   return rest;
 }
 
-/** Local-first merge: cloud fields overwrite; photo arrays always from local device. */
+/** Cloud daily fields overwrite local; photo arrays union cloud + local. */
 export function mergeCloudDailyPreferCloud(cloudPart: DailyJson | null | undefined, localFull: DailyJson): DailyJson {
   const c = cloudPart && typeof cloudPart === 'object' && !Array.isArray(cloudPart) ? cloudPart : {};
   const out: DailyJson = { ...localFull, ...c };
-  out.abnormalPhotos = localFull.abnormalPhotos ?? [];
-  out.dailyPhotos = localFull.dailyPhotos ?? [];
+  out.abnormalPhotos = mergePhotoArrays(getPhotoList(c.abnormalPhotos), getPhotoList(localFull.abnormalPhotos));
+  out.dailyPhotos = mergePhotoArrays(getPhotoList(c.dailyPhotos), getPhotoList(localFull.dailyPhotos));
   return out;
+}
+
+export type DailyRecordRow = {
+  record_date: string;
+  data: DailyJson;
+  updated_at?: string;
+};
+
+export async function fetchAllDailyRecordsForCat(
+  supabase: SupabaseClient,
+  catId: string,
+  limit = 400
+): Promise<{ data: DailyRecordRow[]; error: Error | null }> {
+  const { data, error } = await supabase
+    .from('daily_records')
+    .select('record_date, data, updated_at')
+    .eq('cat_id', catId)
+    .order('record_date', { ascending: false })
+    .limit(limit);
+
+  if (error) return { data: [], error: new Error(error.message) };
+  const rows = (data ?? []) as { record_date: string; data: unknown; updated_at?: string }[];
+  return {
+    data: rows
+      .filter((r) => typeof r.record_date === 'string')
+      .map((r) => ({
+        record_date: r.record_date,
+        data:
+          r.data && typeof r.data === 'object' && !Array.isArray(r.data) ? (r.data as DailyJson) : {},
+        updated_at: r.updated_at,
+      })),
+    error: null,
+  };
 }
 
 export async function fetchDailyRecordRow(

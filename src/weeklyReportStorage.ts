@@ -9,12 +9,31 @@ export type SavedWeeklyReport = {
   report: AssistantWeeklyReportJson;
 };
 
-function storageKey(catId: string, weekEnd: string): string {
+export function weeklyReportStorageKey(catId: string, weekEnd: string): string {
   return `weekly-ai-report-${catId}-${weekEnd}`;
 }
 
+/** All locally saved weekly reports for a cat (newest week_end first). */
+export function listLocalWeeklyReportsForCat(catId: string): SavedWeeklyReport[] {
+  const prefix = `weekly-ai-report-${catId}-`;
+  const out: SavedWeeklyReport[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix)) continue;
+      const weekEnd = key.slice(prefix.length);
+      const saved = loadSavedWeeklyReport(catId, weekEnd);
+      if (saved) out.push(saved);
+    }
+  } catch {
+    // ignore
+  }
+  out.sort((a, b) => b.weekEnd.localeCompare(a.weekEnd));
+  return out;
+}
+
 export function loadSavedWeeklyReport(catId: string, weekEnd: string): SavedWeeklyReport | null {
-  const key = storageKey(catId, weekEnd);
+  const key = weeklyReportStorageKey(catId, weekEnd);
   try {
     const parsed = safeLoadJson<SavedWeeklyReport | null>(key, null, 'weekly report', localStorage);
     if (!parsed?.report || parsed.catId !== catId) return null;
@@ -40,7 +59,7 @@ export function saveWeeklyReport(
     savedAt: new Date().toISOString(),
     report: normalizeWeeklyReport(report, lang),
   };
-  const key = storageKey(catId, weekEnd);
+  const key = weeklyReportStorageKey(catId, weekEnd);
   if (!safeSetItem(key, JSON.stringify(payload))) {
     storageError('saveWeeklyReport: write failed', new Error('quota or private mode'), key);
   }

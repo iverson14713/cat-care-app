@@ -56,6 +56,20 @@ import {
   type DailyJson,
 } from './supabaseDaily';
 import {
+  migrateOfflineCatsToCloud,
+  pullCloudDataIntoLocal,
+  pushAiUsageSnapshot,
+  pushLocalDataToCloud,
+  pushSharedCareForCat,
+  pushWeeklyReportToCloud,
+} from './cloudDataSync';
+import { upsertDailyPhotosCloud } from './supabasePhotos';
+import { upsertUserAiPlan } from './supabaseUserPrefs';
+import type { CloudSyncPhase } from './cloudSyncTypes';
+import { upsertMonthlyRecordCloud } from './supabaseMonthly';
+import { upsertWeightRecordsForCat } from './supabaseWeight';
+import { upsertUserReminders } from './supabaseReminders';
+import {
   computeHistoryDateRange,
   isHistorySearchModeActive,
   searchHistory,
@@ -91,7 +105,9 @@ import {
   formatWeeklyReportPlainText,
   loadSavedWeeklyReport,
   saveWeeklyReport,
+  type SavedWeeklyReport,
 } from './weeklyReportStorage';
+import { getPhotoList } from './supabasePhotos';
 import { normalizeWeeklyReport } from './weeklyReportModel';
 import {
   safeGetItem,
@@ -398,9 +414,16 @@ const text = {
     authSignUpSent: '若註冊成功，請檢查信箱（含垃圾信）並完成驗證後再登入。',
     authSignedInOk: '登入成功。',
     authSignedOutOk: '已登出。',
-    authLocalDataHint: '貓咪與每日紀錄仍儲存在本機，尚未上傳至雲端（下一階段開放）。',
+    authLocalDataHint: '登入後會與雲端同步貓咪、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
     catsCloudLoading: '正在同步雲端貓咪…',
     catsCloudLoadErr: '雲端貓咪載入失敗：',
+    cloudSyncLoading: '正在從雲端載入…',
+    cloudSyncSyncing: '正在同步照護資料…',
+    cloudSyncReady: '已與雲端同步',
+    cloudSyncEmpty: '雲端尚無資料（本機資料已保留）',
+    cloudSyncFailed: '同步失敗',
+    cloudSyncRetry: '重試同步',
+    cloudSyncPhotosNote: '照片與照護資料會加密同步至雲端（同一帳號跨裝置可見）。',
     catsCloudSaveErr: '無法寫入雲端：',
     catsCloudDeleteErr: '無法從雲端刪除：',
     careEventDailyUpdated: '更新了今日照護紀錄',
@@ -739,9 +762,17 @@ const text = {
     authSignUpSent: 'If signup succeeded, check your inbox (and spam), confirm your email, then sign in.',
     authSignedInOk: 'Signed in successfully.',
     authSignedOutOk: 'Signed out.',
-    authLocalDataHint: 'Cats and daily logs still stay on this device; cloud sync comes in a later phase.',
+    authLocalDataHint:
+      'When signed in, cats, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
     catsCloudLoading: 'Syncing cats from the cloud…',
     catsCloudLoadErr: 'Could not load cats from the cloud: ',
+    cloudSyncLoading: 'Loading from cloud…',
+    cloudSyncSyncing: 'Syncing care data…',
+    cloudSyncReady: 'Synced with cloud',
+    cloudSyncEmpty: 'No cloud data yet (local data kept)',
+    cloudSyncFailed: 'Sync failed',
+    cloudSyncRetry: 'Retry sync',
+    cloudSyncPhotosNote: 'Photos and care data sync to the cloud for the same account on all devices.',
     catsCloudSaveErr: 'Could not save to the cloud: ',
     catsCloudDeleteErr: 'Could not delete from the cloud: ',
     careEventDailyUpdated: 'Updated today’s care log',
@@ -1349,15 +1380,20 @@ export default function App() {
   const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState(() => getCareDisplayName());
   const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const patchSharedCare = useCallback((catId: string, updater: (prev: SharedCareCatState) => SharedCareCatState) => {
-    setSharedCareMap((map) => {
-      const prev = map[catId] ?? createDefaultSharedCareState(lang);
-      const next = updater(prev);
-      const merged = { ...map, [catId]: next };
-      saveSharedCareMock(merged);
-      return merged;
-    });
-  }, [lang]);
+  const patchSharedCare = useCallback(
+    (catId: string, updater: (prev: SharedCareCatState) => SharedCareCatState) => {
+      setSharedCareMap((map) => {
+        const prev = map[catId] ?? createDefaultSharedCareState(lang);
+        const next = updater(prev);
+        const merged = { ...map, [catId]: next };
+        saveSharedCareMock(merged);
+        const sb = supabaseAuth.supabase;
+        if (sb && isCloudCatId(catId)) void pushSharedCareForCat(sb, catId, next);
+        return merged;
+      });
+    },
+    [lang, supabaseAuth.supabase]
+  );
 
   const flashSharedCareCopied = useCallback(() => {
     setSharedCareCopied(true);
@@ -1374,10 +1410,15 @@ export default function App() {
   const [authFormError, setAuthFormError] = useState<string | null>(null);
   const [catsCloudBusy, setCatsCloudBusy] = useState(false);
   const [catsCloudErr, setCatsCloudErr] = useState<string | null>(null);
+  const [cloudSyncPhase, setCloudSyncPhase] = useState<CloudSyncPhase>('idle');
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [cloudSyncTick, setCloudSyncTick] = useState(0);
   const [cloudCareEvents, setCloudCareEvents] = useState<CareEventRow[]>([]);
   const lastCloudDailyStripRef = useRef('');
   const cloudDailyFetchSeqRef = useRef(0);
   const cloudDailyHydratingRef = useRef(false);
+  const cloudDailyHydratedRef = useRef(false);
+  const cloudSyncRunRef = useRef(0);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -1549,7 +1590,37 @@ export default function App() {
     setAiPlan(p);
     setAppPlan(p);
     setAssistantQuota((prev) => applyLocalAssistantQuota(p, aiClientId, today, prev));
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (sb && uid) {
+      void upsertUserAiPlan(sb, uid, p).then(({ error }) => {
+        if (error) console.warn('[user_preferences upsert]', error.message);
+      });
+    }
   };
+
+  const pushAiUsageIfCloud = useCallback(() => {
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (sb && uid) void pushAiUsageSnapshot(sb, uid, today);
+  }, [supabaseAuth.supabase, supabaseAuth.user?.id, today]);
+
+  const cloudSaveWeeklyReport = useCallback(
+    (catId: string, weekEnd: string, report: AssistantWeeklyReportJson) => {
+      saveWeeklyReport(catId, weekEnd, report, lang);
+      const sb = supabaseAuth.supabase;
+      const uid = supabaseAuth.user?.id;
+      if (!sb || !uid || !isCloudCatId(catId)) return;
+      const saved: SavedWeeklyReport = {
+        catId,
+        weekEnd,
+        savedAt: new Date().toISOString(),
+        report: normalizeWeeklyReport(report, lang),
+      };
+      void pushWeeklyReportToCloud(sb, uid, saved);
+    },
+    [lang, supabaseAuth.supabase, supabaseAuth.user?.id]
+  );
   const summariesAbortRef = useRef<AbortController | null>(null);
   const qaAbortRef = useRef<AbortController | null>(null);
   const weeklyAbortRef = useRef<AbortController | null>(null);
@@ -1665,6 +1736,7 @@ export default function App() {
             countedSuccess: true,
           })
         );
+        pushAiUsageIfCloud();
       }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
@@ -1736,6 +1808,7 @@ export default function App() {
           countedSuccess: true,
         })
       );
+      pushAiUsageIfCloud();
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       if (e instanceof AssistantApiError) {
@@ -1795,13 +1868,14 @@ export default function App() {
       );
       const safeReport = normalizeWeeklyReport(report, lang);
       setAiWeeklyReport(safeReport);
-      saveWeeklyReport(ctx.catId, ctx.today, safeReport, lang);
+      cloudSaveWeeklyReport(ctx.catId, ctx.today, safeReport);
       setWeeklySaveHint(text[lang].weeklySavedOk);
       setAssistantQuota((prev) =>
         mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
           countedSuccess: true,
         })
       );
+      pushAiUsageIfCloud();
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       console.error('[AI weekly report] generate failed', e);
@@ -1842,10 +1916,72 @@ export default function App() {
   );
   const reminderLimit = getReminderLimit(appPlan);
 
-  const persistReminders = useCallback((list: Reminder[]) => {
-    saveReminders(list);
-    setReminders(list);
+  const reloadSelectedCatFromLocal = useCallback((catId: string) => {
+    const d = todayKey();
+    const mk = monthKey();
+    setDaily(loadDailyRecord(catId, d));
+    setMonthly(loadMonthlyRecord(catId, mk));
+    setWeightRecords(loadWeightRecords(catId));
+    setHistoryRefreshKey((k) => k + 1);
   }, []);
+
+  const runFullCloudSync = useCallback(
+    async (mergedCats: Cat[], sb: NonNullable<typeof supabaseAuth.supabase>, userId: string) => {
+      const runId = ++cloudSyncRunRef.current;
+      const cloudIds = mergedCats.filter((c) => isCloudCatId(c.id)).map((c) => c.id);
+      cloudDailyHydratedRef.current = false;
+      if (cloudIds.length === 0) {
+        setCloudSyncPhase('empty');
+        setCloudSyncError(null);
+        cloudDailyHydratedRef.current = true;
+        return;
+      }
+      setCloudSyncPhase('syncing');
+      setCloudSyncError(null);
+      const usageDate = todayKey();
+      const pull = await pullCloudDataIntoLocal(sb, userId, cloudIds, usageDate);
+      if (runId !== cloudSyncRunRef.current) return;
+      const pushErrs = await pushLocalDataToCloud(sb, userId, cloudIds, loadReminders(), usageDate);
+      if (runId !== cloudSyncRunRef.current) return;
+      setReminders(loadReminders());
+      setSharedCareMap(loadSharedCareMock());
+      setAppPlan(getAiPlan());
+      setAssistantQuota((prev) => applyLocalAssistantQuota(getAiPlan(), aiClientId, usageDate, prev));
+      const errs = [...pull.errors, ...pushErrs].filter(Boolean);
+      if (errs.length > 0) {
+        setCloudSyncPhase('failed');
+        setCloudSyncError(errs.slice(0, 2).join(' · '));
+      } else {
+        const total =
+          pull.dailyDates +
+          pull.weights +
+          pull.months +
+          pull.photoDates +
+          pull.weeklyReports +
+          pull.reminders;
+        setCloudSyncPhase(total > 0 ? 'ready' : 'empty');
+        setCloudSyncError(null);
+      }
+      setCloudSyncTick((t) => t + 1);
+      cloudDailyHydratedRef.current = true;
+    },
+    [aiClientId, applyLocalAssistantQuota]
+  );
+
+  const persistReminders = useCallback(
+    (list: Reminder[]) => {
+      saveReminders(list);
+      setReminders(list);
+      const sb = supabaseAuth.supabase;
+      const uid = supabaseAuth.user?.id;
+      if (sb && uid) {
+        void upsertUserReminders(sb, uid, list).then(({ error }) => {
+          if (error) console.warn('[user_reminders upsert]', error.message);
+        });
+      }
+    },
+    [supabaseAuth.supabase, supabaseAuth.user?.id]
+  );
 
   const tryAddReminder = useCallback(
     (r: Reminder) => {
@@ -1904,6 +2040,9 @@ export default function App() {
     if (!supabaseAuth.user || !supabaseAuth.supabase) {
       setCatsCloudBusy(false);
       setCatsCloudErr(null);
+      setCloudSyncPhase('idle');
+      setCloudSyncError(null);
+      cloudDailyHydratedRef.current = false;
       setCats(loadCats());
       return;
     }
@@ -1917,6 +2056,17 @@ export default function App() {
       }
       setCatsCloudBusy(true);
       setCatsCloudErr(null);
+      const uid = supabaseAuth.user.id;
+      let localCats = loadCats();
+      let migratedIdMap: Record<string, string> = {};
+      const offline = localCats.filter((c) => !isCloudCatId(c.id));
+      if (offline.length > 0) {
+        const mig = await migrateOfflineCatsToCloud(sb, uid, localCats);
+        if (mig.errors.length > 0) console.warn('[offline cat migrate]', mig.errors.join('; '));
+        migratedIdMap = mig.idMap;
+        localCats = mig.cats;
+        safeSetItem(CATS_KEY, JSON.stringify(localCats));
+      }
       const { data: cloudList, error } = await fetchCatsForUser(sb);
       if (cancelled) return;
       if (error) {
@@ -1924,30 +2074,35 @@ export default function App() {
         setCatsCloudBusy(false);
         return;
       }
-      const merged = mergeCloudCatsWithLocal(cloudList, loadCats());
+      const merged = mergeCloudCatsWithLocal(cloudList, localCats);
       setCats(merged);
+      setCloudSyncPhase('loading');
+      let nextCatId = migratedIdMap[selectedCatId] ?? selectedCatId;
       setSelectedCatId((prev) => {
-        const next = merged.some((c) => c.id === prev) ? prev : merged[0]?.id ?? prev;
-        if (next !== prev) {
-          queueMicrotask(() => {
-            if (cancelled) return;
-            const d = todayKey();
-            const mk = monthKey();
-            setDaily(loadDailyRecord(next, d));
-            setMonthly(loadMonthlyRecord(next, mk));
-            setWeightRecords(loadWeightRecords(next));
-            setHistoryRefreshKey((k) => k + 1);
-          });
-        }
-        return next;
+        const remapped = migratedIdMap[prev] ?? prev;
+        nextCatId = merged.some((c) => c.id === remapped) ? remapped : merged[0]?.id ?? remapped;
+        return nextCatId;
       });
       setCatsCloudBusy(false);
+      if (!cancelled) {
+        await runFullCloudSync(merged, sb, uid);
+        if (!cancelled) {
+          reloadSelectedCatFromLocal(nextCatId);
+        }
+      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [supabaseAuth.authReady, supabaseAuth.user?.id, supabaseAuth.supabase]);
+  }, [supabaseAuth.authReady, supabaseAuth.user?.id, supabaseAuth.supabase, runFullCloudSync, reloadSelectedCatFromLocal]);
+
+  const retryCloudSync = useCallback(() => {
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (!sb || !uid) return;
+    void runFullCloudSync(cats, sb, uid).then(() => reloadSelectedCatFromLocal(selectedCatId));
+  }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id, runFullCloudSync, reloadSelectedCatFromLocal, selectedCatId]);
 
   useEffect(() => {
     safeSetItem(SELECTED_CAT_KEY, selectedCatId);
@@ -1974,18 +2129,27 @@ export default function App() {
       if (error) {
         console.warn('[daily_records fetch]', error.message);
         cloudDailyHydratingRef.current = false;
+        cloudDailyHydratedRef.current = true;
         return;
       }
       const localFull = loadDailyRecord(selectedCat.id, today) as unknown as DailyJson;
       const merged = mergeCloudDailyPreferCloud(cloudPart as DailyJson | null, localFull) as DailyRecord;
       setDaily(merged);
+      safeSetItem(dailyStorageKey(selectedCat.id, today), JSON.stringify(merged));
       lastCloudDailyStripRef.current = JSON.stringify(stripPhotoFieldsFromDaily(merged as unknown as DailyJson));
       cloudDailyHydratingRef.current = false;
+      cloudDailyHydratedRef.current = true;
     })();
     return () => {
       cancelled = true;
     };
-  }, [useCloudDaily, selectedCat?.id, today, supabaseAuth.supabase]);
+  }, [useCloudDaily, selectedCat?.id, today, supabaseAuth.supabase, cloudSyncTick]);
+
+  useEffect(() => {
+    if (!useCloudDaily) {
+      cloudDailyHydratedRef.current = true;
+    }
+  }, [useCloudDaily]);
 
   useEffect(() => {
     if (!useCloudDaily || !selectedCat || !supabaseAuth.supabase) {
@@ -2003,6 +2167,7 @@ export default function App() {
     const uid = supabaseAuth.user.id;
     const handle = window.setTimeout(() => {
       if (cloudDailyHydratingRef.current) return;
+      if (!cloudDailyHydratedRef.current) return;
       const strip = stripPhotoFieldsFromDaily(daily as unknown as DailyJson);
       const json = JSON.stringify(strip);
       if (json === lastCloudDailyStripRef.current) return;
@@ -2046,6 +2211,38 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    if (cloudDailyHydratingRef.current) return;
+    if (!cloudDailyHydratedRef.current) return;
+    const abnormal = getPhotoList(daily.abnormalPhotos);
+    const dailyPhotos = getPhotoList(daily.dailyPhotos);
+    if (abnormal.length === 0 && dailyPhotos.length === 0) return;
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user.id;
+    const handle = window.setTimeout(() => {
+      void upsertDailyPhotosCloud(sb, {
+        catId: selectedCat.id,
+        recordDate: today,
+        abnormalPhotos: abnormal,
+        dailyPhotos,
+        updatedBy: uid,
+      }).then(({ error }) => {
+        if (error) console.warn('[daily_record_photos upsert]', error.message);
+      });
+    }, 850);
+    return () => window.clearTimeout(handle);
+  }, [
+    daily.abnormalPhotos,
+    daily.dailyPhotos,
+    useCloudDaily,
+    selectedCat?.id,
+    today,
+    supabaseAuth.user?.id,
+    supabaseAuth.supabase,
+    cloudSyncTick,
+  ]);
+
+  useEffect(() => {
     if (!selectedCat) return;
     safeSetItem(monthlyStorageKey(selectedCat.id, month), JSON.stringify(monthly));
   }, [monthly, selectedCat, month]);
@@ -2058,6 +2255,37 @@ export default function App() {
     if (!selectedCat) return;
     safeSetItem(weightStorageKey(selectedCat.id), JSON.stringify(weightRecords));
   }, [weightRecords, selectedCat]);
+
+  useEffect(() => {
+    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    if (!cloudDailyHydratedRef.current) return;
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user.id;
+    const handle = window.setTimeout(() => {
+      void upsertWeightRecordsForCat(sb, selectedCat.id, weightRecords, uid).then(({ error }) => {
+        if (error) console.warn('[weight_records upsert]', error.message);
+      });
+    }, 700);
+    return () => window.clearTimeout(handle);
+  }, [weightRecords, useCloudDaily, selectedCat?.id, supabaseAuth.user?.id, supabaseAuth.supabase, cloudSyncTick]);
+
+  useEffect(() => {
+    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    if (!cloudDailyHydratedRef.current) return;
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user.id;
+    const handle = window.setTimeout(() => {
+      void upsertMonthlyRecordCloud(sb, {
+        catId: selectedCat.id,
+        monthKey: month,
+        data: monthly as Record<string, unknown>,
+        updatedBy: uid,
+      }).then(({ error }) => {
+        if (error) console.warn('[monthly_records upsert]', error.message);
+      });
+    }, 700);
+    return () => window.clearTimeout(handle);
+  }, [monthly, month, useCloudDaily, selectedCat?.id, supabaseAuth.user?.id, supabaseAuth.supabase, cloudSyncTick]);
 
   const toggleLanguage = () => {
     setLang((prev) => (prev === 'zh' ? 'en' : 'zh'));
@@ -3174,6 +3402,7 @@ export default function App() {
       clientId={aiClientId}
       onOpenPhoto={setSelectedPhoto}
       onGoSettings={() => setPage('settings')}
+      onAiUsageChanged={pushAiUsageIfCloud}
       catSwitcher={renderCatSwitcher()}
     />
   );
@@ -3497,7 +3726,11 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         if (!assistantContext || !aiWeeklyReport) return;
-                        saveWeeklyReport(assistantContext.catId, assistantContext.today, normalizeWeeklyReport(aiWeeklyReport, lang), lang);
+                        cloudSaveWeeklyReport(
+                          assistantContext.catId,
+                          assistantContext.today,
+                          normalizeWeeklyReport(aiWeeklyReport, lang)
+                        );
                         setWeeklySaveHint(tr.weeklySavedOk);
                       }}
                       className="rounded-xl border border-violet-200 bg-white py-2 text-[12px] font-semibold text-violet-800"
@@ -4569,6 +4802,38 @@ export default function App() {
             >
               {tr.authSignOut}
             </button>
+          </div>
+        ) : null}
+
+        {supabaseAuth.user && supabaseAuth.supabase && cloudSyncPhase !== 'idle' ? (
+          <div
+            className={`mb-3 rounded-xl border px-3 py-2 text-[11px] leading-snug shadow-sm ${
+              cloudSyncPhase === 'failed'
+                ? 'border-red-200 bg-red-50 text-red-900'
+                : cloudSyncPhase === 'ready'
+                  ? 'border-emerald-200 bg-emerald-50/90 text-emerald-900'
+                  : 'border-orange-200 bg-orange-50/90 text-orange-900'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                {cloudSyncPhase === 'loading' && tr.cloudSyncLoading}
+                {cloudSyncPhase === 'syncing' && tr.cloudSyncSyncing}
+                {cloudSyncPhase === 'ready' && tr.cloudSyncReady}
+                {cloudSyncPhase === 'empty' && tr.cloudSyncEmpty}
+                {cloudSyncPhase === 'failed' && `${tr.cloudSyncFailed}${cloudSyncError ? `：${cloudSyncError}` : ''}`}
+              </span>
+              {cloudSyncPhase === 'failed' ? (
+                <button
+                  type="button"
+                  onClick={retryCloudSync}
+                  className="shrink-0 rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-orange-700 ring-1 ring-orange-200"
+                >
+                  {tr.cloudSyncRetry}
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[10px] opacity-80">{tr.cloudSyncPhotosNote}</p>
           </div>
         ) : null}
 

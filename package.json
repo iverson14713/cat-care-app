@@ -8,6 +8,7 @@
     "dev:client": "vite",
     "dev:server": "node server/index.mjs",
     "verify:assistant": "node scripts/verify-assistant.mjs",
+    "verify:cloud-sync": "node scripts/verify-cloud-sync.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

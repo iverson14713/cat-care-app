@@ -7,8 +7,20 @@ export function getVetAiDailyLimit(plan?: 'free' | 'pro'): number {
   return p === 'pro' ? Number.POSITIVE_INFINITY : 1;
 }
 
-function vetAiUsageKey(usageDate: string): string {
+export function vetAiUsageStorageKey(usageDate: string): string {
   return `${VET_AI_USAGE_PREFIX}${usageDate}`;
+}
+
+function vetAiUsageKey(usageDate: string): string {
+  return vetAiUsageStorageKey(usageDate);
+}
+
+export function writeVetAiUsedToday(usageDate: string, used: number): void {
+  try {
+    localStorage.setItem(vetAiUsageKey(usageDate), String(Math.max(0, Math.floor(used))));
+  } catch {
+    // ignore
+  }
 }
 
 export function peekVetAiUsedToday(usageDate: string): number {
