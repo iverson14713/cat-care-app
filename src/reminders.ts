@@ -37,7 +37,7 @@ export type ReminderTemplate = {
 export const REMINDER_TEMPLATES: ReminderTemplate[] = [
   { kind: 'daily', titleZh: '早上餵食', titleEn: 'Morning feeding', time: '08:00', repeatType: 'daily', repeatInterval: 1 },
   { kind: 'daily', titleZh: '晚上餵食', titleEn: 'Evening feeding', time: '19:00', repeatType: 'daily', repeatInterval: 1 },
-  { kind: 'daily', titleZh: '清貓砂', titleEn: 'Scoop litter', time: '21:00', repeatType: 'daily', repeatInterval: 1 },
+  { kind: 'daily', titleZh: '清理排泄區', titleEn: 'Clean potty area', time: '21:00', repeatType: 'daily', repeatInterval: 1 },
   { kind: 'daily', titleZh: '喝水確認', titleEn: 'Water check', time: '12:00', repeatType: 'daily', repeatInterval: 1 },
   { kind: 'weight', titleZh: '量體重', titleEn: 'Weigh in', time: '10:00', repeatType: 'weekly', repeatInterval: 1 },
   { kind: 'deworming', titleZh: '驅蟲', titleEn: 'Deworming', time: '10:00', repeatType: 'monthly', repeatInterval: 1 },
@@ -251,14 +251,14 @@ export function buildNotificationBody(
   reminder: Reminder,
   lang: 'zh' | 'en'
 ): { title: string; body: string } {
-  const name = catName.trim() || (lang === 'zh' ? '貓咪' : 'your cat');
+  const name = catName.trim() || (lang === 'zh' ? '寵物' : 'your pet');
   if (lang === 'zh') {
     switch (reminder.type) {
       case 'daily':
         if (reminder.title.includes('餵') || reminder.title.includes('食'))
           return { title: '照護提醒', body: `${name} 該吃飯囉 🍚` };
-        if (reminder.title.includes('砂'))
-          return { title: '照護提醒', body: `${name} 的貓砂該清理了 🧹` };
+        if (reminder.title.includes('砂') || reminder.title.includes('排泄') || reminder.title.includes('清潔'))
+          return { title: '照護提醒', body: `${name} 的環境該清理了 🧹` };
         if (reminder.title.includes('水'))
           return { title: '照護提醒', body: `${name} 記得確認喝水 💧` };
         return { title: '照護提醒', body: `${name}：${reminder.title}` };
@@ -276,8 +276,8 @@ export function buildNotificationBody(
     case 'daily':
       if (/feed|meal|breakfast|dinner/i.test(reminder.title))
         return { title: 'Care reminder', body: `Time to feed ${name} 🍚` };
-      if (/litter/i.test(reminder.title))
-        return { title: 'Care reminder', body: `Litter box time for ${name} 🧹` };
+      if (/litter|potty|clean/i.test(reminder.title))
+        return { title: 'Care reminder', body: `Time to clean ${name}'s area 🧹` };
       if (/water/i.test(reminder.title))
         return { title: 'Care reminder', body: `Check ${name}'s water 💧` };
       return { title: 'Care reminder', body: `${name}: ${reminder.title}` };

@@ -42,3 +42,33 @@ export function getDailyItemsForPetType(petType: PetType): DailyCheckItem[] {
   const specific = petType === 'dog' ? DAILY_DOG_SPECIFIC : DAILY_CAT_SPECIFIC;
   return [...DAILY_SHARED_TOP, ...specific, ...DAILY_SHARED_REST];
 }
+
+export type MonthlyCheckItem = {
+  id: string;
+  labelKey: string;
+  emoji: string;
+};
+
+const MONTHLY_MIDDLE: MonthlyCheckItem[] = [
+  { id: 'deworming', labelKey: 'deworming', emoji: '💊' },
+  { id: 'vaccine', labelKey: 'vaccine', emoji: '💉' },
+  { id: 'vetVisit', labelKey: 'vetVisit', emoji: '🏥' },
+  { id: 'bath', labelKey: 'bath', emoji: '🛁' },
+  { id: 'nailTrim', labelKey: 'nailTrim', emoji: '✂️' },
+];
+
+const MONTHLY_CAT_SPECIFIC: MonthlyCheckItem[] = [
+  { id: 'changeLitter', labelKey: 'changeLitter', emoji: '🧹' },
+  { id: 'catFood', labelKey: 'catFood', emoji: '🍚' },
+];
+
+const MONTHLY_DOG_SPECIFIC: MonthlyCheckItem[] = [
+  { id: 'changeLitter', labelKey: 'changeLitterDog', emoji: '🧽' },
+  { id: 'catFood', labelKey: 'dogFoodStock', emoji: '🦴' },
+];
+
+/** Monthly checklist items; ids stay stable for storage — labels/emojis vary by pet type. */
+export function getMonthlyItemsForPetType(petType: PetType): MonthlyCheckItem[] {
+  const [periodic, stock] = petType === 'dog' ? MONTHLY_DOG_SPECIFIC : MONTHLY_CAT_SPECIFIC;
+  return [periodic, ...MONTHLY_MIDDLE, stock];
+}

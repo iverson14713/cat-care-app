@@ -54,6 +54,7 @@ import {
 import {
   defaultEmojiForPetType,
   getDailyItemsForPetType,
+  getMonthlyItemsForPetType,
   normalizePetType,
   type PetType,
 } from './petTypes';
@@ -154,12 +155,6 @@ type Cat = {
   isArchived?: boolean;
 };
 
-type CheckItem = {
-  id: string;
-  labelKey: string;
-  emoji: string;
-};
-
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
 type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings' | 'sharedCare' | 'reminders';
@@ -200,16 +195,6 @@ const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const LANG_KEY = 'cat-calendar-lang';
 const MAX_PHOTOS = 3;
 
-const monthlyItems: CheckItem[] = [
-  { id: 'changeLitter', labelKey: 'changeLitter', emoji: '🧹' },
-  { id: 'deworming', labelKey: 'deworming', emoji: '💊' },
-  { id: 'vaccine', labelKey: 'vaccine', emoji: '💉' },
-  { id: 'vetVisit', labelKey: 'vetVisit', emoji: '🏥' },
-  { id: 'bath', labelKey: 'bath', emoji: '🛁' },
-  { id: 'nailTrim', labelKey: 'nailTrim', emoji: '✂️' },
-  { id: 'catFood', labelKey: 'catFood', emoji: '🍚' },
-];
-
 const text = {
   zh: {
     appTitle: '寵物日曆',
@@ -243,6 +228,8 @@ const text = {
     photoLimit: '最多 3 張，照片會自動壓縮並保存在本機瀏覽器',
     monthlyCare: '本月定期照顧',
     monthlyCareDesc: '驅蟲、換貓砂、疫苗、看診這類不是每天做的項目',
+    monthlyCareDescDog: '驅蟲、環境清潔、疫苗、看診這類不是每天做的項目',
+    defaultPetName: '我的寵物',
     clearMonth: '清除本月紀錄',
     clearToday: '清除今日紀錄',
     historyTitle: '歷史紀錄',
@@ -275,13 +262,13 @@ const text = {
     historyNoResults: '找不到符合條件的紀錄',
     historyProUpgrade: '歷史篩選與搜尋為 Pro 功能。請到「方案與設定」切換 Pro 測試版。',
     historyClearFilters: '清除篩選',
-    noHistory: '目前還沒有這隻貓的歷史紀錄',
+    noHistory: '目前還沒有這隻寵物的歷史紀錄',
     completed: '完成',
     vetReport: '獸醫報告',
     vetReportDesc: '整理寵物資料、體重趨勢、異常狀況、照片與備註，方便看診時給獸醫參考',
     copyForVet: '複製給獸醫',
     printPdf: '列印 / 存 PDF',
-    noAbnormalHistory: '目前還沒有這隻貓的異常紀錄',
+    noAbnormalHistory: '目前還沒有這隻寵物的異常紀錄',
     photo: '照片',
     todayNoteTitle: '今日備註',
     myCats: '我的寵物',
@@ -296,11 +283,11 @@ const text = {
     add: '新增',
     catList: '寵物列表',
     selected: '目前選擇中',
-    tapToSwitch: '點擊切換到這隻貓',
+    tapToSwitch: '點擊切換到這隻寵物',
     delete: '刪除',
     savedLocal: '紀錄與照片會保存在這台手機 / 電腦的瀏覽器內',
     backupTitle: '備份 / 匯出資料',
-    backupDesc: '匯出目前所有貓咪、每日紀錄、體重、照片與設定。資料會下載成 JSON 檔，換手機或清除瀏覽器前建議先備份。',
+    backupDesc: '匯出目前所有寵物、每日紀錄、體重、照片與設定。資料會下載成 JSON 檔，換手機或清除瀏覽器前建議先備份。',
     exportBackup: '匯出備份',
     importBackup: '匯入備份',
     importBackupDesc: '匯入之前下載的 JSON 備份檔，會覆蓋目前瀏覽器中的寵物日曆資料。',
@@ -310,7 +297,7 @@ const text = {
     privacyTitle: '隱私政策',
     privacyDesc: '目前版本不需要登入，資料主要保存在你的手機 / 電腦瀏覽器內，不會主動上傳到伺服器。',
     privacyPoint1: '我們不會要求你填寫真實姓名、電話或地址。',
-    privacyPoint2: '貓咪資料、體重、異常紀錄、備註與照片會保存在本機瀏覽器。',
+    privacyPoint2: '寵物資料、體重、異常紀錄、備註與照片會保存在本機瀏覽器。',
     privacyPoint3: '如果你清除瀏覽器資料、換手機或更換瀏覽器，紀錄可能會消失，請先使用備份匯出。',
     privacyPoint4: '列印、截圖、複製獸醫報告或備份檔分享出去後，請自行注意照片與健康紀錄隱私。',
     copyPrivacy: '複製隱私政策',
@@ -326,18 +313,18 @@ const text = {
     keepOneCat: '至少要保留一隻寵物',
     confirmArchiveCat: '確定要封存',
     archiveCatNote:
-      '此貓咪將從主畫面隱藏，\n歷史紀錄與照片仍會保留，\n之後可於封存貓咪中恢復。',
+      '此寵物將從主畫面隱藏，\n歷史紀錄與照片仍會保留，\n之後可於封存寵物中恢復。',
     archive: '封存',
     restoreCat: '恢復',
-    archivedCatsSection: '封存貓咪',
-    archivedCatsEmpty: '目前沒有封存的貓咪',
-    archivedCatsHint: '封存的貓咪不會出現在主畫面，資料仍保留在雲端與本機。',
+    archivedCatsSection: '封存寵物',
+    archivedCatsEmpty: '目前沒有封存的寵物',
+    archivedCatsHint: '封存的寵物不會出現在主畫面，資料仍保留在雲端與本機。',
     catsCloudArchiveErr: '無法封存至雲端：',
     catsCloudRestoreErr: '無法恢復至雲端：',
     permanentlyDelete: '永久刪除',
-    permanentDeleteTitle: '永久刪除此貓咪？',
+    permanentDeleteTitle: '永久刪除此寵物？',
     permanentDeleteBody:
-      '永久刪除後，\n此貓咪的歷史紀錄、照片、AI 報告、\n提醒與照護資料都將無法恢復。',
+      '永久刪除後，\n此寵物的歷史紀錄、照片、AI 報告、\n提醒與照護資料都將無法恢復。',
     cancel: '取消',
     catsCloudPermanentDeleteErr: '無法從雲端永久刪除：',
     permanentDeleteBusy: '刪除中…',
@@ -361,7 +348,7 @@ const text = {
     yearsOld: '歲',
     unknown: '未填',
     weightTitle: '體重紀錄',
-    weightDesc: '記錄每次量到的體重，線圖可以看出變胖、變瘦或老貓體重下降趨勢',
+    weightDesc: '記錄每次量到的體重，線圖可以看出變胖、變瘦或老年寵物體重下降趨勢',
     addWeight: '新增體重',
     weightKg: '體重 kg',
     weightNote: '體重備註',
@@ -390,12 +377,14 @@ const text = {
     brushHair: '梳毛確認',
     brushTeeth: '刷牙確認',
     changeLitter: '本月換貓砂',
+    changeLitterDog: '本月環境清潔確認',
     deworming: '本月驅蟲',
     vaccine: '疫苗 / 預防針確認',
     vetVisit: '看診 / 回診確認',
     bath: '本月洗澡確認',
     nailTrim: '剪指甲確認',
     catFood: '本月貓糧 / 貓砂補貨確認',
+    dogFoodStock: '本月狗糧 / 尿墊補貨確認',
     assistantNav: '照護',
     assistantTitle: 'AI 照護助理',
     assistantLead: '依紀錄整理趨勢與提醒；僅供參考，不能取代獸醫。',
@@ -453,9 +442,9 @@ const text = {
     authSignUpSent: '若註冊成功，請檢查信箱（含垃圾信）並完成驗證後再登入。',
     authSignedInOk: '登入成功。',
     authSignedOutOk: '已登出。',
-    authLocalDataHint: '登入後會與雲端同步貓咪、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
-    catsCloudLoading: '正在同步雲端貓咪…',
-    catsCloudLoadErr: '雲端貓咪載入失敗：',
+    authLocalDataHint: '登入後會與雲端同步寵物、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
+    catsCloudLoading: '正在同步雲端寵物…',
+    catsCloudLoadErr: '雲端寵物載入失敗：',
     cloudSyncLoading: '正在從雲端載入…',
     cloudSyncSyncing: '正在同步照護資料…',
     cloudSyncReady: '已與雲端同步',
@@ -477,8 +466,8 @@ const text = {
       '若切換為 Pro 後 AI 每日上限仍顯示 3 次，請在助理伺服器設定 AI_TRUST_CLIENT_PLAN=1（測試用），或將裝置 ID 加入 AI_PRO_CLIENT_IDS。',
     settingsPaymentNote: '目前未串接金流，不會實際收費。',
     settingsClientIdCaption: '本裝置 ID（加入伺服器 AI_PRO_CLIENT_IDS 時使用）',
-    planMultiCatUpgrade: '多貓照護是 Pro 功能。升級後可管理多隻貓咪，並獲得更多 AI 分析次數。',
-    planFreeMultiCatBanner: '免費版僅支援 1 隻貓。你目前有超過 1 隻貓咪，請刪減貓咪或切換至 Pro 測試版。',
+    planMultiCatUpgrade: '多寵物照護是 Pro 功能。升級後可管理多隻寵物，並獲得更多 AI 分析次數。',
+    planFreeMultiCatBanner: '免費版僅支援 1 隻寵物。你目前有超過 1 隻，請刪減寵物或切換至 Pro 測試版。',
     openSettings: '方案與設定',
     remindersTitle: '提醒設定',
     remindersBack: '返回設定',
@@ -511,7 +500,7 @@ const text = {
     remindersTypeVet: '看獸醫',
     remindersTypeCustom: '自訂',
     sharedCareTitle: '共同照護',
-    sharedCareNavHint: '與家人／室友共享同一隻貓的紀錄，資料同步於雲端。',
+    sharedCareNavHint: '與家人／室友共享同一隻寵物的紀錄，資料同步於雲端。',
     sharedCareBack: '返回',
     sharedCareCloudRequired: '請先登入並選擇已同步至雲端的寵物，才能使用共同照護。',
     sharedCareMembersTitle: '共享成員',
@@ -610,7 +599,9 @@ const text = {
     addPhoto: 'Add photo',
     photoLimit: 'Up to 3 photos. Photos are compressed and saved in this browser',
     monthlyCare: 'Monthly care',
-    monthlyCareDesc: 'Deworming, full litter change, vaccines, vet visits, and other periodic tasks',
+    monthlyCareDesc: 'Deworming, litter change, vaccines, vet visits, and other periodic tasks',
+    monthlyCareDescDog: 'Deworming, environment cleaning, vaccines, vet visits, and other periodic tasks',
+    defaultPetName: 'My pet',
     clearMonth: 'Clear month',
     clearToday: 'Clear today',
     historyTitle: 'History',
@@ -643,13 +634,13 @@ const text = {
     historyNoResults: 'No records match your filters',
     historyProUpgrade: 'History filter & search is a Pro feature. Switch to Pro (test) in Plan & settings.',
     historyClearFilters: 'Clear filters',
-    noHistory: 'No history for this cat yet',
+    noHistory: 'No history for this pet yet',
     completed: 'Completed',
     vetReport: 'Vet report',
-    vetReportDesc: 'Collect cat profile, weight trend, abnormal notes, photos, and daily notes for vet visits',
+    vetReportDesc: 'Collect pet profile, weight trend, abnormal notes, photos, and daily notes for vet visits',
     copyForVet: 'Copy for vet',
     printPdf: 'Print / PDF',
-    noAbnormalHistory: 'No abnormal records for this cat yet',
+    noAbnormalHistory: 'No abnormal records for this pet yet',
     photo: 'Photos',
     todayNoteTitle: 'Daily note',
     myCats: 'My pets',
@@ -664,11 +655,11 @@ const text = {
     add: 'Add',
     catList: 'Pet list',
     selected: 'Selected',
-    tapToSwitch: 'Tap to switch to this cat',
+    tapToSwitch: 'Tap to switch to this pet',
     delete: 'Delete',
     savedLocal: 'Records and photos are saved in this phone / computer browser',
     backupTitle: 'Backup / Export data',
-    backupDesc: 'Export all cats, daily records, weights, photos, and settings as a JSON file. Please back up before switching phones or clearing browser data.',
+    backupDesc: 'Export all pets, daily records, weights, photos, and settings as a JSON file. Please back up before switching phones or clearing browser data.',
     exportBackup: 'Export backup',
     importBackup: 'Import backup',
     importBackupDesc: 'Import a JSON backup file downloaded from Pet Calendar. This will overwrite current Pet Calendar data in this browser.',
@@ -678,7 +669,7 @@ const text = {
     privacyTitle: 'Privacy policy',
     privacyDesc: 'This version does not require login. Records are mainly saved in your phone / computer browser and are not actively uploaded to a server.',
     privacyPoint1: 'We do not ask for your real name, phone number, or address.',
-    privacyPoint2: 'Cat profile, weight, abnormal notes, daily notes, and photos are saved in this local browser.',
+    privacyPoint2: 'Pet profile, weight, abnormal notes, daily notes, and photos are saved in this local browser.',
     privacyPoint3: 'If you clear browser data, switch phones, or change browsers, records may be lost. Please export a backup first.',
     privacyPoint4: 'After you print, screenshot, copy a vet report, or share a backup file, please manage the privacy of photos and health records yourself.',
     copyPrivacy: 'Copy privacy policy',
@@ -690,22 +681,22 @@ const text = {
     copyFailed: 'Copy failed. Please select and copy manually.',
     noReport: 'No report content to copy yet',
     photoCannotCopy: 'Photos cannot be copied into plain text. Please screenshot or print the Vet report page.',
-    needCatName: 'Please enter a cat name first',
-    keepOneCat: 'At least one cat is required',
+    needCatName: 'Please enter a pet name first',
+    keepOneCat: 'At least one pet is required',
     confirmArchiveCat: 'Archive',
     archiveCatNote:
-      'This cat will be hidden from the main screen.\nHistory and photos are kept.\nYou can restore it from Archived cats.',
+      'This pet will be hidden from the main screen.\nHistory and photos are kept.\nYou can restore it from Archived pets.',
     archive: 'Archive',
     restoreCat: 'Restore',
-    archivedCatsSection: 'Archived cats',
-    archivedCatsEmpty: 'No archived cats',
-    archivedCatsHint: 'Archived cats are hidden from the main screen; data stays in the cloud and on this device.',
+    archivedCatsSection: 'Archived pets',
+    archivedCatsEmpty: 'No archived pets',
+    archivedCatsHint: 'Archived pets are hidden from the main screen; data stays in the cloud and on this device.',
     catsCloudArchiveErr: 'Could not archive in the cloud: ',
     catsCloudRestoreErr: 'Could not restore in the cloud: ',
     permanentlyDelete: 'Delete permanently',
-    permanentDeleteTitle: 'Delete this cat permanently?',
+    permanentDeleteTitle: 'Delete this pet permanently?',
     permanentDeleteBody:
-      'After permanent deletion,\nall history, photos, AI reports,\nreminders, and care data for this cat cannot be recovered.',
+      'After permanent deletion,\nall history, photos, AI reports,\nreminders, and care data for this pet cannot be recovered.',
     cancel: 'Cancel',
     catsCloudPermanentDeleteErr: 'Could not permanently delete from cloud: ',
     permanentDeleteBusy: 'Deleting…',
@@ -724,7 +715,7 @@ const text = {
     allergyNote: 'Allergies / restrictions',
     vetClinic: 'Preferred vet clinic',
     profileNote: 'Other notes',
-    profilePhoto: 'Cat photo',
+    profilePhoto: 'Pet photo',
     selectPhoto: 'Select photo',
     yearsOld: 'years old',
     unknown: 'Not set',
@@ -757,13 +748,15 @@ const text = {
     snack: 'Snack check',
     brushHair: 'Brushing check',
     brushTeeth: 'Teeth brushing check',
-    changeLitter: 'Full litter change',
+    changeLitter: 'Monthly litter change',
+    changeLitterDog: 'Monthly environment cleaning check',
     deworming: 'Deworming',
     vaccine: 'Vaccine check',
     vetVisit: 'Vet visit / follow-up',
     bath: 'Bath check',
     nailTrim: 'Nail trim check',
-    catFood: 'Food / litter refill check',
+    catFood: 'Cat food / litter refill check',
+    dogFoodStock: 'Dog food / pee pad refill check',
     assistantNav: 'Care',
     assistantTitle: 'AI Care Assistant',
     assistantLead: 'Trends from your logs; reference only—not vet advice.',
@@ -823,9 +816,9 @@ const text = {
     authSignedInOk: 'Signed in successfully.',
     authSignedOutOk: 'Signed out.',
     authLocalDataHint:
-      'When signed in, cats, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
-    catsCloudLoading: 'Syncing cats from the cloud…',
-    catsCloudLoadErr: 'Could not load cats from the cloud: ',
+      'When signed in, pets, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
+    catsCloudLoading: 'Syncing pets from the cloud…',
+    catsCloudLoadErr: 'Could not load pets from the cloud: ',
     cloudSyncLoading: 'Loading from cloud…',
     cloudSyncSyncing: 'Syncing care data…',
     cloudSyncReady: 'Synced with cloud',
@@ -848,9 +841,9 @@ const text = {
     settingsPaymentNote: 'No billing is connected — nothing is charged.',
     settingsClientIdCaption: 'This device ID (for AI_PRO_CLIENT_IDS on the server)',
     planMultiCatUpgrade:
-      'Multiple cats are a Pro feature. Upgrade to manage more than one cat and get more daily AI analysis.',
+      'Multiple pets are a Pro feature. Upgrade to manage more than one pet and get more daily AI analysis.',
     planFreeMultiCatBanner:
-      'Free supports one cat only. You currently have more than one — delete extras or switch to Pro (test).',
+      'Free supports one pet only. You currently have more than one — delete extras or switch to Pro (test).',
     openSettings: 'Plan & settings',
     remindersTitle: 'Reminders',
     remindersBack: 'Back to settings',
@@ -863,7 +856,7 @@ const text = {
     remindersAdd: 'Add reminder',
     remindersAddCustom: 'Custom reminder',
     remindersEmpty: 'No reminders yet — use quick add below.',
-    remindersForCat: 'Cat',
+    remindersForCat: 'Pet',
     remindersTime: 'Time',
     remindersRepeat: 'Repeat',
     remindersTitleField: 'Title',
@@ -883,9 +876,9 @@ const text = {
     remindersTypeVet: 'Vet',
     remindersTypeCustom: 'Custom',
     sharedCareTitle: 'Shared care',
-    sharedCareNavHint: 'Share one cat’s log with family or roommates. Data syncs via the cloud.',
+    sharedCareNavHint: 'Share one pet’s log with family or roommates. Data syncs via the cloud.',
     sharedCareBack: 'Back',
-    sharedCareCloudRequired: 'Sign in and select a cloud-synced cat to use shared care.',
+    sharedCareCloudRequired: 'Sign in and select a cloud-synced pet to use shared care.',
     sharedCareMembersTitle: 'Members',
     sharedCareMembersEmpty: 'No shared care members yet',
     sharedCareRoleOwner: 'Owner',
@@ -1031,14 +1024,14 @@ function dedupeWeightRecordsByDate(records: WeightRecord[]): WeightRecord[] {
 }
 
 const DEFAULT_CATS: Cat[] = [
-  { id: 'default-cat', name: '我的貓咪', petType: 'cat', emoji: '🐱' },
+  { id: 'default-cat', name: '我的寵物', petType: 'cat', emoji: '🐱' },
 ];
 
 function mapStoredCat(cat: unknown): Cat {
   const c = (cat && typeof cat === 'object' ? cat : {}) as Record<string, unknown>;
   return {
     id: typeof c.id === 'string' ? c.id : makeId(),
-    name: typeof c.name === 'string' ? c.name : '我的貓咪',
+    name: typeof c.name === 'string' ? c.name : '我的寵物',
     petType: normalizePetType(c.petType),
     emoji:
       typeof c.emoji === 'string' && c.emoji
@@ -1564,18 +1557,23 @@ export default function App() {
     [selectedPetType]
   );
 
+  const monthlyItemsForPet = useMemo(
+    () => getMonthlyItemsForPetType(selectedPetType),
+    [selectedPetType]
+  );
+
   const dailyDone = useMemo(
     () => dailyItemsForPet.filter((item) => daily[item.id] === true).length,
     [daily, dailyItemsForPet]
   );
 
   const monthlyDone = useMemo(
-    () => monthlyItems.filter((item) => monthly[item.id]).length,
-    [monthly]
+    () => monthlyItemsForPet.filter((item) => monthly[item.id]).length,
+    [monthly, monthlyItemsForPet]
   );
 
   const dailyPercent = Math.round((dailyDone / dailyItemsForPet.length) * 100);
-  const monthlyPercent = Math.round((monthlyDone / monthlyItems.length) * 100);
+  const monthlyPercent = Math.round((monthlyDone / monthlyItemsForPet.length) * 100);
 
   const history = useMemo(() => {
     historyRefreshKey;
@@ -3042,7 +3040,7 @@ export default function App() {
           )}
           <div className="min-w-0">
             <p className="text-xs font-medium text-stone-400">{tr.currentCat}</p>
-            <h2 className="truncate text-xl font-bold">{selectedCat?.name ?? '我的貓咪'}</h2>
+            <h2 className="truncate text-xl font-bold">{selectedCat?.name ?? tr.defaultPetName}</h2>
           </div>
         </div>
 
@@ -3132,7 +3130,7 @@ export default function App() {
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-xl">🐾</span>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[15px] font-bold leading-tight text-stone-900">{tr.appTitle}</h1>
-            <p className="truncate text-xs text-stone-600">{selectedCat?.name ?? '我的貓咪'} · {today}</p>
+            <p className="truncate text-xs text-stone-600">{selectedCat?.name ?? tr.defaultPetName} · {today}</p>
             <p className="text-[10px] font-medium tracking-wide text-stone-400">{tr.appSubtitle}</p>
           </div>
           <div className="shrink-0 text-right">
@@ -3215,18 +3213,20 @@ export default function App() {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold">{tr.monthlyCare}</h2>
-            <p className="text-sm text-stone-500">{tr.monthlyCareDesc}</p>
+            <p className="text-sm text-stone-500">
+              {selectedPetType === 'dog' ? tr.monthlyCareDescDog : tr.monthlyCareDesc}
+            </p>
             <p className="mt-1 text-sm text-stone-500">
-              {selectedCat?.name ?? '我的貓咪'}｜{tr.month}：{month}
+              {selectedCat?.name ?? tr.defaultPetName}｜{tr.month}：{month}
             </p>
           </div>
           <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
-            {monthlyDone}/{monthlyItems.length}
+            {monthlyDone}/{monthlyItemsForPet.length}
           </span>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          {monthlyItems.map((item) => (
+          {monthlyItemsForPet.map((item) => (
             <button
               key={item.id}
               onClick={() => toggleMonthly(item.id)}
@@ -5151,14 +5151,14 @@ export default function App() {
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       <div className="mx-auto max-w-md pb-24">
         <nav
-          className="mb-5 select-none rounded-3xl border border-orange-100/90 bg-white p-3.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"
+          className="mb-4 select-none rounded-3xl border border-orange-100/90 bg-white p-2.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"
           aria-label={lang === 'zh' ? '主要功能' : 'Main'}
         >
-          <div className="flex flex-col gap-3.5">
+          <div className="flex flex-col gap-2.5">
             {MAIN_TAB_ROWS.map((row, rowIndex) => (
               <div
                 key={rowIndex}
-                className={`grid grid-cols-3 gap-2.5 ${rowIndex > 0 ? 'border-t border-orange-100/90 pt-3.5' : ''}`}
+                className={`grid grid-cols-3 gap-2 ${rowIndex > 0 ? 'border-t border-orange-100/90 pt-2.5' : ''}`}
               >
               {row.map((tab) => {
                 const systemActive =
@@ -5177,19 +5177,19 @@ export default function App() {
                     onClick={() => setPage(tab.id)}
                     aria-current={active ? 'page' : undefined}
                     aria-label={label}
-                    className={`relative flex min-h-[5.75rem] touch-manipulation flex-col items-center justify-center gap-2 rounded-2xl px-1 pb-4 pt-3 transition-all duration-200 ease-out active:scale-[0.97] ${
+                    className={`relative flex min-h-[5rem] touch-manipulation flex-col items-center justify-center gap-1.5 rounded-2xl px-1 pb-3 pt-2.5 transition-all duration-200 ease-out active:scale-[0.97] ${
                       active
                         ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/40 ring-2 ring-orange-300/70'
                         : 'border border-stone-200/90 bg-stone-50 text-stone-800 shadow-sm hover:border-orange-200 hover:bg-orange-50/80'
                     }`}
                   >
                     <span
-                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition-colors ${
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
                         active ? 'bg-white/20 text-white' : 'bg-white text-orange-600 shadow-sm ring-1 ring-orange-100/80'
                       }`}
                       aria-hidden
                     >
-                      <TabIcon className="h-7 w-7" strokeWidth={active ? 2.5 : 2.15} />
+                      <TabIcon className="h-6 w-6" strokeWidth={active ? 2.5 : 2.15} />
                     </span>
                     <span
                       className={`max-w-full px-0.5 text-center text-[15px] leading-tight tracking-wide ${
@@ -5199,7 +5199,7 @@ export default function App() {
                       {label}
                     </span>
                     <span
-                      className={`absolute inset-x-5 bottom-2 h-1 rounded-full transition-all duration-200 ${
+                      className={`absolute inset-x-4 bottom-1.5 h-1 rounded-full transition-all duration-200 ${
                         active ? 'bg-white/95 shadow-sm' : 'h-0 opacity-0'
                       }`}
                       aria-hidden
