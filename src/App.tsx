@@ -182,7 +182,7 @@ const text = {
     weight: '體重',
     history: '歷史',
     vet: '獸醫',
-    cats: '貓咪',
+    cats: '系統',
     currentCat: '目前照顧',
     switchCat: '切換貓咪',
     date: '日期',
@@ -219,6 +219,8 @@ const text = {
     historyBackLatest: '回到最新',
     historyRoadmap: '快速跳轉仍可使用；下方可篩選、搜尋（Pro）。',
     historySearchTitle: '篩選與搜尋',
+    historyAdvancedFilters: '進階篩選',
+    historyHideFilters: '收合篩選',
     historyFilterAll: '全部',
     historyFilterAbnormal: '只看異常',
     historyFilterPhoto: '只看有照片',
@@ -521,7 +523,7 @@ const text = {
     weight: 'Weight',
     history: 'History',
     vet: 'Vet',
-    cats: 'Cats',
+    cats: 'System',
     currentCat: 'Current cat',
     switchCat: 'Switch',
     date: 'Date',
@@ -558,6 +560,8 @@ const text = {
     historyBackLatest: 'Back to latest',
     historyRoadmap: 'Jump-to-date still works; filter and search below (Pro).',
     historySearchTitle: 'Filter & search',
+    historyAdvancedFilters: 'Advanced filters',
+    historyHideFilters: 'Hide filters',
     historyFilterAll: 'All',
     historyFilterAbnormal: 'Abnormal only',
     historyFilterPhoto: 'With photos',
@@ -1309,6 +1313,7 @@ export default function App() {
   const [historyDateEnd, setHistoryDateEnd] = useState('');
   const [historyDatePreset, setHistoryDatePreset] = useState<HistoryDatePreset>('none');
   const [historyProHint, setHistoryProHint] = useState<string | null>(null);
+  const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>(() => loadReminders());
   const [notificationPerm, setNotificationPerm] = useState(() => getNotificationPermission());
   const [reminderLimitHint, setReminderLimitHint] = useState<string | null>(null);
@@ -2592,39 +2597,39 @@ export default function App() {
         </ul>
       </section>
 
-      <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="text-4xl">🐾</div>
-        <h1 className="mt-2 text-2xl font-bold">{tr.appTitle}</h1>
-        <p className="mt-1 text-sm font-medium text-orange-600">{tr.appSubtitle}</p>
-        <p className="mt-1 text-sm text-stone-500">
-          {selectedCat?.name ?? '我的貓咪'}｜{tr.date}：{today}
-        </p>
-
-        <div className="mt-4">
-          <div className="mb-2 flex justify-between text-sm">
-            <span>{tr.todayProgress}</span>
-            <span>
-              {dailyDone}/{dailyItems.length}（{dailyPercent}%）
-            </span>
+      <div className="mb-4 rounded-2xl border border-orange-100/90 bg-white px-3.5 py-3 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-xl">🐾</span>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-[15px] font-bold leading-tight text-stone-900">{tr.appTitle}</h1>
+            <p className="truncate text-xs text-stone-600">{selectedCat?.name ?? '我的貓咪'} · {today}</p>
+            <p className="text-[10px] font-medium tracking-wide text-stone-400">{tr.appSubtitle}</p>
           </div>
-          <div className="h-3 overflow-hidden rounded-full bg-orange-100">
-            <div className="h-full rounded-full bg-orange-400 transition-all" style={{ width: `${dailyPercent}%` }} />
+          <div className="shrink-0 text-right">
+            <p className="text-lg font-bold tabular-nums text-orange-600">{dailyPercent}%</p>
+            <p className="text-[10px] text-stone-400">{dailyDone}/{dailyItems.length}</p>
+          </div>
+        </div>
+        <div className="mt-2.5">
+          <div className="mb-1 text-[11px] font-medium text-stone-500">{tr.todayProgress}</div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-orange-100">
+            <div className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300" style={{ width: `${dailyPercent}%` }} />
           </div>
         </div>
       </div>
 
-      <section className="mb-5">
-        <div className="mb-3">
-          <h2 className="text-lg font-bold">{tr.dailyCare}</h2>
-          <p className="text-sm text-stone-500">{tr.dailyCareDesc}</p>
+      <section className="mb-4">
+        <div className="mb-2">
+          <h2 className="text-base font-bold">{tr.dailyCare}</h2>
+          <p className="text-[12px] text-stone-500">{tr.dailyCareDesc}</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2">
           {dailyItems.map((item) => (
             <button
               key={item.id}
               onClick={() => toggleDaily(item.id)}
-              className={`flex min-h-[78px] w-full items-center justify-between rounded-2xl border p-3 text-left shadow-sm transition active:scale-[0.98] ${
+              className={`flex min-h-[64px] w-full items-center justify-between rounded-xl border p-2.5 text-left shadow-sm transition active:scale-[0.98] ${
                 daily[item.id] === true ? 'border-green-200 bg-green-50' : 'border-stone-100 bg-white'
               }`}
             >
@@ -2931,65 +2936,87 @@ export default function App() {
       <>
         {renderCatSwitcher()}
 
-        <div className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="text-4xl">📅</div>
-          <h1 className="mt-2 text-2xl font-bold">{tr.historyTitle}</h1>
-          <p className="mt-1 text-sm text-stone-500">{tr.historyDesc}</p>
-          <p className="mt-2 text-xs leading-5 text-stone-400">{tr.historyOrderNote}</p>
+        <div className="mb-3 rounded-2xl border border-orange-100/80 bg-white px-3.5 py-3 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl" aria-hidden>📅</span>
+            <div>
+              <h1 className="text-base font-bold text-stone-900">{tr.historyTitle}</h1>
+              <p className="text-[11px] text-stone-500">{tr.historyDesc}</p>
+            </div>
+          </div>
         </div>
 
         {history.length === 0 ? (
           <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.noHistory}</div>
         ) : (
           <>
-            <div className="sticky top-0 z-30 mb-4 space-y-2 rounded-2xl border border-stone-200 bg-orange-50/95 p-4 shadow-md backdrop-blur-sm">
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-0 flex-1">
-                  <label htmlFor="history-jump-date" className="mb-1 block text-xs font-bold text-stone-600">
-                    {tr.historyJumpLabel}
-                  </label>
-                  <input
-                    id="history-jump-date"
-                    type="date"
-                    className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-300"
-                    min={historyDateBounds.min}
-                    max={historyDateBounds.max}
-                    value={historyJumpDate}
-                    onChange={(e) => {
-                      setHistoryJumpDate(e.target.value);
-                      setHistoryJumpHint(null);
-                    }}
-                  />
-                </div>
+            <div className="sticky top-0 z-30 mb-3 space-y-2 rounded-xl border border-orange-100/90 bg-white/95 p-2.5 shadow-sm backdrop-blur-sm">
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="history-jump-date"
+                  type="date"
+                  aria-label={tr.historyJumpLabel}
+                  className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-stone-50 px-2 py-1.5 text-[12px] outline-none focus:border-orange-300 focus:bg-white"
+                  min={historyDateBounds.min}
+                  max={historyDateBounds.max}
+                  value={historyJumpDate}
+                  onChange={(e) => {
+                    setHistoryJumpDate(e.target.value);
+                    setHistoryJumpHint(null);
+                  }}
+                />
                 <button
                   type="button"
                   onClick={scrollHistoryToPickedDate}
-                  className="shrink-0 rounded-2xl bg-stone-800 px-5 py-2.5 text-sm font-bold text-white shadow-sm"
+                  className="shrink-0 rounded-lg bg-orange-500 px-3 py-1.5 text-[11px] font-bold text-white"
                 >
                   {tr.historyJumpGo}
                 </button>
               </div>
-              {historyJumpHint ? <p className="text-xs font-medium text-amber-800">{historyJumpHint}</p> : null}
-              <p className="text-xs leading-5 text-stone-500">{tr.historyRoadmap}</p>
+              {historyJumpHint ? <p className="text-[10px] font-medium text-amber-800">{historyJumpHint}</p> : null}
 
-              {/* Filter & search panel */}
+              <input
+                type="search"
+                value={historyKeyword}
+                placeholder={tr.historySearchPlaceholder}
+                readOnly={historyProLocked}
+                onChange={(e) => {
+                  if (historyProLocked) return;
+                  setHistoryKeyword(e.target.value);
+                  setHistoryProHint(null);
+                }}
+                onClick={historyProLocked ? () => setHistoryProHint(tr.historyProUpgrade) : undefined}
+                className={`w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none focus:border-orange-300 focus:bg-white ${historyProLocked ? 'cursor-not-allowed opacity-70' : ''}`}
+              />
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setHistoryFiltersOpen((o) => !o)}
+                  className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition ${
+                    historyFiltersOpen
+                      ? 'border-orange-300 bg-orange-50 text-orange-800'
+                      : 'border-stone-200 bg-white text-stone-600'
+                  }`}
+                >
+                  {historyFiltersOpen ? tr.historyHideFilters : tr.historyAdvancedFilters}
+                  {historyProLocked ? (
+                    <span className="ml-1 rounded bg-stone-200/80 px-1 py-px text-[8px] font-bold text-stone-500">Pro</span>
+                  ) : null}
+                </button>
+                {!historyProLocked && historySearchMode ? (
+                  <button type="button" onClick={clearHistorySearch} className="shrink-0 text-[10px] font-medium text-orange-600">
+                    {tr.historyClearFilters}
+                  </button>
+                ) : null}
+              </div>
+
+              {historyFiltersOpen ? (
               <div
-                className={`rounded-xl border px-3 py-3 ${historyProLocked ? 'border-dashed border-stone-300 bg-stone-100/50' : 'border-orange-200/80 bg-white'}`}
+                className={`space-y-2 rounded-lg border px-2 py-2 ${historyProLocked ? 'border-dashed border-stone-200 bg-stone-50/80' : 'border-orange-100 bg-orange-50/40'}`}
                 onClick={historyProLocked ? (e) => { e.stopPropagation(); setHistoryProHint(tr.historyProUpgrade); } : undefined}
               >
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-stone-700">{tr.historySearchTitle}</span>
-                  {historyProLocked ? (
-                    <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">Pro</span>
-                  ) : historySearchMode ? (
-                    <button type="button" onClick={clearHistorySearch} className="text-[11px] font-medium text-orange-600 hover:underline">
-                      {tr.historyClearFilters}
-                    </button>
-                  ) : null}
-                </div>
-
-                {/* Chip filters */}
-                <div className="mb-2 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1">
                   {historyFilterChips.map((chip) => (
                     <button
                       key={chip.id}
@@ -2999,8 +3026,8 @@ export default function App() {
                         setHistoryFilter(chip.id);
                         setHistoryProHint(null);
                       }}
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
-                        historyFilter === chip.id ? 'bg-orange-500 text-white shadow-sm' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${
+                        historyFilter === chip.id ? 'bg-orange-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-200/80'
                       } ${historyProLocked ? 'cursor-not-allowed opacity-60' : ''}`}
                     >
                       {chip.label}
@@ -3008,28 +3035,13 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* Keyword search */}
-                <input
-                  type="search"
-                  value={historyKeyword}
-                  placeholder={tr.historySearchPlaceholder}
-                  readOnly={historyProLocked}
-                  onChange={(e) => {
-                    if (historyProLocked) return;
-                    setHistoryKeyword(e.target.value);
-                    setHistoryProHint(null);
-                  }}
-                  className={`mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300 focus:bg-white ${historyProLocked ? 'cursor-not-allowed' : ''}`}
-                />
-
-                {/* Date range */}
-                <div className="mb-2 grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
                   {(
                     [['start', tr.historyDateStart, historyDateStart, setHistoryDateStart],
                      ['end', tr.historyDateEnd, historyDateEnd, setHistoryDateEnd]] as const
                   ).map(([key, label, value, setter]) => (
                     <div key={key}>
-                      <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{label}</label>
+                      <label className="mb-0.5 block text-[9px] font-medium text-stone-500">{label}</label>
                       <input
                         type="date"
                         value={value}
@@ -3042,22 +3054,21 @@ export default function App() {
                           setHistoryDatePreset('none');
                           setHistoryProHint(null);
                         }}
-                        className={`w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-[12px] outline-none focus:border-orange-300 ${historyProLocked ? 'cursor-not-allowed' : ''}`}
+                        className={`w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-[11px] outline-none focus:border-orange-300 ${historyProLocked ? 'cursor-not-allowed' : ''}`}
                       />
                     </div>
                   ))}
                 </div>
 
-                {/* Presets */}
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1">
                   {([ ['7d', tr.historyPreset7d], ['30d', tr.historyPreset30d], ['month', tr.historyPresetMonth] ] as const).map(
                     ([preset, label]) => (
                       <button
                         key={preset}
                         type="button"
                         onClick={() => applyHistoryDatePreset(preset)}
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                          historyDatePreset === preset ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          historyDatePreset === preset ? 'bg-orange-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-200/80'
                         } ${historyProLocked ? 'cursor-not-allowed opacity-60' : ''}`}
                       >
                         {label}
@@ -3066,9 +3077,10 @@ export default function App() {
                   )}
                 </div>
               </div>
+              ) : null}
 
               {historyProHint ? (
-                <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-snug text-amber-950">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-950">
                   <p className="m-0">{historyProHint}</p>
                   <button
                     type="button"
@@ -4499,30 +4511,50 @@ export default function App() {
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       <div className="mx-auto max-w-md pb-24">
-        <div className="mb-5 flex flex-col gap-2 rounded-3xl bg-white p-2 shadow-sm">
-          <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => setPage('today')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'today' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-              {tr.today}
-            </button>
-            <button onClick={() => setPage('weight')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'weight' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-              {tr.weight}
-            </button>
-            <button onClick={() => setPage('vet')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'vet' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-              {tr.vet}
-            </button>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => setPage('history')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'history' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-              {tr.history}
-            </button>
-            <button onClick={() => setPage('cats')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'cats' || page === 'settings' || page === 'sharedCare' || page === 'reminders' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-              {tr.cats}
-            </button>
-            <button onClick={() => setPage('assistant')} className={`rounded-2xl py-3 text-xs font-bold transition ${page === 'assistant' ? 'bg-orange-400 text-white' : 'text-stone-500'}`}>
-              {tr.assistantNav}
-            </button>
-          </div>
-        </div>
+        <nav
+          className="mb-4 grid grid-cols-6 gap-0.5 rounded-2xl border border-orange-100/80 bg-white/95 p-1 shadow-sm backdrop-blur-sm"
+          aria-label="Main"
+        >
+          {(
+            [
+              { id: 'today' as Page, label: tr.today, icon: '📅' },
+              { id: 'weight' as Page, label: tr.weight, icon: '⚖️' },
+              { id: 'vet' as Page, label: tr.vet, icon: '🩺' },
+              { id: 'history' as Page, label: tr.history, icon: '🕘' },
+              { id: 'cats' as Page, label: tr.cats, icon: '⚙️' },
+              { id: 'assistant' as Page, label: tr.assistantNav, icon: '✨' },
+            ] as const
+          ).map((tab) => {
+            const systemActive =
+              tab.id === 'cats' &&
+              (page === 'cats' || page === 'settings' || page === 'sharedCare' || page === 'reminders');
+            const active = tab.id === 'cats' ? systemActive : page === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setPage(tab.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 transition-all duration-200 active:scale-95 ${
+                  active
+                    ? 'bg-orange-100 text-orange-800 shadow-sm ring-1 ring-orange-200/70'
+                    : 'text-stone-500 hover:bg-orange-50/60'
+                }`}
+              >
+                <span
+                  className={`text-[16px] leading-none transition-transform duration-200 ${active ? 'scale-110' : 'opacity-60'}`}
+                  aria-hidden
+                >
+                  {tab.icon}
+                </span>
+                <span className={`text-[9px] leading-tight ${active ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
+                <span
+                  className={`h-0.5 rounded-full transition-all duration-200 ${active ? 'mt-0.5 w-4 bg-orange-500' : 'w-0 bg-transparent'}`}
+                  aria-hidden
+                />
+              </button>
+            );
+          })}
+        </nav>
 
         {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2.5 text-[12px] text-stone-700 shadow-sm">
