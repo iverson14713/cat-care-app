@@ -566,7 +566,7 @@ const text = {
     aiErrRate: '問得太快啦，休息一下再試。',
     aiAssistantApiErrorPrefix: 'AI 服務錯誤：',
     aiDisclaimerFoot:
-      'AI 僅提供照護觀察與提醒，\n不能作為診斷或治療依據。\n如症狀持續或惡化，請諮詢獸醫。',
+      '以上僅為照護觀察與提醒，不能取代獸醫診斷；若症狀持續或惡化，請諮詢獸醫。',
   },
   en: {
     appTitle: 'Pet Calendar',
@@ -942,7 +942,7 @@ const text = {
     aiErrRate: 'A little too fast — take a short break and try again.',
     aiAssistantApiErrorPrefix: 'AI service error: ',
     aiDisclaimerFoot:
-      'The assistant shares care observations and reminders only —\nnot diagnosis or treatment.\nIf symptoms persist or worsen, please see a veterinarian.',
+      'The above is for care observation and reminders only — not a veterinary diagnosis. If symptoms persist or worsen, please consult a veterinarian.',
   },
 };
 
@@ -1666,9 +1666,15 @@ export default function App() {
       today,
       monthKey: month,
       catId: selectedCat.id,
+      petType: selectedCat.petType,
       cat: {
         name: selectedCat.name,
         emoji: selectedCat.emoji,
+        petType: selectedCat.petType,
+        birthday: selectedCat.birthday,
+        breed: selectedCat.breed,
+        gender: selectedCat.gender,
+        neutered: selectedCat.neutered,
         chronicNote: selectedCat.chronicNote,
         allergyNote: selectedCat.allergyNote,
         vetClinic: selectedCat.vetClinic,

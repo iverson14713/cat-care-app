@@ -5,6 +5,11 @@ export type DailyData = Record<string, boolean | string | string[]>;
 export type CatProfile = {
   name: string;
   emoji: string;
+  petType?: 'cat' | 'dog';
+  birthday?: string;
+  breed?: string;
+  gender?: string;
+  neutered?: string;
   chronicNote?: string;
   allergyNote?: string;
   vetClinic?: string;
@@ -38,6 +43,7 @@ export type AssistantContext = {
   monthKey: string;
   /** Selected cat id — used for AI quota / cache keys only. */
   catId: string;
+  petType: 'cat' | 'dog';
   cat: CatProfile;
   catsCount: number;
   todayDaily: DailyData;

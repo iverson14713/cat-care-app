@@ -38,12 +38,64 @@ export function careBundleUserPrompt(lang, context) {
   );
 }
 
+/** Dedicated system prompt for Q&A — longer, structured answers (not the short systemBase). */
+export function qaSystemPrompt(lang) {
+  if (lang === 'zh') {
+    return [
+      '你是「寵物日曆」App 的照護紀錄助理，專門回答飼主關於「已記錄照護資料」的問題。',
+      '你只能根據使用者提供的結構化紀錄（寵物資料、最近 7～14 天紀錄、體重、本月項目）回答，並結合年齡、品種、體重、結紮、慢性病、過敏等背景。',
+      '語氣：專業、溫和、實用，不恐嚇；一般問題總字數約 250～500 字（繁體中文），不可只有兩三句敷衍。',
+      '嚴格禁止：診斷疾病、斷言病因、開藥、推薦劑量、說「一定是某某病」、取代獸醫。',
+      '原因與建議一律用「可能」「建議觀察」等語氣；紀錄不足時誠實說明，不要臆測未記載的症狀。',
+      '不要在回答結尾重複免責聲明（App 會自動附加）。',
+    ].join('\n');
+  }
+  return [
+    'You are the care-journal assistant in Pet Calendar, answering questions from logged records only.',
+    'Use pet profile (age, breed, weight, neuter status, chronic conditions, allergies) plus the last 7–14 days of logs.',
+    'Tone: professional, warm, practical — not alarmist. Typical answers: about 180–350 English words; never just 2–3 vague sentences.',
+    'Strictly forbidden: diagnosis, naming a disease as certain, prescriptions, dosages, or replacing a veterinarian.',
+    'Use "may", "might", "consider watching" for causes; say when data is insufficient — do not invent symptoms.',
+    'Do not add a disclaimer at the end (the app appends one).',
+  ].join('\n');
+}
+
 /** @param {'zh' | 'en'} lang */
 export function qaUserPrompt(lang, context, question) {
   if (lang === 'zh') {
-    return `${context}\n\n使用者問題：\n${question.trim()}\n\n請用繁體中文簡短回答，只根據上面紀錄；禁止診斷、禁止醫療建議、禁止開藥或臆測未記載症狀。`;
+    return (
+      `${context}\n\n` +
+      `【使用者問題】\n${question.trim()}\n\n` +
+      `請用繁體中文回答，且**必須**依序包含以下標題與內容（每段都要寫，不可省略標題）：\n\n` +
+      `【目前紀錄看到的狀況】\n` +
+      `根據 App 紀錄，簡短說明目前看到什麼（可引用最近 7～14 天、今日、體重、異常備註；若資料少請說明）。\n\n` +
+      `【可能原因】\n` +
+      `列出 2～4 點**可能**原因（每點一行，用「可能」語氣；不可診斷、不可斷言）。\n\n` +
+      `【建議觀察】\n` +
+      `列出接下來 24～48 小時可觀察的項目（條列 3～6 點）。\n\n` +
+      `【可以先做的照護】\n` +
+      `只提供安全的一般照護（條列 3～6 點），例如：記錄食慾、觀察精神、補充飲水、保持環境安靜、拍照記錄嘔吐物或便便等；不可開藥、不可建議劑量。\n\n` +
+      `【什麼情況要看獸醫】\n` +
+      `列出明確警訊（條列 4～8 點），例如：反覆嘔吐、精神變差、不吃不喝、排尿異常、血便、持續腹瀉、呼吸異常等；語氣清楚但不恐嚇。\n\n` +
+      `若問題與紀錄無關，仍依上述格式回答，並在「目前紀錄看到的狀況」說明紀錄不足以判斷的部分。`
+    );
   }
-  return `${context}\n\nUser question:\n${question.trim()}\n\nAnswer briefly in English using only the records above; no diagnosis, no medical advice, no prescriptions, no invented symptoms.`;
+  return (
+    `${context}\n\n` +
+    `【User question】\n${question.trim()}\n\n` +
+    `Answer in English with **all** section headers below, in order (do not skip headers):\n\n` +
+    `【What the records show】\n` +
+    `Briefly summarize what the app logs show (last 7–14 days, today, weight, abnormal notes). Note gaps if data is sparse.\n\n` +
+    `【Possible reasons】\n` +
+    `2–4 bullet lines using "may/might" — no diagnosis.\n\n` +
+    `【What to watch (24–48h)】\n` +
+    `3–6 observation bullets for the next 1–2 days.\n\n` +
+    `【Safe care you can do now】\n` +
+    `3–6 general, non-medical care steps (e.g. log appetite, monitor energy, water, quiet space, photos of vomit/stool). No meds or doses.\n\n` +
+    `【When to see a vet】\n` +
+    `4–8 clear warning signs (e.g. repeated vomiting, lethargy, not eating/drinking, urinary issues, bloody stool, ongoing diarrhea, breathing changes).\n\n` +
+    `If the question is unrelated to logs, still use this format and state limits in the first section.`
+  );
 }
 
 /** Pro formal weekly report — full structure; shares main daily AI quota with care-bundle / qa. */

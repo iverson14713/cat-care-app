@@ -1,6 +1,7 @@
 import {
   systemBase,
   careBundleUserPrompt,
+  qaSystemPrompt,
   qaUserPrompt,
   vetReportUserPrompt,
   weeklyReportUserPrompt,
@@ -19,7 +20,7 @@ import { appendUsageLog } from './usage-log.mjs';
 export const MAX_CONTEXT_CHARS = 48_000;
 export const MAX_QUESTION_CHARS = 8_000;
 export const CARE_MAX_TOKENS = 450;
-export const QA_MAX_TOKENS = 600;
+export const QA_MAX_TOKENS = 1500;
 export const VET_REPORT_MAX_TOKENS = 900;
 export const WEEKLY_REPORT_MAX_TOKENS = 2000;
 
@@ -301,10 +302,10 @@ async function handleCareBundle(lang, recordContext) {
 async function handleQa(lang, recordContext, question) {
   const { content, usage } = await openAiChatCompletion({
     messages: [
-      { role: 'system', content: systemBase(lang) },
+      { role: 'system', content: qaSystemPrompt(lang) },
       { role: 'user', content: qaUserPrompt(lang, recordContext, question) },
     ],
-    temperature: 0.25,
+    temperature: 0.35,
     maxTokens: QA_MAX_TOKENS,
     jsonMode: false,
   });

@@ -3,7 +3,9 @@ import type {
   AssistantCareBundleJson,
   AssistantWeeklyReportJson,
   DailyData,
+  Lang,
 } from './aiCareAssistant';
+import { getDailyItemsForPetType, getMonthlyItemsForPetType, type PetType } from './petTypes';
 import {
   applySuccessfulAiUsage,
   buildLocalAiQuota,
@@ -20,6 +22,8 @@ const DAILY_CHECKBOX_IDS = [
   'feedNight',
   'litterMorning',
   'litterNight',
+  'walkMorning',
+  'walkNight',
   'pee',
   'poop',
   'waterCan',
@@ -28,15 +32,91 @@ const DAILY_CHECKBOX_IDS = [
   'brushTeeth',
 ] as const;
 
-const MONTHLY_IDS = [
-  'changeLitter',
-  'deworming',
-  'vaccine',
-  'vetVisit',
-  'bath',
-  'nailTrim',
-  'catFood',
-] as const;
+const DAILY_LABELS: Record<Lang, Record<string, string>> = {
+  zh: {
+    feedMorning: '早上餵食',
+    feedNight: '晚上餵食',
+    litterMorning: '早上清貓砂',
+    litterNight: '晚上清貓砂',
+    walkMorning: '早上散步',
+    walkNight: '晚上散步',
+    pee: '今日排尿',
+    poop: '今日排便',
+    waterCan: '飲水／罐頭',
+    snack: '點心',
+    brushHair: '梳毛',
+    brushTeeth: '刷牙',
+  },
+  en: {
+    feedMorning: 'Morning feeding',
+    feedNight: 'Evening feeding',
+    litterMorning: 'Morning litter',
+    litterNight: 'Evening litter',
+    walkMorning: 'Morning walk',
+    walkNight: 'Evening walk',
+    pee: 'Pee today',
+    poop: 'Poop today',
+    waterCan: 'Water / wet food',
+    snack: 'Snack',
+    brushHair: 'Brushing',
+    brushTeeth: 'Teeth brushing',
+  },
+};
+
+const MONTHLY_LABELS: Record<Lang, Record<string, string>> = {
+  zh: {
+    changeLitter: '換貓砂',
+    changeLitterDog: '環境清潔',
+    deworming: '驅蟲',
+    vaccine: '疫苗',
+    vetVisit: '看診',
+    bath: '洗澡',
+    nailTrim: '剪指甲',
+    catFood: '貓糧／貓砂補貨',
+    dogFoodStock: '狗糧／尿墊補貨',
+  },
+  en: {
+    changeLitter: 'Litter change',
+    changeLitterDog: 'Environment cleaning',
+    deworming: 'Deworming',
+    vaccine: 'Vaccine',
+    vetVisit: 'Vet visit',
+    bath: 'Bath',
+    nailTrim: 'Nail trim',
+    catFood: 'Food / litter stock',
+    dogFoodStock: 'Food / pee pads stock',
+  },
+};
+
+function formatPetAgeForLlm(birthday: string | undefined, lang: Lang): string {
+  if (!birthday?.trim()) return lang === 'zh' ? '未填寫' : 'Not set';
+  const birthDate = new Date(birthday);
+  if (Number.isNaN(birthDate.getTime())) return lang === 'zh' ? '未填寫' : 'Not set';
+  const now = new Date();
+  let years = now.getFullYear() - birthDate.getFullYear();
+  const monthDiff = now.getMonth() - birthDate.getMonth();
+  const dayDiff = now.getDate() - birthDate.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) years -= 1;
+  const months = Math.max(
+    0,
+    (now.getFullYear() - birthDate.getFullYear()) * 12 +
+      now.getMonth() -
+      birthDate.getMonth() -
+      (dayDiff < 0 ? 1 : 0)
+  );
+  if (years <= 0) {
+    return lang === 'zh' ? `約 ${months} 個月` : `about ${months} months`;
+  }
+  return lang === 'zh' ? `約 ${years} 歲` : `about ${years} years`;
+}
+
+function dailyIdsForPet(petType: PetType): string[] {
+  return getDailyItemsForPetType(petType).map((i) => i.id);
+}
+
+function monthlyIdsForPet(petType: PetType): { id: string; labelKey: string }[] {
+  return getMonthlyItemsForPetType(petType).map((i) => ({ id: i.id, labelKey: i.labelKey }));
+}
 
 const API_PREFIX = '/api/assistant';
 
@@ -267,53 +347,97 @@ async function readAssistantApiError(res: Response): Promise<{ message: string; 
 /** Compact facts for the model — no image bytes. Uses recentDaysForAi (max 14d) + weights in that window only. */
 export function buildRecordContextForLlm(ctx: AssistantContext): string {
   const recent = ctx.recentDaysForAi.length ? ctx.recentDaysForAi : ctx.last7Days;
-  const oldest =
-    recent.length > 0 ? recent[recent.length - 1].date : ctx.today;
+  const oldest = recent.length > 0 ? recent[recent.length - 1].date : ctx.today;
+  const petType = ctx.petType ?? ctx.cat.petType ?? 'cat';
+  const dailyIds = dailyIdsForPet(petType);
+  const monthlyItems = monthlyIdsForPet(petType);
+  const lang = ctx.lang;
+  const labels = DAILY_LABELS[lang];
+
   const wRows = ctx.weightRecords
     .filter((w) => w.date >= oldest && w.date <= ctx.today)
+    .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 16);
 
+  const latestWeight = ctx.weightRecords
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+
   const lines: string[] = [];
-  lines.push(`Language for reply: ${ctx.lang === 'zh' ? 'Traditional Chinese (zh-TW)' : 'English'}`);
+  const zh = lang === 'zh';
+  lines.push(zh ? '--- 寵物基本資料（請優先參考） ---' : '--- Pet profile (prioritize) ---');
+  lines.push(`${zh ? '名稱' : 'Name'}: ${ctx.cat.name}`);
+  lines.push(`${zh ? '類型' : 'Species'}: ${petType === 'dog' ? (zh ? '狗' : 'Dog') : zh ? '貓' : 'Cat'}`);
+  lines.push(`${zh ? '年齡' : 'Age'}: ${formatPetAgeForLlm(ctx.cat.birthday, lang)}`);
+  lines.push(`${zh ? '品種' : 'Breed'}: ${clip(ctx.cat.breed ?? '', 120) || (zh ? '未填寫' : 'Not set')}`);
+  lines.push(`${zh ? '性別' : 'Gender'}: ${clip(ctx.cat.gender ?? '', 40) || (zh ? '未填寫' : 'Not set')}`);
+  lines.push(`${zh ? '是否結紮' : 'Neutered/spayed'}: ${clip(ctx.cat.neutered ?? '', 40) || (zh ? '未填寫' : 'Not set')}`);
+  if (latestWeight) {
+    lines.push(
+      `${zh ? '最近體重' : 'Latest weight'}: ${latestWeight.weight} kg (${latestWeight.date})${latestWeight.note ? ` | ${clip(latestWeight.note, 120)}` : ''}`
+    );
+  } else {
+    lines.push(`${zh ? '最近體重' : 'Latest weight'}: ${zh ? '無紀錄' : 'No records'}`);
+  }
+  lines.push(`${zh ? '慢性病／用藥' : 'Chronic / meds'}: ${clip(ctx.cat.chronicNote ?? '', 400) || (zh ? '無' : 'None noted')}`);
+  lines.push(`${zh ? '過敏' : 'Allergies'}: ${clip(ctx.cat.allergyNote ?? '', 300) || (zh ? '無' : 'None noted')}`);
+  lines.push(`${zh ? '常用獸醫院' : 'Vet clinic'}: ${clip(ctx.cat.vetClinic ?? '', 200) || (zh ? '未填寫' : 'Not set')}`);
+  lines.push(`${zh ? '其他備註' : 'Profile note'}: ${clip(ctx.cat.profileNote ?? '', 400) || (zh ? '無' : 'None')}`);
+  lines.push('');
+  lines.push(`Language for reply: ${zh ? 'Traditional Chinese (zh-TW)' : 'English'}`);
   lines.push(`Today (local date): ${ctx.today}`);
   lines.push(`Month key (YYYY-MM): ${ctx.monthKey}`);
-  lines.push(`Number of cats in app: ${ctx.catsCount}`);
-  lines.push(`Selected cat name: ${ctx.cat.name}`);
-  lines.push(`Cat emoji: ${ctx.cat.emoji}`);
-  lines.push(`Chronic / meds note: ${clip(ctx.cat.chronicNote ?? '', 400)}`);
-  lines.push(`Allergy note: ${clip(ctx.cat.allergyNote ?? '', 300)}`);
-  lines.push(`Preferred vet clinic: ${clip(ctx.cat.vetClinic ?? '', 200)}`);
-  lines.push(`Profile note: ${clip(ctx.cat.profileNote ?? '', 400)}`);
+  lines.push(`Number of pets in app: ${ctx.catsCount}`);
   lines.push('');
-  lines.push('--- Today daily record ---');
+  lines.push(zh ? '--- 今日照護紀錄 ---' : '--- Today daily record ---');
   const d = ctx.todayDaily;
-  for (const id of DAILY_CHECKBOX_IDS) {
-    lines.push(boolLine(d, id));
+  for (const id of dailyIds) {
+    const label = labels[id] ?? id;
+    lines.push(`${label}: ${d[id] === true ? (zh ? '是' : 'yes') : zh ? '否' : 'no'}`);
   }
-  lines.push(`abnormalNote: ${clip(strField(d, 'abnormalNote'), 600)}`);
-  lines.push(`dailyNote: ${clip(strField(d, 'dailyNote'), 600)}`);
-  lines.push(`abnormalPhotosCount: ${photoCount(d, 'abnormalPhotos')}`);
-  lines.push(`dailyPhotosCount: ${photoCount(d, 'dailyPhotos')}`);
+  lines.push(`${zh ? '異常備註' : 'abnormalNote'}: ${clip(strField(d, 'abnormalNote'), 600) || (zh ? '（無）' : '(none)')}`);
+  lines.push(`${zh ? '今日備註' : 'dailyNote'}: ${clip(strField(d, 'dailyNote'), 600) || (zh ? '（無）' : '(none)')}`);
+  lines.push(`${zh ? '異常照片數' : 'abnormalPhotosCount'}: ${photoCount(d, 'abnormalPhotos')}`);
+  lines.push(`${zh ? '今日照片數' : 'dailyPhotosCount'}: ${photoCount(d, 'dailyPhotos')}`);
   lines.push('');
-  lines.push(`--- Last ${recent.length} days for trend (max 14; newest first) ---`);
+  lines.push(
+    zh
+      ? `--- 最近 ${recent.length} 天紀錄（最多 14 天；新→舊） ---`
+      : `--- Last ${recent.length} days (max 14; newest first) ---`
+  );
   for (const day of recent) {
     const x = day.data;
-    const bits = DAILY_CHECKBOX_IDS.map((id) => `${id}=${x[id] === true ? 1 : 0}`).join(', ');
+    const bits = dailyIds
+      .map((id) => {
+        const label = labels[id] ?? id;
+        return `${label}=${x[id] === true ? 1 : 0}`;
+      })
+      .join(', ');
     const an = strField(x, 'abnormalNote');
     const dn = strField(x, 'dailyNote');
     lines.push(
-      `${day.date}: ${bits} | abnormalNote="${clip(an, 200)}" | dailyNote="${clip(dn, 200)}" | abnormalPhotos=${photoCount(x, 'abnormalPhotos')} | dailyPhotos=${photoCount(x, 'dailyPhotos')}`
+      `${day.date}: ${bits} | ${zh ? '異常' : 'abnormal'}="${clip(an, 220)}" | ${zh ? '備註' : 'note'}="${clip(dn, 220)}" | ${zh ? '異常照' : 'abnPhotos'}=${photoCount(x, 'abnormalPhotos')}`
     );
   }
   lines.push('');
-  lines.push(`--- Weight records in same window (newest first, max ${wRows.length}) ---`);
-  for (const w of wRows) {
-    lines.push(`${w.date}: ${w.weight} kg | note: ${clip(w.note, 200)}`);
+  lines.push(
+    zh
+      ? `--- 同期體重紀錄（新→舊，最多 ${wRows.length} 筆） ---`
+      : `--- Weight in same window (newest first, max ${wRows.length}) ---`
+  );
+  if (!wRows.length) {
+    lines.push(zh ? '（無）' : '(none)');
+  } else {
+    for (const w of wRows) {
+      lines.push(`${w.date}: ${w.weight} kg | ${zh ? '備註' : 'note'}: ${clip(w.note, 200) || (zh ? '無' : 'none')}`);
+    }
   }
   lines.push('');
-  lines.push('--- Monthly checklist (current month) ---');
-  for (const id of MONTHLY_IDS) {
-    lines.push(`${id}: ${ctx.monthlyCare[id] === true ? 'yes' : 'no'}`);
+  lines.push(zh ? '--- 本月定期照顧（勾選） ---' : '--- Monthly checklist (current month) ---');
+  const mLabels = MONTHLY_LABELS[lang];
+  for (const { id, labelKey } of monthlyItems) {
+    const label = mLabels[labelKey] ?? id;
+    lines.push(`${label}: ${ctx.monthlyCare[id] === true ? (zh ? '已完成' : 'done') : zh ? '未完成' : 'not done'}`);
   }
   return lines.join('\n');
 }
