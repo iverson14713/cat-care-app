@@ -16,6 +16,8 @@ export type AppWeightRecord = {
   note: string;
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function rowToApp(row: WeightRow): AppWeightRecord {
   return {
     id: row.id,
@@ -54,14 +56,25 @@ export async function upsertWeightRecordsForCat(
   if (records.length === 0) return { error: null };
   const payload = records
     .filter((r) => r.date && Number.isFinite(r.weight) && r.weight > 0)
-    .map((r) => ({
-      id: /^[0-9a-f-]{36}$/i.test(r.id) ? r.id : undefined,
-      cat_id: catId,
-      record_date: r.date,
-      weight_kg: r.weight,
-      note: r.note ?? '',
-      updated_by: updatedBy,
-    }));
+    .map((r) => {
+      const row: {
+        id?: string;
+        cat_id: string;
+        record_date: string;
+        weight_kg: number;
+        note: string;
+        updated_by: string;
+      } = {
+        cat_id: catId,
+        record_date: r.date,
+        weight_kg: r.weight,
+        note: r.note ?? '',
+        updated_by: updatedBy,
+      };
+      // Local ids are often `cat-...` from makeId(); omit id so DB default applies.
+      if (UUID_RE.test(r.id)) row.id = r.id;
+      return row;
+    });
 
   const { error } = await supabase.from('weight_records').upsert(payload, {
     onConflict: 'cat_id,record_date',

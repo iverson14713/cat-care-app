@@ -2521,7 +2521,7 @@ export default function App() {
     }
 
     const nextRecord: WeightRecord = {
-      id: makeId(),
+      id: useCloudDaily ? crypto.randomUUID() : makeId(),
       date: weightDate || today,
       weight: Math.round(value * 100) / 100,
       note: weightNote.trim(),
