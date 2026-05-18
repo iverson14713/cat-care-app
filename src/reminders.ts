@@ -44,6 +44,10 @@ export const REMINDER_TEMPLATES: ReminderTemplate[] = [
   { kind: 'vet', titleZh: '看獸醫 / 回診', titleEn: 'Vet visit', time: '09:00', repeatType: 'monthly', repeatInterval: 1 },
 ];
 
+export function remindersWithoutCat(reminders: Reminder[], catId: string): Reminder[] {
+  return reminders.filter((r) => r.catId !== catId);
+}
+
 export function getReminderLimit(plan?: 'free' | 'pro'): number {
   const p = plan ?? getAiPlan();
   return p === 'pro' ? REMINDER_LIMIT_PRO : REMINDER_LIMIT_FREE;

@@ -130,6 +130,33 @@ function mergeWeeklyBySavedAt(cloud: SavedWeeklyReport, local: SavedWeeklyReport
   return (Number.isFinite(c) && c >= l) || !Number.isFinite(l) ? cloud : local;
 }
 
+/** Remove all local data keys for a cat (after permanent delete). */
+export function purgeCatLocalStorage(catId: string): void {
+  for (const date of listLocalDailyDatesForCat(catId)) {
+    safeRemoveItem(dailyStorageKey(catId, date));
+  }
+  for (const monthKey of listLocalMonthlyKeysForCat(catId)) {
+    safeRemoveItem(monthlyStorageKey(catId, monthKey));
+  }
+  safeRemoveItem(weightStorageKey(catId));
+  try {
+    const prefix = `weekly-ai-report-${catId}-`;
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(prefix)) keys.push(k);
+    }
+    for (const k of keys) safeRemoveItem(k);
+  } catch {
+    // ignore
+  }
+  const mock = loadSharedCareMock();
+  if (mock[catId]) {
+    delete mock[catId];
+    saveSharedCareMock(mock);
+  }
+}
+
 /** Rewrite localStorage keys when an offline cat receives a cloud UUID. */
 export function rewriteCatStorageKeys(oldId: string, newId: string): void {
   for (const date of listLocalDailyDatesForCat(oldId)) {

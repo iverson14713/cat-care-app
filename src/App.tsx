@@ -59,11 +59,13 @@ import {
 import {
   migrateOfflineCatsToCloud,
   pullCloudDataIntoLocal,
+  purgeCatLocalStorage,
   pushAiUsageSnapshot,
   pushLocalDataToCloud,
   pushSharedCareForCat,
   pushWeeklyReportToCloud,
 } from './cloudDataSync';
+import { permanentlyDeleteCatForOwner } from './supabaseCatPermanentDelete';
 import { upsertDailyPhotosCloud } from './supabasePhotos';
 import { upsertUserAiPlan } from './supabaseUserPrefs';
 import type { CloudSyncPhase } from './cloudSyncTypes';
@@ -85,6 +87,7 @@ import {
   getNotificationSupport,
   getReminderLimit,
   loadReminders,
+  remindersWithoutCat,
   processDueReminders,
   REMINDER_TEMPLATES,
   repeatTypeLabel,
@@ -313,6 +316,13 @@ const text = {
     archivedCatsHint: '封存的貓咪不會出現在主畫面，資料仍保留在雲端與本機。',
     catsCloudArchiveErr: '無法封存至雲端：',
     catsCloudRestoreErr: '無法恢復至雲端：',
+    permanentlyDelete: '永久刪除',
+    permanentDeleteTitle: '永久刪除此貓咪？',
+    permanentDeleteBody:
+      '永久刪除後，\n此貓咪的歷史紀錄、照片、AI 報告、\n提醒與照護資料都將無法恢復。',
+    cancel: '取消',
+    catsCloudPermanentDeleteErr: '無法從雲端永久刪除：',
+    permanentDeleteBusy: '刪除中…',
     confirmClearToday: '確定要清除今天的紀錄嗎？',
     confirmClearMonth: '確定要清除本月定期照顧紀錄嗎？',
     photoTooMany: '照片最多只能放 3 張',
@@ -672,6 +682,13 @@ const text = {
     archivedCatsHint: 'Archived cats are hidden from the main screen; data stays in the cloud and on this device.',
     catsCloudArchiveErr: 'Could not archive in the cloud: ',
     catsCloudRestoreErr: 'Could not restore in the cloud: ',
+    permanentlyDelete: 'Delete permanently',
+    permanentDeleteTitle: 'Delete this cat permanently?',
+    permanentDeleteBody:
+      'After permanent deletion,\nall history, photos, AI reports,\nreminders, and care data for this cat cannot be recovered.',
+    cancel: 'Cancel',
+    catsCloudPermanentDeleteErr: 'Could not permanently delete from cloud: ',
+    permanentDeleteBusy: 'Deleting…',
     confirmClearToday: 'Clear today’s record?',
     confirmClearMonth: 'Clear this month’s periodic care record?',
     photoTooMany: 'You can add up to 3 photos',
@@ -1415,6 +1432,8 @@ export default function App() {
   const [sharedCareCopied, setSharedCareCopied] = useState(false);
   const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState(() => getCareDisplayName());
   const [todayCareFeedOpen, setTodayCareFeedOpen] = useState(false);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Cat | null>(null);
+  const [permanentDeleteBusy, setPermanentDeleteBusy] = useState(false);
   const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const patchSharedCare = useCallback(
@@ -2516,6 +2535,80 @@ export default function App() {
 
     setCats((prev) => prev.map((cat) => (cat.id === catId ? { ...cat, isArchived: false } : cat)));
   };
+
+  const finishLocalCatRemoval = useCallback(
+    (catId: string) => {
+      purgeCatLocalStorage(catId);
+      const nextReminders = remindersWithoutCat(reminders, catId);
+      saveReminders(nextReminders);
+      setReminders(nextReminders);
+      const sb = supabaseAuth.supabase;
+      const uid = supabaseAuth.user?.id;
+      if (sb && uid) {
+        void upsertUserReminders(sb, uid, nextReminders).then(({ error }) => {
+          if (error) console.warn('[user_reminders after cat delete]', error.message);
+        });
+      }
+      const nextCats = cats.filter((c) => c.id !== catId);
+      setCats(nextCats);
+      if (selectedCatId === catId) {
+        const nextActive = nextCats.filter((c) => !c.isArchived);
+        const next = nextActive[0];
+        if (next) {
+          setSelectedCatId(next.id);
+          setDaily(loadDailyRecord(next.id, today));
+          setMonthly(loadMonthlyRecord(next.id, month));
+          setWeightRecords(loadWeightRecords(next.id));
+        } else {
+          setDaily({});
+          setMonthly({});
+          setWeightRecords([]);
+        }
+        setHistoryRefreshKey((v) => v + 1);
+      }
+      setSharedCareMap(loadSharedCareMock());
+    },
+    [
+      cats,
+      reminders,
+      selectedCatId,
+      today,
+      month,
+      supabaseAuth.supabase,
+      supabaseAuth.user?.id,
+    ]
+  );
+
+  const confirmPermanentDeleteCat = useCallback(async () => {
+    const target = permanentDeleteTarget;
+    if (!target || !target.isArchived || permanentDeleteBusy) return;
+
+    setPermanentDeleteBusy(true);
+    try {
+      if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(target.id)) {
+        const { error } = await permanentlyDeleteCatForOwner(
+          supabaseAuth.supabase,
+          target.id,
+          target.profilePhoto
+        );
+        if (error) {
+          alert(`${tr.catsCloudPermanentDeleteErr}${error.message}`);
+          return;
+        }
+      }
+      finishLocalCatRemoval(target.id);
+      setPermanentDeleteTarget(null);
+    } finally {
+      setPermanentDeleteBusy(false);
+    }
+  }, [
+    permanentDeleteTarget,
+    permanentDeleteBusy,
+    supabaseAuth.user,
+    supabaseAuth.supabase,
+    tr.catsCloudPermanentDeleteErr,
+    finishLocalCatRemoval,
+  ]);
 
   const toggleDaily = (id: string) => {
     setDaily((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -4743,14 +4836,22 @@ export default function App() {
                   )}
                   <span className="truncate text-sm font-bold text-stone-700">{cat.name}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void restoreCat(cat.id)}
-                  className="shrink-0 rounded-full bg-orange-100 px-3 py-1.5 text-xs font-bold text-orange-800"
-                >
-                  {tr.restoreCat}
-                </button>
-              </div>
+                <div className="flex shrink-0 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void restoreCat(cat.id)}
+                    className="rounded-full bg-orange-100 px-3 py-1.5 text-xs font-bold text-orange-800"
+                  >
+                    {tr.restoreCat}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPermanentDeleteTarget(cat)}
+                    className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
+                  >
+                    {tr.permanentlyDelete}
+                  </button>
+                </div>
             ))}
           </div>
         )}
@@ -4983,6 +5084,43 @@ export default function App() {
 
         <p className="mt-6 text-center text-xs text-stone-400">{tr.savedLocal}</p>
       </div>
+
+      {permanentDeleteTarget ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="permanent-delete-title"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h2 id="permanent-delete-title" className="text-base font-bold text-stone-900">
+              {tr.permanentDeleteTitle}
+            </h2>
+            <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-stone-600">
+              {tr.permanentDeleteBody}
+            </p>
+            <p className="mt-2 text-sm font-semibold text-stone-800">「{permanentDeleteTarget.name}」</p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                disabled={permanentDeleteBusy}
+                onClick={() => setPermanentDeleteTarget(null)}
+                className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-700 disabled:opacity-50"
+              >
+                {tr.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={permanentDeleteBusy}
+                onClick={() => void confirmPermanentDeleteCat()}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+              >
+                {permanentDeleteBusy ? tr.permanentDeleteBusy : tr.permanentlyDelete}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedPhoto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
