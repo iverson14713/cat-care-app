@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Clock,
+  Crown,
+  Lock,
   Scale,
   Settings,
   Sparkles,
   Stethoscope,
   type LucideIcon,
 } from 'lucide-react';
+import { SkeletonCard, Spinner } from './components/SkeletonCard';
+import { useToast } from './context/ToastContext';
 import {
   type AssistantContext,
   type AssistantCareBundleJson,
@@ -439,6 +443,8 @@ const text = {
     authSwitchToSignUp: '還沒帳號？改為註冊',
     authSwitchToSignIn: '已有帳號？改為登入',
     authProcessing: '處理中…',
+    authBootTitle: '正在確認登入狀態…',
+    authErrGenericShort: '登入時發生問題，請稍後再試。',
     authErrNotConfigured: '尚未連線雲端服務。',
     authErrInvalid: '帳號或密碼不正確。',
     authErrEmailNotConfirmed: '請先到信箱完成驗證，再登入。',
@@ -457,6 +463,27 @@ const text = {
     cloudSyncReady: '已與雲端同步',
     cloudSyncEmpty: '雲端尚無資料（本機資料已保留）',
     cloudSyncFailed: '同步失敗',
+    syncErrorFriendly: '同步未完成，請檢查網路後重試。',
+    toastSaved: '已儲存',
+    toastSynced: '已同步',
+    toastPhotoOk: '照片上傳成功',
+    toastReminderCreated: '提醒已建立',
+    toastArchived: '已封存',
+    toastRestored: '已恢復',
+    toastDeleted: '已刪除',
+    toastAiReportDone: 'AI 報告產生完成',
+    toastGenericError: '發生問題，請稍後再試。',
+    photoUploading: '照片上傳中…',
+    emptyPetsTitle: '新增第一隻寵物，開始記錄牠的日常照護',
+    emptyPetsCta: '新增寵物',
+    emptyHistoryTitle: '還沒有照護紀錄，今天完成一次照護後就會出現在這裡',
+    emptyHistoryCta: '前往今日照護',
+    emptyPhotosTitle: '還沒有照片，新增一張照片記錄可愛瞬間',
+    emptyPhotosCta: '選擇照片',
+    emptyRemindersTitle: '還沒有提醒，設定固定照護時間比較不容易忘記',
+    emptyRemindersCta: '新增第一則提醒',
+    emptyWeeklyTitle: '累積更多照護紀錄後，就能產生 AI 週報',
+    emptyWeeklyCta: '前往今日填寫',
     cloudSyncRetry: '重試同步',
     cloudSyncPhotosNote: '照片與照護資料會加密同步至雲端（同一帳號跨裝置可見）。',
     catsCloudSaveErr: '無法寫入雲端：',
@@ -814,6 +841,8 @@ const text = {
     authSwitchToSignUp: 'No account? Switch to sign up',
     authSwitchToSignIn: 'Have an account? Switch to sign in',
     authProcessing: 'Working…',
+    authBootTitle: 'Checking sign-in…',
+    authErrGenericShort: 'Something went wrong while signing in. Please try again.',
     authErrNotConfigured: 'Cloud service is not connected.',
     authErrInvalid: 'Invalid email or password.',
     authErrEmailNotConfirmed: 'Please confirm your email from the inbox, then sign in.',
@@ -833,6 +862,27 @@ const text = {
     cloudSyncReady: 'Synced with cloud',
     cloudSyncEmpty: 'No cloud data yet (local data kept)',
     cloudSyncFailed: 'Sync failed',
+    syncErrorFriendly: 'Sync could not finish. Check your connection and try again.',
+    toastSaved: 'Saved',
+    toastSynced: 'Synced',
+    toastPhotoOk: 'Photo uploaded',
+    toastReminderCreated: 'Reminder created',
+    toastArchived: 'Archived',
+    toastRestored: 'Restored',
+    toastDeleted: 'Deleted',
+    toastAiReportDone: 'AI report is ready',
+    toastGenericError: 'Something went wrong. Please try again.',
+    photoUploading: 'Uploading photos…',
+    emptyPetsTitle: 'Add your first pet to start logging daily care.',
+    emptyPetsCta: 'Add a pet',
+    emptyHistoryTitle: 'No care history yet. Complete today’s care once and it will show up here.',
+    emptyHistoryCta: 'Go to Today',
+    emptyPhotosTitle: 'No photos yet — add one to capture a cute moment.',
+    emptyPhotosCta: 'Choose photos',
+    emptyRemindersTitle: 'No reminders yet — scheduled nudges help you stay on track.',
+    emptyRemindersCta: 'Add your first reminder',
+    emptyWeeklyTitle: 'Log a bit more daily care to unlock the AI weekly report.',
+    emptyWeeklyCta: 'Go to Today',
     cloudSyncRetry: 'Retry sync',
     cloudSyncPhotosNote: 'Photos and care data sync to the cloud for the same account on all devices.',
     catsCloudSaveErr: 'Could not save to the cloud: ',
@@ -1350,7 +1400,7 @@ function formatAuthErrorMessage(lang: Lang, err: unknown): string {
   if (low.includes('email not confirmed')) return t.authErrEmailNotConfirmed;
   if (low.includes('already registered') || low.includes('user already registered')) return t.authErrAlreadyReg;
   if (low.includes('password')) return t.authErrWeak;
-  return `${t.authErrGeneric}${msg}`;
+  return t.authErrGenericShort;
 }
 
 export default function App() {
@@ -1362,6 +1412,7 @@ export default function App() {
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   const tr = text[lang];
+  const { showToast } = useToast();
 
   const supabaseAuth = useSupabaseAuth();
   const authDisplayLabel = useMemo(() => {
@@ -1540,12 +1591,27 @@ export default function App() {
   const [cloudSyncPhase, setCloudSyncPhase] = useState<CloudSyncPhase>('idle');
   const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
   const [cloudSyncTick, setCloudSyncTick] = useState(0);
+  const [cloudDailyUiLoading, setCloudDailyUiLoading] = useState(false);
+  const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
+  const prevCloudPhaseRef = useRef<CloudSyncPhase>('idle');
   const [cloudCareEvents, setCloudCareEvents] = useState<CareEventRow[]>([]);
   const lastCloudDailyStripRef = useRef('');
   const cloudDailyFetchSeqRef = useRef(0);
   const cloudDailyHydratingRef = useRef(false);
   const cloudDailyHydratedRef = useRef(false);
   const cloudSyncRunRef = useRef(0);
+
+  useEffect(() => {
+    const prev = prevCloudPhaseRef.current;
+    const cur = cloudSyncPhase;
+    if (prev === 'syncing' && (cur === 'ready' || cur === 'empty')) {
+      showToast(tr.toastSynced, 'success');
+    }
+    if (cur === 'failed' && prev !== 'failed') {
+      showToast(tr.syncErrorFriendly, 'error');
+    }
+    prevCloudPhaseRef.current = cur;
+  }, [cloudSyncPhase, showToast, tr.toastSynced, tr.syncErrorFriendly]);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -1895,6 +1961,7 @@ export default function App() {
       const { bundle, quota } = await generateAssistantCareBundleOpenAi(ctx, meta, ac.signal);
       setAiCareBundle(bundle);
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
+      showToast(tr.toastAiReportDone, 'success');
       if (quota) {
         setAssistantQuota((prev) =>
           mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
@@ -1930,6 +1997,8 @@ export default function App() {
     appPlan,
     applyLocalAssistantQuota,
     openPremium,
+    showToast,
+    tr.toastAiReportDone,
   ]);
 
   const runOpenAiQa = useCallback(async () => {
@@ -2041,6 +2110,7 @@ export default function App() {
       const safeReport = normalizeWeeklyReport(report, lang);
       setAiWeeklyReport(safeReport);
       cloudSaveWeeklyReport(ctx.catId, ctx.today, safeReport);
+      showToast(tr.toastAiReportDone, 'success');
       setWeeklySaveHint(text[lang].weeklySavedOk);
       setAssistantQuota((prev) =>
         mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
@@ -2073,6 +2143,10 @@ export default function App() {
     aiClientId,
     assistantQuota,
     applyLocalAssistantQuota,
+    cloudSaveWeeklyReport,
+    showToast,
+    tr.toastAiReportDone,
+    pushAiUsageIfCloud,
   ]);
 
   const latestWeight = weightRecords[0];
@@ -2174,9 +2248,10 @@ export default function App() {
       }
       setReminderLimitHint(null);
       persistReminders([r, ...reminders]);
+      showToast(tr.toastReminderCreated, 'success');
       return true;
     },
-    [reminders, reminderLimit, appPlan, tr.remindersLimitReached, persistReminders, openPremium]
+    [reminders, reminderLimit, appPlan, tr.remindersLimitReached, tr.toastReminderCreated, persistReminders, openPremium, showToast]
   );
 
   const updateReminder = useCallback(
@@ -2189,8 +2264,9 @@ export default function App() {
   const deleteReminder = useCallback(
     (id: string) => {
       persistReminders(reminders.filter((r) => r.id !== id));
+      showToast(tr.toastDeleted, 'success');
     },
-    [reminders, persistReminders]
+    [reminders, persistReminders, showToast, tr.toastDeleted]
   );
 
   useEffect(() => {
@@ -2311,17 +2387,20 @@ export default function App() {
     const sb = supabaseAuth.supabase;
     const mySeq = ++cloudDailyFetchSeqRef.current;
     cloudDailyHydratingRef.current = true;
+    setCloudDailyUiLoading(true);
     let cancelled = false;
     void (async () => {
       const { data: cloudPart, error } = await fetchDailyRecordRow(sb, selectedCat.id, today);
       if (cancelled || mySeq !== cloudDailyFetchSeqRef.current) {
         cloudDailyHydratingRef.current = false;
+        setCloudDailyUiLoading(false);
         return;
       }
       if (error) {
         console.warn('[daily_records fetch]', error.message);
         cloudDailyHydratingRef.current = false;
         cloudDailyHydratedRef.current = true;
+        setCloudDailyUiLoading(false);
         return;
       }
       const localFull = loadDailyRecord(selectedCat.id, today) as unknown as DailyJson;
@@ -2331,6 +2410,7 @@ export default function App() {
       lastCloudDailyStripRef.current = JSON.stringify(stripPhotoFieldsFromDaily(merged as unknown as DailyJson));
       cloudDailyHydratingRef.current = false;
       cloudDailyHydratedRef.current = true;
+      setCloudDailyUiLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -2560,6 +2640,7 @@ export default function App() {
         if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
         else {
           setAuthMessage(text[lang].authSignedInOk);
+          showToast(text[lang].authSignedInOk, 'success');
           setAuthPassword('');
         }
       } else {
@@ -2577,7 +2658,7 @@ export default function App() {
     } finally {
       setAuthBusy(false);
     }
-  }, [authEmail, authPassword, authDisplayNameReg, authMode, supabaseAuth, lang]);
+  }, [authEmail, authPassword, authDisplayNameReg, authMode, supabaseAuth, lang, showToast]);
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
     if (!selectedCat) return;
@@ -2624,7 +2705,7 @@ export default function App() {
     if (supabaseAuth.user && supabaseAuth.supabase) {
       const { data, error } = await insertCatForOwner(supabaseAuth.supabase, supabaseAuth.user.id, base);
       if (error) {
-        alert(`${tr.catsCloudSaveErr}${error.message}`);
+        showToast(tr.toastGenericError, 'error');
         return;
       }
       if (!data) return;
@@ -2637,6 +2718,7 @@ export default function App() {
       setMonthly({});
       setWeightRecords([]);
       setHistoryRefreshKey((v) => v + 1);
+      showToast(tr.toastSaved, 'success');
       setPage('cats');
       return;
     }
@@ -2649,6 +2731,7 @@ export default function App() {
     setMonthly({});
     setWeightRecords([]);
     setHistoryRefreshKey((v) => v + 1);
+    showToast(tr.toastSaved, 'success');
     setPage('cats');
   };
 
@@ -2657,7 +2740,7 @@ export default function App() {
     if (!target || target.isArchived) return;
 
     if (activeCats.length <= 1) {
-      alert(tr.keepOneCat);
+      showToast(tr.keepOneCat, 'error');
       return;
     }
 
@@ -2668,13 +2751,14 @@ export default function App() {
     if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
       const { error } = await archiveCatForOwner(supabaseAuth.supabase, catId);
       if (error) {
-        alert(`${tr.catsCloudArchiveErr}${error.message}`);
+        showToast(tr.toastGenericError, 'error');
         return;
       }
     }
 
     const nextCats = cats.map((cat) => (cat.id === catId ? { ...cat, isArchived: true } : cat));
     setCats(nextCats);
+    showToast(tr.toastArchived, 'success');
 
     if (selectedCatId === catId) {
       const nextActive = nextCats.filter((c) => !c.isArchived);
@@ -2696,12 +2780,13 @@ export default function App() {
     if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
       const { error } = await restoreCatForOwner(supabaseAuth.supabase, catId);
       if (error) {
-        alert(`${tr.catsCloudRestoreErr}${error.message}`);
+        showToast(tr.toastGenericError, 'error');
         return;
       }
     }
 
     setCats((prev) => prev.map((cat) => (cat.id === catId ? { ...cat, isArchived: false } : cat)));
+    showToast(tr.toastRestored, 'success');
   };
 
   const finishLocalCatRemoval = useCallback(
@@ -2759,12 +2844,13 @@ export default function App() {
           target.profilePhoto
         );
         if (error) {
-          alert(`${tr.catsCloudPermanentDeleteErr}${error.message}`);
+          showToast(tr.toastGenericError, 'error');
           return;
         }
       }
       finishLocalCatRemoval(target.id);
       setPermanentDeleteTarget(null);
+      showToast(tr.toastDeleted, 'success');
     } finally {
       setPermanentDeleteBusy(false);
     }
@@ -2800,7 +2886,7 @@ export default function App() {
 
     if (availableSlots <= 0) {
       if (appPlan === 'free') openPremium('photos');
-      else alert(tr.photoTooMany);
+      else showToast(tr.photoTooMany, 'error');
       return;
     }
 
@@ -2808,6 +2894,7 @@ export default function App() {
       .filter((file) => file.type.startsWith('image/'))
       .slice(0, availableSlots);
 
+    setPhotoUploadBusy(true);
     try {
       const compressedPhotos = await Promise.all(
         selectedFiles.map((file) => compressImage(file))
@@ -2817,8 +2904,11 @@ export default function App() {
         ...prev,
         [key]: [...getPhotoList(prev[key]), ...compressedPhotos].slice(0, maxDailyPhotos),
       }));
+      if (compressedPhotos.length > 0) showToast(tr.toastPhotoOk, 'success');
     } catch {
-      alert(tr.photoLoadFail);
+      showToast(tr.toastGenericError, 'error');
+    } finally {
+      setPhotoUploadBusy(false);
     }
   };
 
@@ -2826,11 +2916,15 @@ export default function App() {
     const file = files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
 
+    setPhotoUploadBusy(true);
     try {
       const photo = await compressImage(file);
       updateSelectedCat({ profilePhoto: photo });
+      showToast(tr.toastPhotoOk, 'success');
     } catch {
-      alert(tr.photoLoadFail);
+      showToast(tr.toastGenericError, 'error');
+    } finally {
+      setPhotoUploadBusy(false);
     }
   };
 
@@ -2848,7 +2942,7 @@ export default function App() {
     const value = Number(weightValue);
 
     if (!Number.isFinite(value) || value <= 0) {
-      alert(tr.needWeight);
+      showToast(tr.needWeight, 'error');
       return;
     }
 
@@ -2901,7 +2995,7 @@ export default function App() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    alert(tr.exportDone);
+    showToast(tr.exportDone, 'success');
   };
 
   const importBackup = (files: FileList | null) => {
@@ -2910,7 +3004,7 @@ export default function App() {
 
     const reader = new FileReader();
 
-    reader.onerror = () => alert(tr.importFailed);
+    reader.onerror = () => showToast(tr.importFailed, 'error');
 
     reader.onload = () => {
       try {
@@ -2932,11 +3026,11 @@ export default function App() {
           );
         });
 
-        alert(tr.importDone);
-        window.location.reload();
+        showToast(tr.importDone, 'success');
+        window.setTimeout(() => window.location.reload(), 400);
       } catch (err) {
         console.error('[backup] import failed:', err);
-        alert(tr.importFailed);
+        showToast(tr.importFailed, 'error');
       }
     };
 
@@ -2957,9 +3051,9 @@ export default function App() {
 
     try {
       await navigator.clipboard.writeText(policy);
-      alert(tr.privacyCopied);
+      showToast(tr.privacyCopied, 'success');
     } catch {
-      alert(tr.copyFailed);
+      showToast(tr.copyFailed, 'error');
     }
   };
 
@@ -2995,6 +3089,10 @@ export default function App() {
           <p className="mt-1 text-xs text-stone-400">{tr.photoLimit}</p>
         </div>
 
+        {photos.length === 0 ? (
+          <p className="mb-3 text-center text-[13px] leading-relaxed text-stone-600">{tr.emptyPhotosTitle}</p>
+        ) : null}
+
         <div className="grid grid-cols-3 gap-3">
           {photos.map((photo, index) => (
             <div key={`${keyName}-${index}`} className="overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm">
@@ -3010,7 +3108,7 @@ export default function App() {
 
           {photos.length < maxDailyPhotos && (
             <label className={`flex aspect-square cursor-pointer items-center justify-center rounded-2xl border-2 border-dashed p-3 text-center text-sm font-bold ${buttonClass}`}>
-              + {tr.addPhoto}
+              {photos.length === 0 ? tr.emptyPhotosCta : `+ ${tr.addPhoto}`}
               <input
                 type="file"
                 accept="image/*"
@@ -3127,6 +3225,13 @@ export default function App() {
     return (
     <>
       {renderCatSwitcher()}
+
+      {(photoUploadBusy || cloudDailyUiLoading) && (
+        <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-orange-100 bg-white/95 px-3 py-2.5 text-[12px] font-medium text-stone-600 shadow-sm backdrop-blur-sm animate-fade-in">
+          <Spinner className="h-4 w-4 shrink-0 border-2" />
+          <span>{photoUploadBusy ? tr.photoUploading : tr.cloudSyncSyncing}</span>
+        </div>
+      )}
 
       <section className="mb-5 overflow-hidden rounded-3xl border border-amber-100 bg-amber-50/60 shadow-sm">
         <button
@@ -3525,8 +3630,21 @@ export default function App() {
           </div>
         </div>
 
-        {history.length === 0 ? (
-          <div className="rounded-3xl bg-white p-6 text-center text-stone-500 shadow-sm">{tr.noHistory}</div>
+        {cloudDailyUiLoading && useCloudDaily ? (
+          <div className="mb-4 space-y-3 animate-fade-in">
+            <SkeletonCard rows={4} />
+          </div>
+        ) : history.length === 0 ? (
+          <div className="animate-fade-in space-y-4 rounded-3xl border border-orange-100 bg-white p-8 text-center shadow-sm">
+            <p className="text-[15px] leading-relaxed text-stone-700">{tr.emptyHistoryTitle}</p>
+            <button
+              type="button"
+              onClick={() => setPage('today')}
+              className="w-full rounded-2xl bg-orange-500 py-3 text-[14px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99]"
+            >
+              {tr.emptyHistoryCta}
+            </button>
+          </div>
         ) : (
           <>
             <div className="sticky top-0 z-30 mb-3 space-y-2 rounded-xl border border-orange-100/90 bg-white/95 p-2.5 shadow-sm backdrop-blur-sm">
@@ -3965,6 +4083,12 @@ export default function App() {
             {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
           </button>
 
+          {aiBundleLoading && apiReady ? (
+            <div className="mt-4 animate-fade-in space-y-2">
+              <SkeletonCard rows={3} />
+            </div>
+          ) : null}
+
           <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiAnalysisCardSubtitle}</p>
 
           {dataStale && !aiBundleLoading ? (
@@ -4021,6 +4145,16 @@ export default function App() {
               <p className="mb-3 rounded-xl border border-stone-100 bg-stone-50/90 px-3 py-2.5 text-[12px] leading-snug text-stone-600">
                 {tr.weeklyFreePreview}
               </p>
+              <div className="mb-3 rounded-2xl border border-dashed border-violet-200/80 bg-violet-50/30 px-4 py-4 text-center">
+                <p className="text-[13px] leading-relaxed text-stone-700">{tr.emptyWeeklyTitle}</p>
+                <button
+                  type="button"
+                  onClick={() => setPage('today')}
+                  className="mt-3 w-full rounded-xl bg-white py-2.5 text-[12px] font-bold text-violet-800 shadow-sm ring-1 ring-violet-200 transition active:scale-[0.99]"
+                >
+                  {tr.emptyWeeklyCta}
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => openPremium('weekly')}
@@ -4063,6 +4197,18 @@ export default function App() {
                   <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400" aria-hidden />
                   {tr.aiOpenAiBusy}
                 </p>
+              ) : null}
+              {!aiWeeklyReport && !aiWeeklyLoading && !weeklyErr && apiReady ? (
+                <div className="mt-4 animate-fade-in space-y-3 rounded-2xl border border-violet-100 bg-violet-50/40 px-4 py-5 text-center">
+                  <p className="text-[14px] leading-relaxed text-stone-700">{tr.emptyWeeklyTitle}</p>
+                  <button
+                    type="button"
+                    onClick={() => setPage('today')}
+                    className="w-full rounded-2xl bg-white py-2.5 text-[13px] font-bold text-violet-800 shadow-sm ring-1 ring-violet-200 transition active:scale-[0.99]"
+                  >
+                    {tr.emptyWeeklyCta}
+                  </button>
+                </div>
               ) : null}
               {aiWeeklyReport ? (
                 <WeeklyReportErrorBoundary
@@ -4544,8 +4690,15 @@ export default function App() {
         ) : null}
 
         {reminders.length === 0 ? (
-          <div className="mb-4 rounded-2xl bg-white p-6 text-center text-sm text-stone-500 shadow-sm">
-            {tr.remindersEmpty}
+          <div className="mb-4 animate-fade-in space-y-4 rounded-2xl border border-orange-100 bg-white p-8 text-center shadow-sm">
+            <p className="text-[15px] leading-relaxed text-stone-700">{tr.emptyRemindersTitle}</p>
+            <button
+              type="button"
+              onClick={() => document.getElementById('reminders-quick-add')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="w-full rounded-2xl bg-orange-500 py-3 text-[14px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99]"
+            >
+              {tr.emptyRemindersCta}
+            </button>
           </div>
         ) : (
           <div className="mb-4 space-y-3">
@@ -4599,8 +4752,7 @@ export default function App() {
           </div>
         )}
 
-        <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-bold text-stone-900">{tr.remindersQuickAdd}</h2>
+        <section id="reminders-quick-add" className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
           <div className="mb-3">
             <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersForCat}</label>
             <select
@@ -4728,7 +4880,14 @@ export default function App() {
           <p className="text-xs leading-relaxed text-amber-950">{tr.authNotConfigured}</p>
         </div>
       ) : !supabaseAuth.authReady ? (
-        <p className="text-sm text-stone-500">{tr.authProcessing}</p>
+        <div className="space-y-3 py-2 animate-fade-in">
+          <SkeletonLine className="h-4 w-3/5" />
+          <SkeletonLine className="h-10 w-full" />
+          <div className="flex justify-center pt-2">
+            <Spinner className="h-7 w-7 border-2" />
+          </div>
+          <p className="text-center text-[11px] text-stone-500">{tr.authBootTitle}</p>
+        </div>
       ) : supabaseAuth.user ? (
         <>
           <p className="text-sm text-stone-700">
@@ -4843,23 +5002,42 @@ export default function App() {
 
       {renderAuthAccountSection()}
 
-      <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.settingsPlanSection}</h2>
-        <p className="text-sm text-stone-700">
-          {tr.settingsPlanCurrent}：
-          <span className="font-bold text-orange-600">
-            {appPlan === 'pro' ? tr.settingsPlanPro : tr.settingsPlanFree}
+      <section className="mb-4 overflow-hidden rounded-3xl border border-amber-200/80 bg-gradient-to-b from-amber-50/95 via-white to-orange-50/90 p-5 shadow-[0_12px_40px_-18px_rgba(234,88,12,0.35)]">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-amber-500 text-white shadow-md">
+            <Crown className="h-5 w-5" strokeWidth={2.2} aria-hidden />
           </span>
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-stone-500">{tr.settingsPlanHint}</p>
-        <p className="mt-1 text-xs leading-relaxed text-stone-500">{tr.settingsPaymentNote}</p>
+          <div>
+            <h2 className="text-base font-bold text-stone-900">{tr.settingsPlanSection}</h2>
+            <p className="text-[11px] text-stone-500">{tr.settingsPaymentNote}</p>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/80 bg-white/85 px-4 py-3 shadow-inner">
+          <p className="text-sm text-stone-700">
+            {tr.settingsPlanCurrent}：
+            <span className="font-bold text-orange-600">
+              {appPlan === 'pro' ? (
+                <span className="inline-flex items-center gap-1">
+                  <Crown className="inline h-3.5 w-3.5 text-amber-500" aria-hidden />
+                  {tr.settingsPlanPro}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1">
+                  <Lock className="inline h-3.5 w-3.5 text-stone-400" aria-hidden />
+                  {tr.settingsPlanFree}
+                </span>
+              )}
+            </span>
+          </p>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-stone-600">{tr.settingsPlanHint}</p>
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           {appPlan === 'free' ? (
             <button
               type="button"
               onClick={() => openPremium('general')}
-              className="rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
+              className="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3.5 text-sm font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99]"
             >
               {tr.settingsSwitchPro}
             </button>
@@ -4867,7 +5045,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => persistAppPlan('free')}
-              className="rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700"
+              className="rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition active:scale-[0.99]"
             >
               {tr.settingsSwitchFree}
             </button>
@@ -4876,7 +5054,7 @@ export default function App() {
 
         <p className="mt-4 text-[11px] leading-relaxed text-stone-400">{tr.settingsPlanServerHint}</p>
         <p className="mt-2 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
-        <p className="mt-1 break-all rounded-lg bg-stone-50 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
+        <p className="mt-1 break-all rounded-lg bg-stone-50/90 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
       </section>
 
       <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
@@ -4922,15 +5100,33 @@ export default function App() {
 
       {supabaseAuth.user && supabaseAuth.supabase ? (
         catsCloudBusy ? (
-          <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 shadow-sm">
-            {tr.catsCloudLoading}
+          <div className="mb-3 space-y-2 animate-fade-in">
+            <div className="flex items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-[12px] text-sky-900 shadow-sm">
+              <Spinner className="h-4 w-4 border-2" />
+              <span>{tr.catsCloudLoading}</span>
+            </div>
+            <SkeletonCard rows={3} />
           </div>
         ) : catsCloudErr ? (
           <div className="mb-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] leading-snug text-red-900 shadow-sm">
             {tr.catsCloudLoadErr}
-            {catsCloudErr}
+            <span className="sr-only">{catsCloudErr}</span>
+            <p className="mt-1 text-[11px] text-red-800/90">{tr.toastGenericError}</p>
           </div>
         ) : null
+      ) : null}
+
+      {activeCats.length === 0 && !catsCloudBusy ? (
+        <div className="mb-4 animate-fade-in rounded-3xl border border-orange-100 bg-white p-8 text-center shadow-sm">
+          <p className="text-[15px] font-semibold leading-relaxed text-stone-800">{tr.emptyPetsTitle}</p>
+          <button
+            type="button"
+            onClick={() => document.getElementById('add-cat-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="mt-5 w-full rounded-2xl bg-orange-500 py-3 text-[14px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99]"
+          >
+            {tr.emptyPetsCta}
+          </button>
+        </div>
       ) : null}
 
       <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
@@ -4981,7 +5177,7 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
+      <section id="add-cat-form" className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.addCat}</h2>
         <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.petType}</label>
         <div className="mb-2 flex gap-2">
@@ -5226,7 +5422,17 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
-      <div className="mx-auto max-w-md pb-24">
+      {supabaseAuth.configured && !supabaseAuth.authReady ? (
+        <div className="mx-auto max-w-md space-y-5 px-2 py-14 animate-fade-in">
+          <p className="text-center text-[14px] font-semibold text-stone-600">{tr.authBootTitle}</p>
+          <SkeletonCard rows={5} />
+          <div className="flex justify-center pt-2">
+            <Spinner className="h-10 w-10 border-[3px]" />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mx-auto max-w-md pb-24">
         <nav
           className="mb-4 select-none rounded-3xl border border-orange-100/90 bg-white p-2.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"
           aria-label={lang === 'zh' ? '主要功能' : 'Main'}
@@ -5291,7 +5497,8 @@ export default function App() {
 
         {appPlan === 'pro' ? (
           <div className="mb-3 flex justify-center">
-            <span className="rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 px-3.5 py-1 text-[11px] font-bold tracking-wide text-white shadow-md shadow-orange-300/40">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 px-3.5 py-1.5 text-[11px] font-bold tracking-wide text-white shadow-md shadow-orange-300/40">
+              <Crown className="h-3.5 w-3.5 shrink-0 text-amber-100" strokeWidth={2.5} aria-hidden />
               {tr.navProBadge}
             </span>
           </div>
@@ -5327,7 +5534,7 @@ export default function App() {
               <span>
                 {cloudSyncPhase === 'loading' && tr.cloudSyncLoading}
                 {cloudSyncPhase === 'syncing' && tr.cloudSyncSyncing}
-                {cloudSyncPhase === 'failed' && `${tr.cloudSyncFailed}${cloudSyncError ? `：${cloudSyncError}` : ''}`}
+                {cloudSyncPhase === 'failed' && tr.cloudSyncFailed}
               </span>
               {cloudSyncPhase === 'failed' ? (
                 <button
@@ -5342,6 +5549,13 @@ export default function App() {
           </div>
         ) : null}
 
+        {(cloudSyncPhase === 'loading' || cloudSyncPhase === 'syncing') && supabaseAuth.user ? (
+          <div className="mb-4 animate-fade-in">
+            <SkeletonCard rows={2} />
+          </div>
+        ) : null}
+
+        <div key={page} className="page-tab-fade">
         {page === 'today' && renderTodayPage()}
         {page === 'weight' && renderWeightPage()}
         {page === 'vet' && renderVetPage()}
@@ -5351,6 +5565,7 @@ export default function App() {
         {page === 'reminders' && renderRemindersPage()}
         {page === 'sharedCare' && renderSharedCarePage()}
         {page === 'assistant' && renderAssistantPage()}
+        </div>
 
         <p className="mt-6 text-center text-xs text-stone-400">{tr.savedLocal}</p>
       </div>
@@ -5410,6 +5625,8 @@ export default function App() {
         onClose={() => setPremiumSheetOpen(false)}
         onUpgrade={() => persistAppPlan('pro')}
       />
+        </>
+      )}
     </div>
   );
 }

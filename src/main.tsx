@@ -1,8 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App.tsx';
 import { AppErrorBoundary } from './AppErrorBoundary.tsx';
+import { ToastProvider } from './context/ToastContext.tsx';
 import { repairCorruptedLocalStorage } from './safeStorage.ts';
+import { Root } from './Root.tsx';
 import './index.css';
 
 repairCorruptedLocalStorage();
@@ -14,7 +15,9 @@ if (!rootEl) {
   createRoot(rootEl).render(
     <StrictMode>
       <AppErrorBoundary>
-        <App />
+        <ToastProvider>
+          <Root />
+        </ToastProvider>
       </AppErrorBoundary>
     </StrictMode>
   );

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useToast } from '../context/ToastContext';
 import { safeSetItem } from '../safeStorage';
 
 type ProfileProps = {
@@ -19,6 +20,7 @@ type ProfileProps = {
 };
 
 export function Profile({ profile, onSave }: ProfileProps) {
+  const { showToast } = useToast();
   const [gender, setGender] = useState(profile?.gender || 'male');
   const [age, setAge] = useState(profile?.age || 35);
   const [height, setHeight] = useState(profile?.height || 170);
@@ -43,7 +45,7 @@ export function Profile({ profile, onSave }: ProfileProps) {
       onSave(nextProfile);
     }
 
-    alert('個人資料已儲存');
+    showToast('個人資料已儲存', 'success');
   };
 
   return (

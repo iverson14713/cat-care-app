@@ -2,6 +2,9 @@ import type { Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from './supabaseClient';
 
+/** Email 驗證信導向（須與 Supabase Dashboard → Redirect URLs 白名單一致） */
+const EMAIL_AUTH_REDIRECT = 'https://cat-care-app2.vercel.app/auth/callback';
+
 export type UserProfile = {
   id: string;
   display_name: string | null;
@@ -100,6 +103,7 @@ export function useSupabaseAuth() {
         email,
         password,
         options: {
+          emailRedirectTo: EMAIL_AUTH_REDIRECT,
           data: {
             display_name: displayName?.trim() || undefined,
           },

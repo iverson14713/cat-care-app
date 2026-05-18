@@ -1,3 +1,5 @@
+import { Crown } from 'lucide-react';
+
 export type PremiumUpsellReason =
   | 'ai'
   | 'reminders'
@@ -110,7 +112,8 @@ export function PremiumUpsellSheet({ open, lang, reason, onClose, onUpgrade }: P
       >
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-stone-300/80" aria-hidden />
         <div className="max-h-[min(85vh,640px)] overflow-y-auto px-5 pb-5 pt-3">
-          <h2 id="premium-upsell-title" className="text-center text-lg font-bold tracking-tight text-stone-900">
+          <h2 id="premium-upsell-title" className="flex items-center justify-center gap-2 text-center text-lg font-bold tracking-tight text-stone-900">
+            <Crown className="h-5 w-5 shrink-0 text-amber-500" strokeWidth={2.2} aria-hidden />
             {t.title}
           </h2>
           <p className="mt-2 text-center text-[13px] leading-snug text-stone-600">{sub}</p>
@@ -118,7 +121,9 @@ export function PremiumUpsellSheet({ open, lang, reason, onClose, onUpgrade }: P
           <ul className="mt-4 space-y-2 rounded-2xl border border-orange-100/80 bg-white/70 px-4 py-3">
             {t.bullets.map((line) => (
               <li key={line} className="flex gap-2 text-[14px] leading-snug text-stone-800">
-                <span className="shrink-0 font-semibold text-orange-500">✓</span>
+                <span className="shrink-0 font-semibold text-amber-500" aria-hidden>
+                  <Crown className="h-3.5 w-3.5" strokeWidth={2.5} />
+                </span>
                 <span>{line}</span>
               </li>
             ))}
