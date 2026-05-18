@@ -1,7 +1,7 @@
 {
-  "name": "貓咪日記 Cat Calendar",
-  "short_name": "貓咪日記",
-  "description": "Cat care diary and calendar",
+  "name": "寵物日曆 Pet Calendar",
+  "short_name": "寵物日曆",
+  "description": "Pet care calendar",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f97316",

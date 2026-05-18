@@ -42,6 +42,12 @@ import {
   mergeCloudCatsWithLocal,
   updateCatForOwner,
 } from './supabaseCats';
+import {
+  defaultEmojiForPetType,
+  getDailyItemsForPetType,
+  normalizePetType,
+  type PetType,
+} from './petTypes';
 import type { CareEventRow } from './supabaseDaily';
 import {
   careEventCreatedOnLocalDate,
@@ -124,6 +130,7 @@ type Lang = 'zh' | 'en';
 type Cat = {
   id: string;
   name: string;
+  petType: PetType;
   emoji: string;
   profilePhoto?: string;
   birthday?: string;
@@ -169,19 +176,6 @@ const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const LANG_KEY = 'cat-calendar-lang';
 const MAX_PHOTOS = 3;
 
-const dailyItems: CheckItem[] = [
-  { id: 'feedMorning', labelKey: 'feedMorning', emoji: '🍖' },
-  { id: 'feedNight', labelKey: 'feedNight', emoji: '🌙' },
-  { id: 'litterMorning', labelKey: 'litterMorning', emoji: '🚽' },
-  { id: 'litterNight', labelKey: 'litterNight', emoji: '🧹' },
-  { id: 'pee', labelKey: 'pee', emoji: '💧' },
-  { id: 'poop', labelKey: 'poop', emoji: '💩' },
-  { id: 'waterCan', labelKey: 'waterCan', emoji: '🥫' },
-  { id: 'snack', labelKey: 'snack', emoji: '🍪' },
-  { id: 'brushHair', labelKey: 'brushHair', emoji: '🪮' },
-  { id: 'brushTeeth', labelKey: 'brushTeeth', emoji: '🪥' },
-];
-
 const monthlyItems: CheckItem[] = [
   { id: 'changeLitter', labelKey: 'changeLitter', emoji: '🧹' },
   { id: 'deworming', labelKey: 'deworming', emoji: '💊' },
@@ -194,15 +188,15 @@ const monthlyItems: CheckItem[] = [
 
 const text = {
   zh: {
-    appTitle: '貓咪日記',
-    appSubtitle: 'Cat Calendar',
+    appTitle: '寵物日曆',
+    appSubtitle: 'Pet Calendar',
     today: '今日',
     weight: '體重',
     history: '歷史',
     vet: '獸醫',
     cats: '系統',
     currentCat: '目前照顧',
-    switchCat: '切換貓咪',
+    switchCat: '切換寵物',
     date: '日期',
     month: '月份',
     todayProgress: '今日完成度',
@@ -244,7 +238,7 @@ const text = {
     historyFilterPhoto: '只看有照片',
     historyFilterNote: '只看有備註',
     historyFilterWeight: '只看有體重',
-    historySearchPlaceholder: '搜尋異常、備註、體重或貓咪名字…',
+    historySearchPlaceholder: '搜尋異常、備註、體重或寵物名字…',
     historyDateStart: '起始日期',
     historyDateEnd: '結束日期',
     historyPreset7d: '最近 7 天',
@@ -260,20 +254,23 @@ const text = {
     noHistory: '目前還沒有這隻貓的歷史紀錄',
     completed: '完成',
     vetReport: '獸醫報告',
-    vetReportDesc: '整理貓咪資料、體重趨勢、異常狀況、照片與備註，方便看診時給獸醫參考',
+    vetReportDesc: '整理寵物資料、體重趨勢、異常狀況、照片與備註，方便看診時給獸醫參考',
     copyForVet: '複製給獸醫',
     printPdf: '列印 / 存 PDF',
     noAbnormalHistory: '目前還沒有這隻貓的異常紀錄',
     photo: '照片',
     todayNoteTitle: '今日備註',
-    myCats: '我的貓咪',
-    catsDesc: '新增、切換不同貓咪，每隻貓會分開保存紀錄，也可以編輯貓咪個人資料',
-    catProfile: '貓咪個人資料',
+    myCats: '我的寵物',
+    catsDesc: '新增、切換不同寵物，每隻會分開保存紀錄，也可以編輯寵物個人資料',
+    catProfile: '寵物個人資料',
     catProfileDesc: '基本資料、慢性病、過敏與常用獸醫院，之後可以一起整理給獸醫看',
-    addCat: '新增貓咪',
-    catNamePlaceholder: '輸入貓咪名字，例如：火火',
+    addCat: '新增寵物',
+    catNamePlaceholder: '輸入寵物名字，例如：火火',
+    petType: '寵物類型',
+    petTypeCat: '貓',
+    petTypeDog: '狗',
     add: '新增',
-    catList: '貓咪列表',
+    catList: '寵物列表',
     selected: '目前選擇中',
     tapToSwitch: '點擊切換到這隻貓',
     delete: '刪除',
@@ -282,10 +279,10 @@ const text = {
     backupDesc: '匯出目前所有貓咪、每日紀錄、體重、照片與設定。資料會下載成 JSON 檔，換手機或清除瀏覽器前建議先備份。',
     exportBackup: '匯出備份',
     importBackup: '匯入備份',
-    importBackupDesc: '匯入之前下載的 JSON 備份檔，會覆蓋目前瀏覽器中的貓咪日記資料。',
+    importBackupDesc: '匯入之前下載的 JSON 備份檔，會覆蓋目前瀏覽器中的寵物日曆資料。',
     exportDone: '備份檔已下載',
     importDone: '備份已匯入，頁面將重新整理',
-    importFailed: '匯入失敗，請確認檔案是貓咪日記匯出的 JSON 備份',
+    importFailed: '匯入失敗，請確認檔案是寵物日曆匯出的 JSON 備份',
     privacyTitle: '隱私政策',
     privacyDesc: '目前版本不需要登入，資料主要保存在你的手機 / 電腦瀏覽器內，不會主動上傳到伺服器。',
     privacyPoint1: '我們不會要求你填寫真實姓名、電話或地址。',
@@ -301,8 +298,8 @@ const text = {
     copyFailed: '複製失敗，請手動選取內容複製',
     noReport: '目前還沒有可以複製的報告內容',
     photoCannotCopy: '照片無法直接複製到文字訊息，請在獸醫報告頁面截圖或列印給獸醫。',
-    needCatName: '請先輸入貓咪名字',
-    keepOneCat: '至少要保留一隻貓咪',
+    needCatName: '請先輸入寵物名字',
+    keepOneCat: '至少要保留一隻寵物',
     confirmArchiveCat: '確定要封存',
     archiveCatNote:
       '此貓咪將從主畫面隱藏，\n歷史紀錄與照片仍會保留，\n之後可於封存貓咪中恢復。',
@@ -335,7 +332,7 @@ const text = {
     allergyNote: '過敏 / 禁忌',
     vetClinic: '常用獸醫院',
     profileNote: '其他備註',
-    profilePhoto: '貓咪照片',
+    profilePhoto: '寵物照片',
     selectPhoto: '選擇照片',
     yearsOld: '歲',
     unknown: '未填',
@@ -360,6 +357,8 @@ const text = {
     feedNight: '晚上餵食',
     litterMorning: '早上挖貓砂',
     litterNight: '晚上挖貓砂',
+    walkMorning: '早上散步',
+    walkNight: '晚上散步',
     pee: '今天有尿尿',
     poop: '今天有大便',
     waterCan: '補水罐 / 飲水確認',
@@ -469,7 +468,7 @@ const text = {
     remindersAdd: '新增提醒',
     remindersAddCustom: '自訂提醒',
     remindersEmpty: '尚未設定提醒，可從下方快速新增。',
-    remindersForCat: '貓咪',
+    remindersForCat: '寵物',
     remindersTime: '時間',
     remindersRepeat: '重複',
     remindersTitleField: '標題',
@@ -491,7 +490,7 @@ const text = {
     sharedCareTitle: '共同照護',
     sharedCareNavHint: '與家人／室友共享同一隻貓的紀錄，資料同步於雲端。',
     sharedCareBack: '返回',
-    sharedCareCloudRequired: '請先登入並選擇已同步至雲端的貓咪，才能使用共同照護。',
+    sharedCareCloudRequired: '請先登入並選擇已同步至雲端的寵物，才能使用共同照護。',
     sharedCareMembersTitle: '共享成員',
     sharedCareMembersEmpty: '目前尚無共同照護成員',
     sharedCareRoleOwner: '主人',
@@ -509,7 +508,7 @@ const text = {
     sharedCareJoinSubmit: '加入',
     sharedCareJoinOk: '已成功加入共同照護',
     sharedCareJoinWrong: '邀請碼不正確或已失效。',
-    sharedCareJoinDuplicate: '你已經是此貓咪的成員。',
+    sharedCareJoinDuplicate: '你已經是此寵物的成員。',
     sharedCareJoinNeedLogin: '請先登入後再輸入邀請碼。',
     sharedCareActivityTitle: '最近動態',
     sharedCareActivityEmpty: '目前尚無照護動態',
@@ -558,8 +557,8 @@ const text = {
       'AI 僅提供照護觀察與提醒，\n不能作為診斷或治療依據。\n如症狀持續或惡化，請諮詢獸醫。',
   },
   en: {
-    appTitle: 'Cat Diary',
-    appSubtitle: 'Cat Calendar',
+    appTitle: 'Pet Calendar',
+    appSubtitle: '',
     today: 'Today',
     weight: 'Weight',
     history: 'History',
@@ -630,14 +629,17 @@ const text = {
     noAbnormalHistory: 'No abnormal records for this cat yet',
     photo: 'Photos',
     todayNoteTitle: 'Daily note',
-    myCats: 'My cats',
-    catsDesc: 'Add and switch cats. Each cat has separate records and profile details',
-    catProfile: 'Cat profile',
+    myCats: 'My pets',
+    catsDesc: 'Add and switch pets. Each pet has separate records and profile details',
+    catProfile: 'Pet profile',
     catProfileDesc: 'Basic info, chronic conditions, allergies, and preferred vet clinic',
-    addCat: 'Add cat',
-    catNamePlaceholder: 'Enter cat name, e.g. Momo',
+    addCat: 'Add pet',
+    catNamePlaceholder: 'Enter pet name, e.g. Momo',
+    petType: 'Pet type',
+    petTypeCat: 'Cat',
+    petTypeDog: 'Dog',
     add: 'Add',
-    catList: 'Cat list',
+    catList: 'Pet list',
     selected: 'Selected',
     tapToSwitch: 'Tap to switch to this cat',
     delete: 'Delete',
@@ -646,10 +648,10 @@ const text = {
     backupDesc: 'Export all cats, daily records, weights, photos, and settings as a JSON file. Please back up before switching phones or clearing browser data.',
     exportBackup: 'Export backup',
     importBackup: 'Import backup',
-    importBackupDesc: 'Import a JSON backup file downloaded from Cat Diary. This will overwrite current Cat Diary data in this browser.',
+    importBackupDesc: 'Import a JSON backup file downloaded from Pet Calendar. This will overwrite current Pet Calendar data in this browser.',
     exportDone: 'Backup file downloaded',
     importDone: 'Backup imported. The page will reload.',
-    importFailed: 'Import failed. Please choose a valid Cat Diary JSON backup file.',
+    importFailed: 'Import failed. Please choose a valid Pet Calendar JSON backup file.',
     privacyTitle: 'Privacy policy',
     privacyDesc: 'This version does not require login. Records are mainly saved in your phone / computer browser and are not actively uploaded to a server.',
     privacyPoint1: 'We do not ask for your real name, phone number, or address.',
@@ -724,6 +726,8 @@ const text = {
     feedNight: 'Evening feeding',
     litterMorning: 'Morning litter scooping',
     litterNight: 'Evening litter scooping',
+    walkMorning: 'Morning walk',
+    walkNight: 'Evening walk',
     pee: 'Pee today',
     poop: 'Poop today',
     waterCan: 'Water / wet food check',
@@ -1004,7 +1008,7 @@ function dedupeWeightRecordsByDate(records: WeightRecord[]): WeightRecord[] {
 }
 
 const DEFAULT_CATS: Cat[] = [
-  { id: 'default-cat', name: '我的貓咪', emoji: '🐱' },
+  { id: 'default-cat', name: '我的貓咪', petType: 'cat', emoji: '🐱' },
 ];
 
 function mapStoredCat(cat: unknown): Cat {
@@ -1012,7 +1016,11 @@ function mapStoredCat(cat: unknown): Cat {
   return {
     id: typeof c.id === 'string' ? c.id : makeId(),
     name: typeof c.name === 'string' ? c.name : '我的貓咪',
-    emoji: typeof c.emoji === 'string' ? c.emoji : '🐱',
+    petType: normalizePetType(c.petType),
+    emoji:
+      typeof c.emoji === 'string' && c.emoji
+        ? c.emoji
+        : defaultEmojiForPetType(normalizePetType(c.petType)),
     profilePhoto: typeof c.profilePhoto === 'string' ? c.profilePhoto : '',
     birthday: typeof c.birthday === 'string' ? c.birthday : '',
     gender: typeof c.gender === 'string' ? c.gender : '',
@@ -1379,6 +1387,7 @@ export default function App() {
 
   const [page, setPage] = useState<Page>('today');
   const [newCatName, setNewCatName] = useState('');
+  const [newCatPetType, setNewCatPetType] = useState<PetType>('cat');
   const [multiCatHint, setMultiCatHint] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [historyJumpDate, setHistoryJumpDate] = useState('');
@@ -1526,9 +1535,15 @@ export default function App() {
   const abnormalPhotos = getPhotoList(daily.abnormalPhotos);
   const dailyPhotos = getPhotoList(daily.dailyPhotos);
 
+  const selectedPetType = selectedCat?.petType ?? 'cat';
+  const dailyItemsForPet = useMemo(
+    () => getDailyItemsForPetType(selectedPetType),
+    [selectedPetType]
+  );
+
   const dailyDone = useMemo(
-    () => dailyItems.filter((item) => daily[item.id] === true).length,
-    [daily]
+    () => dailyItemsForPet.filter((item) => daily[item.id] === true).length,
+    [daily, dailyItemsForPet]
   );
 
   const monthlyDone = useMemo(
@@ -1536,7 +1551,7 @@ export default function App() {
     [monthly]
   );
 
-  const dailyPercent = Math.round((dailyDone / dailyItems.length) * 100);
+  const dailyPercent = Math.round((dailyDone / dailyItemsForPet.length) * 100);
   const monthlyPercent = Math.round((monthlyDone / monthlyItems.length) * 100);
 
   const history = useMemo(() => {
@@ -2525,7 +2540,8 @@ export default function App() {
     const base: Cat = {
       id: supabaseAuth.user && supabaseAuth.supabase ? crypto.randomUUID() : makeId(),
       name,
-      emoji: '🐱',
+      petType: newCatPetType,
+      emoji: defaultEmojiForPetType(newCatPetType),
       profilePhoto: '',
       birthday: '',
       gender: '',
@@ -2548,6 +2564,7 @@ export default function App() {
       const created = data as Cat;
       setCats((prev) => [...prev, created]);
       setNewCatName('');
+      setNewCatPetType('cat');
       setSelectedCatId(created.id);
       setDaily({});
       setMonthly({});
@@ -2559,6 +2576,7 @@ export default function App() {
 
     setCats((prev) => [...prev, base]);
     setNewCatName('');
+    setNewCatPetType('cat');
     setSelectedCatId(base.id);
     setDaily({});
     setMonthly({});
@@ -3096,7 +3114,7 @@ export default function App() {
           </div>
           <div className="shrink-0 text-right">
             <p className="text-lg font-bold tabular-nums text-orange-600">{dailyPercent}%</p>
-            <p className="text-[10px] text-stone-400">{dailyDone}/{dailyItems.length}</p>
+            <p className="text-[10px] text-stone-400">{dailyDone}/{dailyItemsForPet.length}</p>
           </div>
         </div>
         <div className="mt-2.5">
@@ -3114,7 +3132,7 @@ export default function App() {
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          {dailyItems.map((item) => (
+          {dailyItemsForPet.map((item) => (
             <button
               key={item.id}
               onClick={() => toggleDaily(item.id)}
@@ -3341,8 +3359,8 @@ export default function App() {
     ];
 
     const renderHistoryDayCard = (record: { date: string; data: DailyRecord }) => {
-      const done = dailyItems.filter((item) => record.data[item.id] === true).length;
-      const percent = Math.round((done / dailyItems.length) * 100);
+      const done = dailyItemsForPet.filter((item) => record.data[item.id] === true).length;
+      const percent = Math.round((done / dailyItemsForPet.length) * 100);
       const recordAbnormalNote = typeof record.data.abnormalNote === 'string' ? record.data.abnormalNote : '';
       const recordDailyNote = typeof record.data.dailyNote === 'string' ? record.data.dailyNote : '';
       const recordAbnormalPhotos = getPhotoList(record.data.abnormalPhotos);
@@ -3358,7 +3376,7 @@ export default function App() {
             <div>
               <h2 className="text-lg font-bold">{record.date}</h2>
               <p className="text-sm text-stone-500">
-                {tr.completed} {done}/{dailyItems.length}（{percent}%）
+                {tr.completed} {done}/{dailyItemsForPet.length}（{percent}%）
               </p>
             </div>
             <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-bold text-orange-700">{percent}%</span>
@@ -3369,7 +3387,7 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-sm">
-            {dailyItems.map((item) => (
+            {dailyItemsForPet.map((item) => (
               <div key={item.id} className={`rounded-2xl px-3 py-2 ${record.data[item.id] === true ? 'bg-green-50 text-green-700' : 'bg-stone-50 text-stone-400'}`}>
                 <span className="mr-1">{item.emoji}</span>
                 {tr[item.labelKey as keyof typeof tr]}
@@ -4872,6 +4890,23 @@ export default function App() {
 
       <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.addCat}</h2>
+        <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.petType}</label>
+        <div className="mb-2 flex gap-2">
+          {(['cat', 'dog'] as PetType[]).map((pt) => (
+            <button
+              key={pt}
+              type="button"
+              onClick={() => setNewCatPetType(pt)}
+              className={`flex-1 rounded-xl border py-2 text-sm font-bold transition ${
+                newCatPetType === pt
+                  ? 'border-orange-400 bg-orange-50 text-orange-800'
+                  : 'border-stone-200 bg-white text-stone-600'
+              }`}
+            >
+              {pt === 'cat' ? `🐱 ${tr.petTypeCat}` : `🐶 ${tr.petTypeDog}`}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-2">
           <input
             value={newCatName}
@@ -4964,7 +4999,9 @@ export default function App() {
                 <img src={selectedCat.profilePhoto} alt={selectedCat.name} className="h-full w-full object-cover" />
               </button>
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-3xl">🐱</div>
+              <div className="flex h-full w-full items-center justify-center text-3xl">
+                {selectedCat?.emoji ?? defaultEmojiForPetType(selectedCat?.petType ?? 'cat')}
+              </div>
             )}
           </div>
           <div className="min-w-0 flex-1">
@@ -4985,6 +5022,30 @@ export default function App() {
         </div>
 
         <div className="space-y-2">
+          <div>
+            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.petType}</label>
+            <div className="flex gap-2">
+              {(['cat', 'dog'] as PetType[]).map((pt) => (
+                <button
+                  key={pt}
+                  type="button"
+                  onClick={() =>
+                    updateSelectedCat({
+                      petType: pt,
+                      emoji: defaultEmojiForPetType(pt),
+                    })
+                  }
+                  className={`flex-1 rounded-xl border py-2 text-sm font-bold transition ${
+                    (selectedCat?.petType ?? 'cat') === pt
+                      ? 'border-orange-400 bg-orange-50 text-orange-800'
+                      : 'border-stone-200 bg-white text-stone-600'
+                  }`}
+                >
+                  {pt === 'cat' ? `🐱 ${tr.petTypeCat}` : `🐶 ${tr.petTypeDog}`}
+                </button>
+              ))}
+            </div>
+          </div>
           {renderProfileInput(tr.name, selectedCat?.name, 'name', tr.catNamePlaceholder)}
           <div className="grid grid-cols-2 gap-2">
             <div>

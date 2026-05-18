@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { defaultEmojiForPetType, normalizePetType, type PetType } from './petTypes';
 
 export type CatRow = {
   id: string;
@@ -42,7 +43,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const CAT_SELECT_BASE =
   'id, owner_id, name, emoji, profile_photo, birthday, gender, breed, neutered, chip_no, chronic_note, allergy_note, vet_clinic, profile_note, created_at, updated_at';
 
-const CAT_SELECT = `${CAT_SELECT_BASE}, is_archived`;
+const CAT_SELECT = `${CAT_SELECT_BASE}, is_archived, pet_type`;
 
 /** Shown when DB migration 20260519120000_cats_is_archived.sql has not been applied yet. */
 export const CATS_ARCHIVE_MIGRATION_HINT =
@@ -50,6 +51,14 @@ export const CATS_ARCHIVE_MIGRATION_HINT =
 
 function isArchivedColumnError(message: string): boolean {
   return /is_archived/i.test(message) && /(does not exist|schema cache|column)/i.test(message);
+}
+
+function isPetTypeColumnError(message: string): boolean {
+  return /pet_type/i.test(message) && /(does not exist|schema cache|column)/i.test(message);
+}
+
+function isOptionalCatsColumnError(message: string): boolean {
+  return isArchivedColumnError(message) || isPetTypeColumnError(message);
 }
 
 function archiveMigrationError(): Error {
@@ -61,10 +70,12 @@ export function isCloudCatId(id: string): boolean {
 }
 
 export function rowToAppCat(row: CatRow): AppCat {
+  const petType = normalizePetType(row.pet_type);
   return {
     id: row.id,
     name: row.name,
-    emoji: row.emoji,
+    petType,
+    emoji: row.emoji || defaultEmojiForPetType(petType),
     profilePhoto: row.profile_photo ?? '',
     birthday: row.birthday ?? '',
     gender: row.gender ?? '',
@@ -90,6 +101,7 @@ export function mergeCloudCatsWithLocal(cloud: AppCat[], local: AppCat[]): AppCa
       byId.set(c.id, {
         ...cloudCat,
         isArchived: cloudCat.isArchived ?? c.isArchived,
+        petType: cloudCat.petType ?? c.petType,
       });
     }
   }
@@ -106,7 +118,7 @@ export async function fetchCatsForUser(
 ): Promise<{ data: AppCat[]; error: Error | null }> {
   let { data, error } = await supabase.from('cats').select(CAT_SELECT).order('created_at', { ascending: true });
 
-  if (error && isArchivedColumnError(error.message)) {
+  if (error && isOptionalCatsColumnError(error.message)) {
     const legacy = await supabase.from('cats').select(CAT_SELECT_BASE).order('created_at', { ascending: true });
     data = legacy.data;
     error = legacy.error;
@@ -115,7 +127,9 @@ export async function fetchCatsForUser(
   if (error) return { data: [], error: new Error(error.message) };
   const rows = (data ?? []) as CatRow[];
   return {
-    data: rows.map((r) => rowToAppCat({ ...r, is_archived: r.is_archived ?? false })),
+    data: rows.map((r) =>
+      rowToAppCat({ ...r, is_archived: r.is_archived ?? false, pet_type: r.pet_type ?? 'cat' })
+    ),
     error: null,
   };
 }
@@ -126,11 +140,13 @@ export async function insertCatForOwner(
   cat: AppCat
 ): Promise<{ data: AppCat | null; error: Error | null }> {
   const id = isCloudCatId(cat.id) ? cat.id : crypto.randomUUID();
+  const petType = normalizePetType(cat.petType);
   const base = {
     id,
     owner_id: ownerId,
     name: cat.name,
-    emoji: cat.emoji || '🐱',
+    emoji: cat.emoji || defaultEmojiForPetType(petType),
+    pet_type: petType,
     profile_photo: cat.profilePhoto ?? '',
     birthday: cat.birthday ?? '',
     gender: cat.gender ?? '',
@@ -149,14 +165,29 @@ export async function insertCatForOwner(
     .select(CAT_SELECT)
     .single();
 
+  if (error && isPetTypeColumnError(error.message)) {
+    const { pet_type: _pt, ...withoutPetType } = base;
+    const retry = await supabase
+      .from('cats')
+      .insert({ ...withoutPetType, is_archived: false })
+      .select(`${CAT_SELECT_BASE}, is_archived`)
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+
   if (error && isArchivedColumnError(error.message)) {
-    const legacy = await supabase.from('cats').insert(base).select(CAT_SELECT_BASE).single();
+    const { pet_type: _pt, ...withoutPetType } = base;
+    const legacy = await supabase.from('cats').insert(withoutPetType).select(CAT_SELECT_BASE).single();
     data = legacy.data;
     error = legacy.error;
   }
 
   if (error) return { data: null, error: new Error(error.message) };
-  return { data: rowToAppCat({ ...(data as CatRow), is_archived: false }), error: null };
+  return {
+    data: rowToAppCat({ ...(data as CatRow), is_archived: false, pet_type: petType }),
+    error: null,
+  };
 }
 
 export async function updateCatForOwner(
@@ -164,9 +195,11 @@ export async function updateCatForOwner(
   cat: AppCat
 ): Promise<{ error: Error | null }> {
   if (!isCloudCatId(cat.id)) return { error: null };
+  const petType = normalizePetType(cat.petType);
   const payload = {
     name: cat.name,
-    emoji: cat.emoji || '🐱',
+    emoji: cat.emoji || defaultEmojiForPetType(petType),
+    pet_type: petType,
     profile_photo: cat.profilePhoto ?? '',
     birthday: cat.birthday ?? '',
     gender: cat.gender ?? '',
@@ -178,7 +211,12 @@ export async function updateCatForOwner(
     vet_clinic: cat.vetClinic ?? '',
     profile_note: cat.profileNote ?? '',
   };
-  const { error } = await supabase.from('cats').update(payload).eq('id', cat.id);
+  let { error } = await supabase.from('cats').update(payload).eq('id', cat.id);
+  if (error && isPetTypeColumnError(error.message)) {
+    const { pet_type: _pt, ...withoutPetType } = payload;
+    const retry = await supabase.from('cats').update(withoutPetType).eq('id', cat.id);
+    error = retry.error;
+  }
   if (error) return { error: new Error(error.message) };
   return { error: null };
 }
