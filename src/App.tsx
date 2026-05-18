@@ -502,6 +502,9 @@ const text = {
     sharedCareSaveName: '儲存',
     sharedCareTodayFeedTitle: '今日照護動態',
     sharedCareTodayFeedDemo: '以下為示範文案；連接雲端後會顯示真實紀錄。',
+    sharedCareTodayFeedTap: '點開查看',
+    sharedCareTodayFeedCollapse: '收合',
+    sharedCareTodayFeedCount: '則動態',
     sharedCareDemoLine1: 'Wayne 於 21:30 記錄了晚餐',
     sharedCareDemoLine2: 'Amy 上傳了異常照片',
     proTeaserHistorySearch: '歷史篩選與搜尋',
@@ -853,6 +856,9 @@ const text = {
     sharedCareSaveName: 'Save',
     sharedCareTodayFeedTitle: 'Today’s care feed',
     sharedCareTodayFeedDemo: 'Sample lines below; real entries will appear after cloud sync.',
+    sharedCareTodayFeedTap: 'Tap to expand',
+    sharedCareTodayFeedCollapse: 'Collapse',
+    sharedCareTodayFeedCount: 'updates',
     sharedCareDemoLine1: 'Wayne logged dinner at 21:30',
     sharedCareDemoLine2: 'Amy uploaded an abnormal photo',
     proTeaserHistorySearch: 'History filter & search',
@@ -1378,6 +1384,7 @@ export default function App() {
   const [sharedCareFeedback, setSharedCareFeedback] = useState<string | null>(null);
   const [sharedCareCopied, setSharedCareCopied] = useState(false);
   const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState(() => getCareDisplayName());
+  const [todayCareFeedOpen, setTodayCareFeedOpen] = useState(false);
   const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const patchSharedCare = useCallback(
@@ -2793,36 +2800,67 @@ export default function App() {
     const todayCloudFeed = useCloudDaily
       ? cloudCareEvents.filter((e) => careEventCreatedOnLocalDate(e.created_at, today)).slice(0, 12)
       : [];
+    const todayActivityCount =
+      todayCloudFeed.length + (sharedCareToday?.activities?.length ?? 0);
+    const hasRealTodayFeed = todayActivityCount > 0;
 
     return (
     <>
       {renderCatSwitcher()}
 
-      <section className="mb-5 rounded-3xl border border-amber-100 bg-amber-50/60 p-4 shadow-sm">
-        <h2 className="text-base font-bold text-stone-900">{tr.sharedCareTodayFeedTitle}</h2>
-        <p className="mt-1 text-xs text-stone-500">{tr.sharedCareTodayFeedDemo}</p>
-        <ul className="mt-3 space-y-2 text-sm text-stone-700">
-          {todayCloudFeed.map((e) => (
-            <li key={e.id}>
-              <span className="font-semibold text-stone-900">{e.actor}</span>
-              <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
-              <span> — {e.summary}</span>
-            </li>
-          ))}
-          {(sharedCareToday?.activities ?? []).slice(0, 8).map((a) => (
-            <li key={a.id}>
-              <span className="font-semibold text-stone-900">{a.actor}</span>
-              <span className="text-stone-400"> · {a.timeLabel}</span>
-              <span> — {a.summary}</span>
-            </li>
-          ))}
-          {!todayCloudFeed.length && !sharedCareToday?.activities?.length ? (
-            <>
-              <li>{tr.sharedCareDemoLine1}</li>
-              <li>{tr.sharedCareDemoLine2}</li>
-            </>
-          ) : null}
-        </ul>
+      <section className="mb-5 overflow-hidden rounded-3xl border border-amber-100 bg-amber-50/60 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setTodayCareFeedOpen((open) => !open)}
+          className="flex w-full items-center gap-3 p-4 text-left transition active:bg-amber-100/50"
+          aria-expanded={todayCareFeedOpen}
+        >
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold text-stone-900">{tr.sharedCareTodayFeedTitle}</h2>
+            <p className="mt-0.5 text-xs text-stone-500">
+              {todayCareFeedOpen
+                ? tr.sharedCareTodayFeedCollapse
+                : hasRealTodayFeed
+                  ? `${todayActivityCount} ${tr.sharedCareTodayFeedCount} · ${tr.sharedCareTodayFeedTap}`
+                  : tr.sharedCareTodayFeedTap}
+            </p>
+          </div>
+          <span
+            className={`shrink-0 text-stone-400 transition-transform duration-200 ${todayCareFeedOpen ? 'rotate-180' : ''}`}
+            aria-hidden
+          >
+            ▼
+          </span>
+        </button>
+        {todayCareFeedOpen ? (
+          <div className="border-t border-amber-100/80 px-4 pb-4 pt-1">
+            {!hasRealTodayFeed ? (
+              <p className="mb-2 text-xs text-stone-500">{tr.sharedCareTodayFeedDemo}</p>
+            ) : null}
+            <ul className="space-y-2 text-sm text-stone-700">
+              {todayCloudFeed.map((e) => (
+                <li key={e.id}>
+                  <span className="font-semibold text-stone-900">{e.actor}</span>
+                  <span className="text-stone-400"> · {formatCareEventTimeLabel(e.created_at)}</span>
+                  <span> — {e.summary}</span>
+                </li>
+              ))}
+              {(sharedCareToday?.activities ?? []).slice(0, 8).map((a) => (
+                <li key={a.id}>
+                  <span className="font-semibold text-stone-900">{a.actor}</span>
+                  <span className="text-stone-400"> · {a.timeLabel}</span>
+                  <span> — {a.summary}</span>
+                </li>
+              ))}
+              {!hasRealTodayFeed ? (
+                <>
+                  <li>{tr.sharedCareDemoLine1}</li>
+                  <li>{tr.sharedCareDemoLine2}</li>
+                </>
+              ) : null}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       <div className="mb-4 rounded-2xl border border-orange-100/90 bg-white px-3.5 py-3 shadow-sm">
