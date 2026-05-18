@@ -28,7 +28,7 @@ const copy: Record<
   zh: {
     title: '🐾 升級 Pro 解鎖完整照護',
     bullets: [
-      'AI 每日 30 次',
+      '每日 30 次 AI（整理重點、照護助理、週報與隨口問共用）',
       'AI 週報',
       '無限提醒',
       '多寵物管理',
@@ -46,7 +46,7 @@ const copy: Record<
       reminders: '提醒數量已達免費版上限。',
       pets: '寵物數量已達免費版上限（最多 3 隻）。',
       weekly: 'AI 正式週報為 Pro 專屬功能。',
-      history: '完整歷史搜尋為 Pro 功能；免費版可搜尋最近 30 天。',
+      history: '完整關鍵字與進階篩選為 Pro；免費版可使用「最近 7 天／30 天／本月」日期篩選。',
       pdf: 'PDF 匯出為 Pro 功能。',
       photos: '每日照片已達免費版上限，升級可上傳更多張。',
       general: '此功能需要 Pro，升級即可解鎖。',
@@ -55,7 +55,7 @@ const copy: Record<
   en: {
     title: '🐾 Upgrade to Pro',
     bullets: [
-      '30 AI uses per day',
+      '30 shared AI uses/day (vet highlights, assistant, weekly, Q&A)',
       'AI weekly report',
       'Unlimited reminders',
       'Unlimited pets',
@@ -73,7 +73,7 @@ const copy: Record<
       reminders: "You've reached the free reminder limit.",
       pets: 'Free plan supports up to 3 pets.',
       weekly: 'The full AI weekly report is a Pro feature.',
-      history: 'Full history search is Pro; free search covers the last 30 days.',
+      history: 'Full keyword search and advanced filters are Pro; free plan uses quick date ranges (7 / 30 days / this month).',
       pdf: 'PDF export is a Pro feature.',
       photos: "You've reached the free daily photo limit.",
       general: 'This feature requires Pro.',

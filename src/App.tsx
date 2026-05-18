@@ -10,7 +10,7 @@ import {
   Stethoscope,
   type LucideIcon,
 } from 'lucide-react';
-import { SkeletonCard, Spinner } from './components/SkeletonCard';
+import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
 import { useToast } from './context/ToastContext';
 import {
   type AssistantContext,
@@ -21,7 +21,6 @@ import {
 import { buildLocalAiQuota, getOrCreateClientId, getAiPlan, setAiPlan } from './aiClient';
 import {
   FREE_MAX_ACTIVE_PETS,
-  getFreeHistorySearchDateFloor,
   getMaxDailyPhotos,
   type AppPlan,
 } from './planLimits';
@@ -250,7 +249,7 @@ const text = {
     historyPickDateFirst: '請先選擇日期',
     historyJumpNoMatch: '找不到此日期的紀錄',
     historyBackLatest: '回到最新',
-    historyRoadmap: '快速跳轉仍可使用；下方可篩選與搜尋（免費版限最近 30 天）。',
+    historyRoadmap: '快速跳轉仍可使用；免費版進階篩選與關鍵字為 Pro 功能，日期請用下方快捷（7 天／30 天／本月）。',
     historySearchTitle: '篩選與搜尋',
     historyAdvancedFilters: '進階篩選',
     historyHideFilters: '收合篩選',
@@ -270,8 +269,10 @@ const text = {
     historyTagNote: '備註',
     historyTagWeight: '體重',
     historyNoResults: '找不到符合條件的紀錄',
-    historyFreeSearchNote: '免費版歷史搜尋限最近 30 天；升級 Pro 可搜尋完整紀錄。',
-    historyUnlockFullSearch: '解鎖完整歷史搜尋',
+    historyFreeSearchNote:
+      '免費版可使用「最近 7 天／30 天／本月」篩選日期；關鍵字與進階篩選（異常、照片、備註、體重）為 Pro 功能。',
+    historyUnlockFullSearch: '升級 Pro 解鎖完整搜尋',
+    historyKeywordProHint: '🔒 關鍵字搜尋為 Pro 功能，點此升級',
     historyClearFilters: '清除篩選',
     noHistory: '目前還沒有這隻寵物的歷史紀錄',
     completed: '完成',
@@ -424,10 +425,12 @@ const text = {
     aiOpenAiBusy: '正在整理…',
     aiOpenAiFail: '這次沒成功：',
     assistantSendBusy: '處理中…',
-    aiQuotaLine: '今天剩餘 AI 次數：{{remaining}} / {{limit}}',
+    aiQuotaLine: '今日 AI 次數：{{used}} / {{limit}}',
     aiQuotaExhaustedTitle: '今日 AI 次數已用完',
     aiQuotaExhaustedUpgradeFree: '升級 Pro 可獲得更多 AI 次數',
     settingsTitle: '方案與設定',
+    settingsAiQuotaTitle: '今日 AI 次數',
+    settingsAiQuotaHint: '含獸醫報告「整理重點」、照護助理、週報與隨口問 AI；每日重新計算。',
     settingsBack: '返回系統',
     authAccountSection: '帳號與登入',
     authNotConfigured: '雲端登入尚未開放。請確認伺服器已完成雲端連線設定後，重新整理此頁面。',
@@ -598,7 +601,7 @@ const text = {
     proTeaserRoadmap: 'Pro 功能規劃中',
     proTeaserAdvancedVet: '進階獸醫報告',
     aiErrRate: '問得太快啦，休息一下再試。',
-    aiAssistantApiErrorPrefix: 'AI 服務錯誤：',
+    aiAssistantGenericFail: 'AI 暫時無法回覆，請稍後再試。',
     aiDisclaimerFoot:
       '以上僅為照護觀察與提醒，不能取代獸醫診斷；若症狀持續或惡化，請諮詢獸醫。',
   },
@@ -647,7 +650,8 @@ const text = {
     historyPickDateFirst: 'Pick a date first',
     historyJumpNoMatch: 'No saved record for that date',
     historyBackLatest: 'Back to latest',
-    historyRoadmap: 'Jump-to-date still works; filter and search below (free plan: last 30 days).',
+    historyRoadmap:
+      'Jump-to-date still works. Advanced filters and keyword search are Pro; free plan uses quick ranges (7 / 30 days / this month).',
     historySearchTitle: 'Filter & search',
     historyAdvancedFilters: 'Advanced filters',
     historyHideFilters: 'Hide filters',
@@ -667,8 +671,10 @@ const text = {
     historyTagNote: 'Note',
     historyTagWeight: 'Weight',
     historyNoResults: 'No records match your filters',
-    historyFreeSearchNote: 'Free plan: history search covers the last 30 days. Upgrade to Pro for full search.',
-    historyUnlockFullSearch: 'Unlock full history search',
+    historyFreeSearchNote:
+      'Free plan: use Last 7 / 30 days / This month for dates. Keyword search and advanced chips (abnormal, photos, notes, weight) are Pro.',
+    historyUnlockFullSearch: 'Upgrade to Pro for full search',
+    historyKeywordProHint: '🔒 Keyword search is Pro — tap to upgrade',
     historyClearFilters: 'Clear filters',
     noHistory: 'No history for this pet yet',
     completed: 'Completed',
@@ -821,10 +827,12 @@ const text = {
     aiOpenAiBusy: 'Putting it together…',
     aiOpenAiFail: 'Something went wrong: ',
     assistantSendBusy: 'Working…',
-    aiQuotaLine: 'AI uses remaining today: {{remaining}} / {{limit}}',
+    aiQuotaLine: 'AI uses today: {{used}} / {{limit}}',
     aiQuotaExhaustedTitle: "Today's AI quota is used up.",
     aiQuotaExhaustedUpgradeFree: 'Upgrade to Pro for more daily AI uses.',
     settingsTitle: 'Plan & settings',
+    settingsAiQuotaTitle: 'AI uses today',
+    settingsAiQuotaHint: 'Shared across vet report highlights, care assistant, weekly report, and Q&A. Resets daily.',
     settingsBack: 'Back to system',
     authAccountSection: 'Account',
     authNotConfigured:
@@ -998,7 +1006,7 @@ const text = {
     proTeaserRoadmap: 'Planned for Pro',
     proTeaserAdvancedVet: 'Advanced vet report',
     aiErrRate: 'A little too fast — take a short break and try again.',
-    aiAssistantApiErrorPrefix: 'AI service error: ',
+    aiAssistantGenericFail: 'The assistant could not reply. Please try again later.',
     aiDisclaimerFoot:
       'The above is for care observation and reminders only — not a veterinary diagnosis. If symptoms persist or worsen, please consult a veterinarian.',
   },
@@ -1690,27 +1698,21 @@ export default function App() {
 
   const historySearchHits = useMemo((): HistorySearchHit[] => {
     if (!selectedCat || !historySearchMode) return [];
-    const floor = appPlan === 'free' ? getFreeHistorySearchDateFloor(today) : '';
+    const effFilter: HistoryFilterChip = appPlan === 'free' ? 'all' : historyFilter;
+    const effKeyword = appPlan === 'free' ? '' : historyKeyword;
     let dateStart = historyDateStart.trim();
     let dateEnd = historyDateEnd.trim();
-    if (appPlan === 'free') {
-      const explicit = Boolean(dateStart || dateEnd);
-      if (!explicit) {
-        dateStart = floor;
-        dateEnd = today;
-      } else {
-        if (!dateStart || dateStart < floor) dateStart = floor;
-        if (!dateEnd) dateEnd = today;
-        if (dateEnd > today) dateEnd = today;
-        if (dateStart > dateEnd) dateStart = floor;
-      }
+    if (appPlan === 'free' && historyDatePreset === 'none') {
+      dateStart = '';
+      dateEnd = '';
     }
+    if (dateEnd && dateEnd > today) dateEnd = today;
     return searchHistory({
       catName: selectedCat.name,
       dailyRows: history,
       weightRows: weightRecords.map((w) => ({ date: w.date, weight: w.weight, note: w.note })),
-      filter: historyFilter,
-      keyword: historyKeyword,
+      filter: effFilter,
+      keyword: effKeyword,
       dateStart,
       dateEnd,
     });
@@ -1722,6 +1724,7 @@ export default function App() {
     historyKeyword,
     historyDateStart,
     historyDateEnd,
+    historyDatePreset,
     historySearchMode,
     appPlan,
     today,
@@ -1816,6 +1819,10 @@ export default function App() {
   const persistAppPlan = (p: AppPlan) => {
     setAiPlan(p);
     setAppPlan(p);
+    if (p === 'free') {
+      setHistoryKeyword('');
+      setHistoryFilter('all');
+    }
     setAssistantQuota((prev) => applyLocalAssistantQuota(p, aiClientId, today, prev));
     const sb = supabaseAuth.supabase;
     const uid = supabaseAuth.user?.id;
@@ -1977,12 +1984,11 @@ export default function App() {
           if (appPlan === 'free') openPremium('ai');
           setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
         } else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI')
-          setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
+        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiAssistantGenericFail);
         else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
-        else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
+        else setOpenAiErr(text[lang].aiAssistantGenericFail);
       } else {
-        setOpenAiErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
+        setOpenAiErr(text[lang].aiAssistantGenericFail);
       }
     } finally {
       setAiBundleLoading(false);
@@ -2054,12 +2060,11 @@ export default function App() {
           if (appPlan === 'free') openPremium('ai');
           setOpenAiErr(aiQuotaExhaustedMessage(lang, appPlan));
         } else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI')
-          setOpenAiErr(`${text[lang].aiAssistantApiErrorPrefix}${e.message}`);
+        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiAssistantGenericFail);
         else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
-        else setOpenAiErr(`${text[lang].aiOpenAiFail}${e.message}`);
+        else setOpenAiErr(text[lang].aiAssistantGenericFail);
       } else {
-        setOpenAiErr(`${text[lang].aiOpenAiFail}${e instanceof Error ? e.message : String(e)}`);
+        setOpenAiErr(text[lang].aiAssistantGenericFail);
       }
       setAiReply('');
     } finally {
@@ -2120,7 +2125,6 @@ export default function App() {
       pushAiUsageIfCloud();
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
-      console.error('[AI weekly report] generate failed', e);
       setAiWeeklyReport(null);
       if (e instanceof AssistantApiError) {
         if (e.code === 'QUOTA') setWeeklyErr(aiQuotaExhaustedMessage(lang, appPlan));
@@ -3499,18 +3503,14 @@ export default function App() {
   );
 
   const renderHistoryPage = () => {
-    const freeHistoryFloor = getFreeHistorySearchDateFloor(today);
-    const historyStartInputMin = appPlan === 'free' ? freeHistoryFloor : historyDateBounds.min;
+    const historyStartInputMin = historyDateBounds.min;
 
     const applyHistoryDatePreset = (preset: HistoryDatePreset) => {
       setHistoryDatePreset(preset);
       const { start, end } = computeHistoryDateRange(preset, today);
       let startFinal = start;
       let endFinal = end;
-      if (appPlan === 'free') {
-        if (startFinal < freeHistoryFloor) startFinal = freeHistoryFloor;
-        if (endFinal > today) endFinal = today;
-      }
+      if (endFinal > today) endFinal = today;
       setHistoryDateStart(startFinal);
       setHistoryDateEnd(endFinal);
     };
@@ -3672,15 +3672,25 @@ export default function App() {
               </div>
               {historyJumpHint ? <p className="text-[10px] font-medium text-amber-800">{historyJumpHint}</p> : null}
 
-              <input
-                type="search"
-                value={historyKeyword}
-                placeholder={tr.historySearchPlaceholder}
-                onChange={(e) => {
-                  setHistoryKeyword(e.target.value);
-                }}
-                className="w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none focus:border-orange-300 focus:bg-white"
-              />
+              {appPlan === 'free' ? (
+                <button
+                  type="button"
+                  onClick={() => openPremium('history')}
+                  className="w-full rounded-lg border border-dashed border-orange-200 bg-orange-50/50 px-2.5 py-2 text-left text-[12px] text-stone-600 outline-none transition active:scale-[0.99]"
+                >
+                  {tr.historyKeywordProHint}
+                </button>
+              ) : (
+                <input
+                  type="search"
+                  value={historyKeyword}
+                  placeholder={tr.historySearchPlaceholder}
+                  onChange={(e) => {
+                    setHistoryKeyword(e.target.value);
+                  }}
+                  className="w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[12px] outline-none focus:border-orange-300 focus:bg-white"
+                />
+              )}
 
               <div className="flex items-center gap-1.5">
                 <button
@@ -3693,9 +3703,11 @@ export default function App() {
                   }`}
                 >
                   {historyFiltersOpen ? tr.historyHideFilters : tr.historyAdvancedFilters}
-                  {appPlan === 'free' ? (
-                    <span className="ml-1 rounded bg-amber-100/90 px-1 py-px text-[8px] font-bold text-amber-900">30d</span>
-                  ) : null}
+              {appPlan === 'free' ? (
+                <span className="ml-1 rounded bg-amber-100/90 px-1 py-px text-[8px] font-bold text-amber-900">
+                  Pro
+                </span>
+              ) : null}
                 </button>
                 {historySearchMode ? (
                   <button type="button" onClick={clearHistorySearch} className="shrink-0 text-[10px] font-medium text-orange-600">
@@ -3712,43 +3724,67 @@ export default function App() {
                       key={chip.id}
                       type="button"
                       onClick={() => {
+                        if (appPlan === 'free' && chip.id !== 'all') {
+                          openPremium('history');
+                          return;
+                        }
                         setHistoryFilter(chip.id);
                       }}
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${
                         historyFilter === chip.id ? 'bg-orange-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-200/80'
-                      }`}
+                      } ${appPlan === 'free' && chip.id !== 'all' ? 'opacity-85' : ''}`}
                     >
-                      {chip.label}
+                      {chip.id !== 'all' && appPlan === 'free' ? (
+                        <span className="inline-flex items-center gap-0.5">
+                          <Lock className="inline h-2.5 w-2.5 text-amber-700/90" aria-hidden />
+                          {chip.label}
+                        </span>
+                      ) : (
+                        chip.label
+                      )}
                     </button>
                   ))}
                 </div>
 
                 <div className="grid grid-cols-2 gap-1.5">
-                  {(
-                    [['start', tr.historyDateStart, historyDateStart, setHistoryDateStart],
-                     ['end', tr.historyDateEnd, historyDateEnd, setHistoryDateEnd]] as const
-                  ).map(([key, label, value, setter]) => (
-                    <div key={key}>
-                      <label className="mb-0.5 block text-[9px] font-medium text-stone-500">{label}</label>
-                      <input
-                        type="date"
-                        value={value}
-                        min={
-                          key === 'start'
-                            ? historyStartInputMin
-                            : historyDateStart && historyDateStart >= historyStartInputMin
-                              ? historyDateStart
-                              : historyStartInputMin
-                        }
-                        max={today}
-                        onChange={(e) => {
-                          setter(e.target.value);
-                          setHistoryDatePreset('none');
-                        }}
-                        className="w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-[11px] outline-none focus:border-orange-300"
-                      />
-                    </div>
-                  ))}
+                  {appPlan === 'pro' ? (
+                    (
+                      [['start', tr.historyDateStart, historyDateStart, setHistoryDateStart],
+                       ['end', tr.historyDateEnd, historyDateEnd, setHistoryDateEnd]] as const
+                    ).map(([key, label, value, setter]) => (
+                      <div key={key}>
+                        <label className="mb-0.5 block text-[9px] font-medium text-stone-500">{label}</label>
+                        <input
+                          type="date"
+                          value={value}
+                          min={
+                            key === 'start'
+                              ? historyStartInputMin
+                              : historyDateStart && historyDateStart >= historyStartInputMin
+                                ? historyDateStart
+                                : historyStartInputMin
+                          }
+                          max={today}
+                          onChange={(e) => {
+                            setter(e.target.value);
+                            setHistoryDatePreset('none');
+                          }}
+                          className="w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-[11px] outline-none focus:border-orange-300"
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openPremium('history')}
+                      className="col-span-2 rounded-lg border border-dashed border-orange-200 bg-white/80 px-2 py-2 text-left text-[10px] leading-snug text-stone-600 transition active:scale-[0.99]"
+                    >
+                      <span className="inline-flex items-center gap-1 font-semibold text-orange-700">
+                        <Lock className="h-3 w-3 shrink-0" aria-hidden />
+                        {lang === 'zh' ? '自訂起迄日期為 Pro 功能，請用下方快捷或升級。' : 'Custom date range is Pro — use quick ranges below or upgrade.'}
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-1">
@@ -3918,7 +3954,7 @@ export default function App() {
     const quotaLine =
       assistantQuota && assistantQuota.dailyLimit > 0
         ? tr.aiQuotaLine
-            .replace('{{remaining}}', String(assistantQuota.dailyRemaining))
+            .replace('{{used}}', String(assistantQuota.dailyUsed))
             .replace('{{limit}}', String(assistantQuota.dailyLimit))
         : null;
 
@@ -4872,105 +4908,101 @@ export default function App() {
     );
   };
 
-  const renderAuthAccountSection = () => (
-    <section className="mb-4 rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-sm">
-      <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
-      {!supabaseAuth.configured ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-          <p className="text-xs leading-relaxed text-amber-950">{tr.authNotConfigured}</p>
-        </div>
-      ) : !supabaseAuth.authReady ? (
-        <div className="space-y-3 py-2 animate-fade-in">
-          <SkeletonLine className="h-4 w-3/5" />
-          <SkeletonLine className="h-10 w-full" />
-          <div className="flex justify-center pt-2">
-            <Spinner className="h-7 w-7 border-2" />
+  const renderAuthAccountSection = () => {
+    if (!supabaseAuth.configured) {
+      return (
+        <section className="mb-4 rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+            <p className="text-xs leading-relaxed text-amber-950">{tr.authNotConfigured}</p>
           </div>
-          <p className="text-center text-[11px] text-stone-500">{tr.authBootTitle}</p>
-        </div>
-      ) : supabaseAuth.user ? (
-        <>
-          <p className="text-sm text-stone-700">
-            <span className="font-bold text-stone-500">{tr.authCurrentAccount}</span>{' '}
-            <span className="font-semibold text-orange-700">{authDisplayLabel}</span>
-          </p>
-          <p className="mt-2 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+        </section>
+      );
+    }
+    if (!supabaseAuth.authReady) {
+      return (
+        <section className="mb-4 rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
+          <div className="space-y-3 py-2 animate-fade-in">
+            <SkeletonLine className="h-4 w-3/5" />
+            <SkeletonLine className="h-10 w-full" />
+            <div className="flex justify-center pt-2">
+              <Spinner className="h-7 w-7 border-2" />
+            </div>
+            <p className="text-center text-[11px] text-stone-500">{tr.authBootTitle}</p>
+          </div>
+        </section>
+      );
+    }
+    if (supabaseAuth.user) return null;
+    return (
+      <section className="mb-4 rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
+        <p className="mb-3 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+        <div className="mb-3 flex gap-2">
           <button
             type="button"
-            onClick={() => void handleAuthSignOut()}
-            className="mt-3 w-full rounded-xl border border-stone-300 bg-white py-2.5 text-sm font-bold text-stone-700"
+            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition ${authMode === 'signIn' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
+            onClick={() => {
+              setAuthMode('signIn');
+              setAuthFormError(null);
+              setAuthMessage(null);
+            }}
           >
-            {tr.authSignOut}
+            {tr.authSignIn}
           </button>
-        </>
-      ) : (
-        <>
-          <p className="mb-3 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
-          <div className="mb-3 flex gap-2">
-            <button
-              type="button"
-              className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition ${authMode === 'signIn' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
-              onClick={() => {
-                setAuthMode('signIn');
-                setAuthFormError(null);
-                setAuthMessage(null);
-              }}
-            >
-              {tr.authSignIn}
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition ${authMode === 'signUp' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
-              onClick={() => {
-                setAuthMode('signUp');
-                setAuthFormError(null);
-                setAuthMessage(null);
-              }}
-            >
-              {tr.authSignUp}
-            </button>
-          </div>
-          <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authEmail}</label>
-          <input
-            type="email"
-            autoComplete="email"
-            value={authEmail}
-            onChange={(e) => setAuthEmail(e.target.value)}
-            className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
-          />
-          <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authPassword}</label>
-          <input
-            type="password"
-            autoComplete={authMode === 'signIn' ? 'current-password' : 'new-password'}
-            value={authPassword}
-            onChange={(e) => setAuthPassword(e.target.value)}
-            className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
-          />
-          {authMode === 'signUp' ? (
-            <>
-              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authDisplayNameOptional}</label>
-              <input
-                type="text"
-                value={authDisplayNameReg}
-                onChange={(e) => setAuthDisplayNameReg(e.target.value)}
-                className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
-              />
-            </>
-          ) : null}
-          {authFormError ? <p className="mb-2 text-[13px] font-medium text-red-600">{authFormError}</p> : null}
-          {authMessage ? <p className="mb-2 text-[13px] font-medium text-green-700">{authMessage}</p> : null}
           <button
             type="button"
-            disabled={authBusy}
-            onClick={() => void handleAuthSubmit()}
-            className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-55"
+            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition ${authMode === 'signUp' ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'}`}
+            onClick={() => {
+              setAuthMode('signUp');
+              setAuthFormError(null);
+              setAuthMessage(null);
+            }}
           >
-            {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
+            {tr.authSignUp}
           </button>
-        </>
-      )}
-    </section>
-  );
+        </div>
+        <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authEmail}</label>
+        <input
+          type="email"
+          autoComplete="email"
+          value={authEmail}
+          onChange={(e) => setAuthEmail(e.target.value)}
+          className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
+        />
+        <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authPassword}</label>
+        <input
+          type="password"
+          autoComplete={authMode === 'signIn' ? 'current-password' : 'new-password'}
+          value={authPassword}
+          onChange={(e) => setAuthPassword(e.target.value)}
+          className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
+        />
+        {authMode === 'signUp' ? (
+          <>
+            <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.authDisplayNameOptional}</label>
+            <input
+              type="text"
+              value={authDisplayNameReg}
+              onChange={(e) => setAuthDisplayNameReg(e.target.value)}
+              className="mb-2 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] outline-none focus:border-orange-300"
+            />
+          </>
+        ) : null}
+        {authFormError ? <p className="mb-2 text-[13px] font-medium text-red-600">{authFormError}</p> : null}
+        {authMessage ? <p className="mb-2 text-[13px] font-medium text-green-700">{authMessage}</p> : null}
+        <button
+          type="button"
+          disabled={authBusy}
+          onClick={() => void handleAuthSubmit()}
+          className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-55"
+        >
+          {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
+        </button>
+      </section>
+    );
+  };
 
   const renderSettingsPage = () => (
     <>
@@ -4998,6 +5030,15 @@ export default function App() {
         {appPlan === 'free' ? (
           <p className="mt-2 text-[11px] leading-relaxed text-stone-400">{tr.remindersLimitFree}</p>
         ) : null}
+      </section>
+
+      <section className="mb-4 rounded-2xl border border-violet-100/80 bg-gradient-to-br from-white to-violet-50/40 p-4 shadow-sm">
+        <h2 className="mb-1 text-base font-bold text-stone-900">{tr.settingsAiQuotaTitle}</h2>
+        <p className="text-2xl font-bold tabular-nums text-orange-600">
+          {buildLocalAiQuota(appPlan, aiClientId, today).dailyUsed}{' '}
+          <span className="text-stone-400">/</span> {buildLocalAiQuota(appPlan, aiClientId, today).dailyLimit}
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-stone-500">{tr.settingsAiQuotaHint}</p>
       </section>
 
       {renderAuthAccountSection()}

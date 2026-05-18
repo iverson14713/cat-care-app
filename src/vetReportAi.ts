@@ -1,3 +1,4 @@
+import type { LocalAiQuotaFields } from './aiClient';
 import type { VetReportAiSummary } from './vetReportData';
 
 export class VetReportApiError extends Error {
@@ -52,12 +53,30 @@ function parseAiSummary(data: Record<string, unknown>): VetReportAiSummary | nul
   };
 }
 
+function parseQuotaFromResponse(data: Record<string, unknown>): LocalAiQuotaFields | null {
+  const dailyLimit = Number(data.dailyLimit);
+  const dailyUsed = Number(data.dailyUsed);
+  const dailyRemaining = Number(data.dailyRemaining);
+  if (!Number.isFinite(dailyLimit) || dailyLimit <= 0) return null;
+  if (!Number.isFinite(dailyUsed) || !Number.isFinite(dailyRemaining)) return null;
+  return {
+    dailyLimit: Math.floor(dailyLimit),
+    dailyUsed: Math.max(0, Math.floor(dailyUsed)),
+    dailyRemaining: Math.max(0, Math.floor(dailyRemaining)),
+  };
+}
+
+export type VetReportAiResult = {
+  summary: VetReportAiSummary;
+  quota: LocalAiQuotaFields | null;
+};
+
 export async function generateVetReportAiSummary(
   lang: 'zh' | 'en',
   recordContext: string,
   meta: { clientId: string; catId: string; usageDate: string; plan: 'free' | 'pro' },
   signal?: AbortSignal
-): Promise<VetReportAiSummary> {
+): Promise<VetReportAiResult> {
   const res = await fetch('/api/assistant/vet-report', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -79,13 +98,22 @@ export async function generateVetReportAiSummary(
     // ignore
   }
   if (!res.ok) {
+    const code = typeof data.code === 'string' ? data.code : undefined;
+    if (res.status === 429 && code === 'QUOTA') {
+      throw new VetReportApiError(
+        lang === 'zh'
+          ? '今日 AI 次數已用完，可明日再試或升級 Pro。'
+          : 'Daily AI limit reached. Try again tomorrow or upgrade to Pro.',
+        'QUOTA',
+        429
+      );
+    }
     const raw =
       typeof data.error === 'string' ? data.error : text.trim() || res.statusText || `HTTP ${res.status}`;
-    const code = typeof data.code === 'string' ? data.code : undefined;
     const msg = friendlyVetReportAiError(raw, lang, res.status);
     throw new VetReportApiError(msg, code, res.status);
   }
   const summary = parseAiSummary(data);
   if (!summary) throw new VetReportApiError('Invalid AI response', 'OPENAI', res.status);
-  return summary;
+  return { summary, quota: parseQuotaFromResponse(data) };
 }

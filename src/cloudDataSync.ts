@@ -23,25 +23,21 @@ import {
   upsertDailyPhotosCloud,
 } from './supabasePhotos';
 import { fetchWeeklyReportsForCat, upsertWeeklyReportCloud } from './supabaseWeeklyReports';
-import {
-  fetchUserAiUsage,
-  mergeUsageCounts,
-  upsertUserAiUsage,
-} from './supabaseAiUsage';
+import { fetchUserAiUsage, upsertUserAiUsage } from './supabaseAiUsage';
 import { fetchUserAiPlan, mergeAiPlan, upsertUserAiPlan, type AiPlan } from './supabaseUserPrefs';
 import {
   getOrCreateClientId,
+  getAiPlan,
   readLocalAiUsageCount,
+  setAiPlan,
   writeLocalAiUsageCount,
 } from './aiClient';
-import { peekVetAiUsedToday, vetAiUsageStorageKey, writeVetAiUsedToday } from './vetReportLimits';
 import {
   listLocalWeeklyReportsForCat,
   loadSavedWeeklyReport,
   type SavedWeeklyReport,
   weeklyReportStorageKey,
 } from './weeklyReportStorage';
-import { getAiPlan, setAiPlan } from './aiClient';
 
 export function dailyStorageKey(catId: string, date: string): string {
   return `cat-calendar-daily-${catId}-${date}`;
@@ -342,18 +338,11 @@ export async function pullCloudDataIntoLocal(
 
   const clientId = getOrCreateClientId();
   const localDaily = readLocalAiUsageCount(clientId, usageDate);
-  const localVet = peekVetAiUsedToday(usageDate);
   const { data: cloudUsage, error: usageErr } = await fetchUserAiUsage(supabase, userId, usageDate);
   if (usageErr) errors.push(`ai usage: ${usageErr.message}`);
   else {
-    const merged = mergeUsageCounts(
-      cloudUsage?.daily_used ?? 0,
-      localDaily,
-      cloudUsage?.vet_used ?? 0,
-      localVet
-    );
-    writeLocalAiUsageCount(clientId, usageDate, merged.dailyUsed);
-    writeVetAiUsedToday(usageDate, merged.vetUsed);
+    const mergedDaily = Math.max(cloudUsage?.daily_used ?? 0, localDaily);
+    writeLocalAiUsageCount(clientId, usageDate, mergedDaily);
   }
 
   const localPlan = getAiPlan();
@@ -456,8 +445,7 @@ export async function pushLocalDataToCloud(
 
   const clientId = getOrCreateClientId();
   const dailyUsed = readLocalAiUsageCount(clientId, usageDate);
-  const vetUsed = peekVetAiUsedToday(usageDate);
-  const { error: usageUpErr } = await upsertUserAiUsage(supabase, userId, usageDate, dailyUsed, vetUsed);
+  const { error: usageUpErr } = await upsertUserAiUsage(supabase, userId, usageDate, dailyUsed, 0);
   if (usageUpErr) errors.push(`ai usage upsert: ${usageUpErr.message}`);
 
   const plan: AiPlan = getAiPlan();
@@ -496,7 +484,7 @@ export async function pushAiUsageSnapshot(
     userId,
     usageDate,
     readLocalAiUsageCount(clientId, usageDate),
-    peekVetAiUsedToday(usageDate)
+    0
   );
   if (error) console.warn('[user_ai_usage upsert]', error.message);
 }

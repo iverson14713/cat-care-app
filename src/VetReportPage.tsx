@@ -11,12 +11,8 @@ import {
   type VetReportSections,
 } from './vetReportData';
 import { generateVetReportAiSummary, VetReportApiError } from './vetReportAi';
-import {
-  canExportVetPdf,
-  canUseVetAiSummary,
-  maxVetReportDays,
-  recordVetAiUsedToday,
-} from './vetReportLimits';
+import { canExportVetPdf, maxVetReportDays } from './vetReportLimits';
+import { applySuccessfulAiUsage, buildLocalAiQuota, remainingAiUsage } from './aiClient';
 import { exportReportElementAsPdf, exportReportElementAsPng, shareReportText } from './vetReportExport';
 
 type Lang = 'zh' | 'en';
@@ -42,7 +38,8 @@ const copy = {
     title: '進階獸醫報告',
     lead: '整理照護紀錄給獸醫參考，非醫療診斷。',
     proBadge: 'Pro',
-    freeBanner: '免費版：可預覽最近 30 天內容；不可匯出 PDF／圖片；AI 整理每日 1 次。',
+    freeBanner:
+      '免費版：可預覽最近 30 天內容；不可匯出 PDF／圖片；「AI 幫我整理重點」與照護助理、週報等共用每日 3 次 AI 額度。',
     upgrade: '升級 Pro',
     openSettings: '方案與設定',
     cat: '貓咪',
@@ -61,7 +58,8 @@ const copy = {
     generate: '產生報告',
     aiBtn: 'AI 幫我整理重點',
     aiBusy: 'AI 整理中…',
-    aiLimit: '今日免費版 AI 整理已用完（每日 1 次）',
+    aiLimit: '今日 AI 次數已用完（與照護助理、週報共用額度）。可明日再試或升級 Pro。',
+    aiQuotaMini: '今日 AI 次數',
     exportPdf: '匯出 PDF',
     exportPng: '匯出圖片',
     share: '分享文字',
@@ -102,7 +100,8 @@ const copy = {
     title: 'Advanced vet report',
     lead: 'Care log handoff for your vet — not a medical diagnosis.',
     proBadge: 'Pro',
-    freeBanner: 'Free: preview up to 30 days; no PDF/image export; 1 AI summary per day.',
+    freeBanner:
+      'Free: preview up to 30 days; no PDF/image export. “AI summarize highlights” shares the same 3 AI uses/day as the assistant and weekly report.',
     upgrade: 'Upgrade to Pro',
     openSettings: 'Plan & settings',
     cat: 'Cat',
@@ -121,7 +120,8 @@ const copy = {
     generate: 'Generate report',
     aiBtn: 'AI summarize highlights',
     aiBusy: 'Summarizing…',
-    aiLimit: "Today's free AI summary used (1 per day)",
+    aiLimit: 'Daily AI uses are used up (shared with the assistant and weekly report). Try tomorrow or upgrade to Pro.',
+    aiQuotaMini: 'AI uses today',
     exportPdf: 'Export PDF',
     exportPng: 'Export image',
     share: 'Share text',
@@ -266,6 +266,11 @@ export function VetReportPage({
 
   const selectedCat = cats.find((c) => c.id === selectedCatId) ?? cats[0];
 
+  const vetAiQuota = useMemo(
+    () => buildLocalAiQuota(appPlan, clientId, today),
+    [appPlan, clientId, today, aiLoading, aiSummary]
+  );
+
   const toProfile = useCallback(
     (c: CatRow): VetReportCatProfile => ({
       id: c.id,
@@ -297,7 +302,8 @@ export function VetReportPage({
 
   const runAiSummary = useCallback(async () => {
     if (!report || !selectedCat) return;
-    if (!canUseVetAiSummary(today, appPlan)) {
+    if (remainingAiUsage(appPlan, clientId, today) <= 0) {
+      if (appPlan === 'free') onRequestPro?.();
       setAiErr(t.aiLimit);
       return;
     }
@@ -305,19 +311,18 @@ export function VetReportPage({
     setAiErr(null);
     try {
       const ctx = buildVetReportContextText(report, sections, lang);
-      const summary = await generateVetReportAiSummary(lang, ctx, {
+      const { summary, quota } = await generateVetReportAiSummary(lang, ctx, {
         clientId,
         catId: selectedCat.id,
         usageDate: today,
         plan: appPlan,
       });
       setAiSummary(summary);
-      if (!isPro) {
-        recordVetAiUsedToday(today);
-        onAiUsageChanged?.();
-      }
+      applySuccessfulAiUsage(appPlan, clientId, today, quota?.dailyUsed);
+      onAiUsageChanged?.();
     } catch (e) {
       if (e instanceof VetReportApiError) {
+        if (e.code === 'QUOTA' && appPlan === 'free') onRequestPro?.();
         setAiErr(e.message);
       } else {
         setAiErr(lang === 'zh' ? 'AI 重點整理暫時無法使用，請稍後再試。' : 'AI summary is temporarily unavailable. Please try again later.');
@@ -325,7 +330,18 @@ export function VetReportPage({
     } finally {
       setAiLoading(false);
     }
-  }, [report, selectedCat, sections, lang, clientId, today, appPlan, isPro, t.aiLimit, onAiUsageChanged]);
+  }, [
+    report,
+    selectedCat,
+    sections,
+    lang,
+    clientId,
+    today,
+    appPlan,
+    t.aiLimit,
+    onAiUsageChanged,
+    onRequestPro,
+  ]);
 
   const reportPlainText = useMemo(() => {
     if (!report) return '';
@@ -682,13 +698,16 @@ export function VetReportPage({
           {sections.ai ? (
             <button
               type="button"
-              disabled={aiLoading || !canUseVetAiSummary(today, appPlan)}
+              disabled={aiLoading || remainingAiUsage(appPlan, clientId, today) <= 0}
               onClick={() => void runAiSummary()}
               className="w-full rounded-2xl border border-violet-200 bg-violet-50 py-3 text-sm font-bold text-violet-800 disabled:opacity-50"
             >
               {aiLoading ? t.aiBusy : t.aiBtn}
             </button>
           ) : null}
+          <p className="text-center text-[11px] text-stone-500">
+            {t.aiQuotaMini}：{vetAiQuota.dailyUsed} / {vetAiQuota.dailyLimit}
+          </p>
           {aiErr ? <p className="text-xs text-red-700">{aiErr}</p> : null}
 
           <div className="grid grid-cols-3 gap-2">

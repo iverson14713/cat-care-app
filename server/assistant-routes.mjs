@@ -225,7 +225,7 @@ function assistantRateAndQuota(clientId, catId, usageDate, feature, planHint) {
  *   catId: string;
  *   usageDate: string;
  *   planHint: 'free' | 'pro';
- *   feature: 'care-bundle' | 'qa' | 'weekly-report';
+ *   feature: 'care-bundle' | 'qa' | 'weekly-report' | 'vet-report';
  *   run: () => Promise<Record<string, unknown> & { usage: unknown }>;
  * }} opts
  * @returns {Promise<{ status: number, json: object }>}
@@ -634,7 +634,7 @@ async function handleVetReport(lang, recordContext) {
 }
 
 /**
- * Vet report AI — does NOT increment main daily AI quota (client tracks vet-report AI separately).
+ * Vet report AI — shares the same daily AI pool as care-bundle / qa / weekly-report.
  * @param {unknown} body
  * @returns {Promise<{ status: number, json: object }>}
  */
@@ -676,53 +676,16 @@ export async function assistVetReportPOST(body) {
     };
   }
 
-  const minute = assertMinuteRate(clientId);
-  if (!minute.ok) {
-    return {
-      status: 429,
-      json: {
-        error: 'Too many AI requests in a short time. Please wait about a minute and try again.',
-        code: 'RATE',
-      },
-    };
-  }
+  const planHint = planHintFromBody(b.plan);
+  const rq = assistantRateAndQuota(clientId, catId, usageDate, 'vet-report', planHint);
+  if (!rq.ok) return { status: rq.status, json: rq.json };
 
-  try {
-    const { usage, ...summary } = await handleVetReport(lang, recordContext);
-    const estUsd = estUsdFromUsage(usage);
-    logLine({
-      userId: clientId,
-      catId,
-      feature: 'vet-report',
-      ok: true,
-      statusCode: 200,
-      promptTokens: usage?.prompt_tokens ?? null,
-      completionTokens: usage?.completion_tokens ?? null,
-      totalTokens: usage?.total_tokens ?? null,
-      estUsd,
-    });
-    return { status: 200, json: summary };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logLine({
-      userId: clientId,
-      catId,
-      feature: 'vet-report',
-      ok: false,
-      statusCode: 502,
-      error: msg.slice(0, 500),
-      promptTokens: null,
-      completionTokens: null,
-      totalTokens: null,
-      estUsd: null,
-    });
-    return {
-      status: 502,
-      json: {
-        error: 'The AI service returned an error. Please try again later.',
-        code: 'OPENAI',
-        detail: msg.slice(0, 300),
-      },
-    };
-  }
+  return runAssistantOpenAiCounted({
+    clientId,
+    catId,
+    usageDate,
+    planHint,
+    feature: 'vet-report',
+    run: async () => handleVetReport(lang, recordContext),
+  });
 }
