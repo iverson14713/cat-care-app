@@ -12,7 +12,7 @@ import {
 } from './vetReportData';
 import { generateVetReportAiSummary, VetReportApiError } from './vetReportAi';
 import { canExportVetPdf, maxVetReportDays } from './vetReportLimits';
-import { buildLocalAiQuota, remainingAiUsage } from './aiClient';
+import { applySuccessfulAiUsage, buildLocalAiQuota, remainingAiUsage } from './aiClient';
 import { AiDailyQuotaCard } from './components/AiDailyQuotaCard';
 import { PremiumUpgradeCard } from './components/PremiumUpgradeCard';
 import { exportReportElementAsPdf, exportReportElementAsPng, shareReportText } from './vetReportExport';
@@ -37,74 +37,74 @@ type WeightPoint = { id: string; date: string; weight: number; note: string };
 
 const copy = {
   zh: {
-    title: '進階獸醫報告',
-    lead: '整理照護紀錄給獸醫參考，非醫療診斷。',
+    title: '??????????????',
+    lead: '?????????????????????????????????????????',
     proBadge: 'Pro',
     freeBanner:
-      '免費版：可預覽最近 30 天內容；不可匯出 PDF／圖片；「AI 幫我整理重點」與照護助理、週報等共用每日 3 次 AI 額度。',
-    upgrade: '升級 Pro',
-    openSettings: '方案與設定',
-    cat: '貓咪',
-    range: '日期範圍',
-    preset7: '最近 7 天',
-    preset30: '最近 30 天',
-    presetCustom: '自訂',
-    dateStart: '起始',
-    dateEnd: '結束',
-    sections: '包含內容',
-    secAbnormal: '異常紀錄',
-    secWeight: '體重紀錄',
-    secPhotos: '照片',
-    secNotes: '備註',
-    secAi: 'AI 摘要',
-    generate: '產生報告',
-    aiBtn: 'AI 幫我整理重點',
-    aiBusy: 'AI 整理中…',
-    aiLimit: '今日 AI 次數已用完',
-    aiQuotaProExhausted: 'Pro 方案今日 30 次 AI 已用完，請明日再試。',
-    aiQuotaMini: '今日 AI 次數',
-    exportPdf: '匯出 PDF',
-    exportPng: '匯出圖片',
-    share: '分享文字',
-    sharedOk: '已複製／分享報告文字',
-    shareFail: '無法分享',
-    exportProOnly: '匯出為 Pro 功能',
-    profile: '貓咪基本資料',
-    abnormalSummary: '最近異常摘要',
-    noAbnormal: '此期間無異常備註',
-    weightTrend: '體重趨勢',
-    noWeight: '此期間無體重紀錄',
-    timeline: '時間線',
-    noTimeline: '此期間無相關紀錄',
-    photos: '照片',
-    noPhotos: '此期間無照片',
-    aiSection: 'AI 整理重點',
-    watchItems: '最近需注意',
-    observe: '建議觀察方向',
-    vetHandoff: '帶給獸醫的重點',
+      '????????????????? 30 ??????????????? PDF????????????AI ???????????????????????????????????????????????? 3 ? AI ?????',
+    upgrade: '???? Pro',
+    openSettings: '???????????',
+    cat: '?????',
+    range: '???????????',
+    preset7: '????? 7 ?',
+    preset30: '????? 30 ?',
+    presetCustom: '?????',
+    dateStart: '???',
+    dateEnd: '???',
+    sections: '????????',
+    secAbnormal: '?????????',
+    secWeight: '??????????',
+    secPhotos: '??????',
+    secNotes: '????',
+    secAi: 'AI ????',
+    generate: '??????????',
+    aiBtn: 'AI ??????????????',
+    aiBusy: 'AI ?????????',
+    aiLimit: '????? AI ??????????',
+    aiQuotaProExhausted: 'Pro ?????????? 30 ? AI ???????????????????????',
+    aiQuotaMini: '????? AI ????',
+    exportPdf: '?????? PDF',
+    exportPng: '????????????',
+    share: '?????????',
+    sharedOk: '??????????????????',
+    shareFail: '?????????',
+    exportProOnly: '????????? Pro ??????',
+    profile: '????????????????',
+    abnormalSummary: '?????????????',
+    noAbnormal: '??????????????????',
+    weightTrend: '?????????',
+    noWeight: '????????????????????',
+    timeline: '????????',
+    noTimeline: '?????????????????????',
+    photos: '??????',
+    noPhotos: '????????????????',
+    aiSection: 'AI ??????????',
+    watchItems: '????????????',
+    observe: '???????????',
+    vetHandoff: '??????????????',
     disclaimer:
-      '本報告僅供照護紀錄整理與就診溝通參考，不構成診斷或醫療建議。若症狀持續或惡化，請諮詢獸醫。',
-    previewLocked: '升級 Pro 可查看完整報告並匯出',
-    name: '名字',
-    age: '年齡',
-    birthday: '生日',
-    gender: '性別',
-    breed: '品種',
-    chronic: '慢性病',
-    allergy: '過敏',
-    clinic: '常用獸醫院',
-    note: '備註',
-    unknown: '未填',
-    yearsOld: '歲',
-    weightChange: '近期變化',
-    latestWeight: '最近體重',
+      '??????????????????????????????????????????????????????????????????????????????????????????????????????',
+    previewLocked: '???? Pro ???????????????????????',
+    name: '???',
+    age: '??',
+    birthday: '??????',
+    gender: '??????',
+    breed: '????',
+    chronic: '?????????',
+    allergy: '?????',
+    clinic: '???????????',
+    note: '????',
+    unknown: '????',
+    yearsOld: '?',
+    weightChange: '??????????',
+    latestWeight: '??????????',
   },
   en: {
     title: 'Advanced vet report',
-    lead: 'Care log handoff for your vet — not a medical diagnosis.',
+    lead: 'Care log handoff for your vet ??? not a medical diagnosis.',
     proBadge: 'Pro',
     freeBanner:
-      'Free: preview up to 30 days; no PDF/image export. “AI summarize highlights” shares the same 3 AI uses/day as the assistant and weekly report.',
+      'Free: preview up to 30 days; no PDF/image export. ???AI summarize highlights??? shares the same 3 AI uses/day as the assistant and weekly report.',
     upgrade: 'Upgrade to Pro',
     openSettings: 'Plan & settings',
     cat: 'Cat',
@@ -122,7 +122,7 @@ const copy = {
     secAi: 'AI summary',
     generate: 'Generate report',
     aiBtn: 'AI summarize highlights',
-    aiBusy: 'Summarizing…',
+    aiBusy: 'Summarizing???',
     aiLimit: "Today's AI quota is used up",
     aiQuotaProExhausted: 'All 30 Pro AI uses are used for today. Try again tomorrow.',
     aiQuotaMini: 'AI uses today',
@@ -146,7 +146,7 @@ const copy = {
     observe: 'Observation ideas',
     vetHandoff: 'For your vet',
     disclaimer:
-      'This report organizes care logs for visit communication only — not diagnosis or treatment advice.',
+      'This report organizes care logs for visit communication only ??? not diagnosis or treatment advice.',
     previewLocked: 'Upgrade to Pro for the full report and exports',
     name: 'Name',
     age: 'Age',
@@ -157,7 +157,7 @@ const copy = {
     allergy: 'Allergies',
     clinic: 'Vet clinic',
     note: 'Notes',
-    unknown: '—',
+    unknown: '???',
     yearsOld: 'y/o',
     weightChange: 'Recent change',
     latestWeight: 'Latest weight',
@@ -180,9 +180,9 @@ function calculateAgeText(
   if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) years -= 1;
   if (years <= 0) {
     const months = Math.max(0, (now.getFullYear() - birthDate.getFullYear()) * 12 + monthDiff);
-    return lang === 'zh' ? `約 ${months} 個月` : `about ${months} months`;
+    return lang === 'zh' ? `?? ${months} ??????` : `about ${months} months`;
   }
-  return lang === 'zh' ? `約 ${years} ${yearsOld}` : `about ${years} ${yearsOld}`;
+  return lang === 'zh' ? `?? ${years} ${yearsOld}` : `about ${years} ${yearsOld}`;
 }
 
 function WeightSparkline({ points }: { points: { date: string; weight: number }[] }) {
@@ -323,7 +323,7 @@ export function VetReportPage({
         plan: appPlan,
       });
       setAiSummary(summary);
-      buildLocalAiQuota(appPlan, clientId, today, quota?.dailyUsed);
+      applySuccessfulAiUsage(appPlan, clientId, today, quota?.dailyUsed);
       onAiUsageChanged?.();
     } catch (e) {
       if (e instanceof VetReportApiError) {
@@ -335,7 +335,7 @@ export function VetReportPage({
           setAiErr(e.message);
         }
       } else {
-        setAiErr(lang === 'zh' ? 'AI 重點整理暫時無法使用，請稍後再試。' : 'AI summary is temporarily unavailable. Please try again later.');
+        setAiErr(lang === 'zh' ? 'AI ???????????????????????????????????????' : 'AI summary is temporarily unavailable. Please try again later.');
       }
     } finally {
       setAiLoading(false);
@@ -356,21 +356,21 @@ export function VetReportPage({
   const reportPlainText = useMemo(() => {
     if (!report) return '';
     const lines: string[] = [];
-    lines.push(`${t.title} — ${report.cat.name}`);
-    lines.push(`${report.startDate} — ${report.endDate}`);
+    lines.push(`${t.title} ??? ${report.cat.name}`);
+    lines.push(`${report.startDate} ??? ${report.endDate}`);
     lines.push('');
     if (report.abnormalBullets.length) {
-      lines.push(`【${t.abnormalSummary}】`);
-      report.abnormalBullets.forEach((b) => lines.push(`• ${b}`));
+      lines.push(`???${t.abnormalSummary}???`);
+      report.abnormalBullets.forEach((b) => lines.push(`??? ${b}`));
     }
     if (report.timeline.length) {
-      lines.push(`【${t.timeline}】`);
+      lines.push(`???${t.timeline}???`);
       for (const row of report.timeline) {
-        lines.push(`${row.date}: ${row.lines.join('；')}`);
+        lines.push(`${row.date}: ${row.lines.join('??')}`);
       }
     }
     if (aiSummary) {
-      lines.push(`【${t.aiSection}】`);
+      lines.push(`???${t.aiSection}???`);
       lines.push(`${t.watchItems}: ${aiSummary.watchItems}`);
       lines.push(`${t.observe}: ${aiSummary.observeDirections}`);
       lines.push(`${t.vetHandoff}: ${aiSummary.vetHandoff}`);
@@ -525,7 +525,7 @@ export function VetReportPage({
           >
             <div className="rounded-2xl bg-white p-4 shadow-sm">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                {report.startDate} — {report.endDate}
+                {report.startDate} ??? {report.endDate}
               </p>
               <h2 className="mt-1 flex items-center gap-2 text-lg font-bold text-stone-900">
                 <span>{report.cat.emoji}</span>
@@ -598,7 +598,7 @@ export function VetReportPage({
                         <p className="text-lg font-bold text-stone-800">
                           {report.weights.length >= 2
                             ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(2)} kg`
-                            : '—'}
+                            : '???'}
                         </p>
                       </div>
                     </div>
@@ -782,7 +782,7 @@ export function VetReportPage({
             <button
               type="button"
               onClick={async () => {
-                const ok = await shareReportText(`${t.title} — ${report.cat.name}`, reportPlainText);
+                const ok = await shareReportText(`${t.title} ??? ${report.cat.name}`, reportPlainText);
                 setExportMsg(ok ? t.sharedOk : t.shareFail);
               }}
               className="rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-xs font-bold text-orange-800"

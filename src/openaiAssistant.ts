@@ -7,6 +7,7 @@ import type {
 } from './aiCareAssistant';
 import { getDailyItemsForPetType, getMonthlyItemsForPetType, type PetType } from './petTypes';
 import {
+  applySuccessfulAiUsage,
   buildLocalAiQuota,
   careBundleCacheKey,
   djb2Hash,
@@ -250,9 +251,12 @@ export function mergeAssistantQuotaFromSnapshot(
   quota: AssistantQuotaSnapshot,
   plan: 'free' | 'pro',
   clientId: string,
-  usageDate: string
+  usageDate: string,
+  options?: { countedSuccess?: boolean }
 ): AssistantHealthPayload {
-  const merged = buildLocalAiQuota(plan, clientId, usageDate, quota.dailyUsed);
+  const merged = options?.countedSuccess
+    ? applySuccessfulAiUsage(plan, clientId, usageDate, quota.dailyUsed)
+    : buildLocalAiQuota(plan, clientId, usageDate, quota.dailyUsed);
   return {
     openaiReady: prev?.openaiReady ?? true,
     planEffective: plan,
@@ -267,7 +271,12 @@ function quotaAfterCountedAiSuccess(
   meta: AssistantRequestMeta
 ): AssistantQuotaSnapshot {
   const raw = parseQuotaSnapshot(data);
-  return buildLocalAiQuota(meta.plan, meta.clientId, meta.usageDate, raw?.dailyUsed);
+  return applySuccessfulAiUsage(
+    meta.plan,
+    meta.clientId,
+    meta.usageDate,
+    raw?.dailyUsed
+  );
 }
 
 export function buildAssistantHealthFromLocal(

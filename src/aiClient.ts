@@ -1,4 +1,4 @@
-const CLIENT_KEY = 'cat-ai-client-id';
+﻿const CLIENT_KEY = 'cat-ai-client-id';
 const PLAN_KEY = 'cat-ai-plan';
 const CARE_PREFIX = 'cat-ai-care:v2:';
 
@@ -41,7 +41,7 @@ export function readLocalAiUsageCount(clientId: string, usageDate: string): numb
   return readAiUsageStore(clientId, usageDate);
 }
 
-/** After a successful AI API response — keep local count in sync (never decrease). */
+/** After a successful AI API response ??keep local count in sync (never decrease). */
 export function syncLocalAiUsageFromServer(
   clientId: string,
   usageDate: string,
@@ -101,7 +101,7 @@ export function remainingAiUsage(
 }
 
 /**
- * After a successful counted AI call — sync from server snapshot only (server already incremented).
+ * After a successful counted AI call ??sync from server snapshot only (server already incremented).
  */
 export function applySuccessfulAiUsage(
   plan: 'free' | 'pro',
@@ -109,7 +109,19 @@ export function applySuccessfulAiUsage(
   usageDate: string,
   serverUsed?: number
 ): LocalAiQuotaFields {
-  return buildLocalAiQuota(plan, clientId, usageDate, serverUsed);
+  const limit = getDailyAiLimit(plan);
+  const local = readLocalAiUsageCount(clientId, usageDate);
+  const server =
+    serverUsed != null && Number.isFinite(serverUsed) ? Math.max(0, Math.floor(serverUsed)) : null;
+  let nextUsed = local + 1;
+  if (server != null && server > nextUsed) nextUsed = server;
+  nextUsed = capAiUsageUsed(nextUsed, limit);
+  writeLocalAiUsageCount(clientId, usageDate, nextUsed);
+  return {
+    dailyLimit: limit,
+    dailyUsed: nextUsed,
+    dailyRemaining: Math.max(0, limit - nextUsed),
+  };
 }
 
 export function getOrCreateClientId(): string {
