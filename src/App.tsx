@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Archive,
+  Bell,
   Calendar,
   Clock,
   Crown,
+  Download,
+  LayoutGrid,
   Lock,
   Scale,
-  Settings,
   Sparkles,
   Stethoscope,
+  User,
   type LucideIcon,
 } from 'lucide-react';
 import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
@@ -164,11 +168,25 @@ type Cat = NormalizedCat;
 
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
-type Page = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant' | 'settings' | 'sharedCare' | 'reminders';
+type Page =
+  | 'today'
+  | 'weight'
+  | 'vet'
+  | 'history'
+  | 'reminders'
+  | 'more'
+  | 'cats'
+  | 'assistant'
+  | 'settings'
+  | 'sharedCare';
 
-type MainTabId = 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistant';
+type MainTabId = 'today' | 'weight' | 'vet' | 'history' | 'reminders' | 'more';
 
-const MAIN_TAB_ROWS: { id: MainTabId; labelKey: 'today' | 'weight' | 'vet' | 'history' | 'cats' | 'assistantNav'; Icon: LucideIcon }[][] = [
+const MAIN_TAB_ROWS: {
+  id: MainTabId;
+  labelKey: 'today' | 'weight' | 'vet' | 'history' | 'remindersNav' | 'more';
+  Icon: LucideIcon;
+}[][] = [
   [
     { id: 'today', labelKey: 'today', Icon: Calendar },
     { id: 'weight', labelKey: 'weight', Icon: Scale },
@@ -176,10 +194,12 @@ const MAIN_TAB_ROWS: { id: MainTabId; labelKey: 'today' | 'weight' | 'vet' | 'hi
   ],
   [
     { id: 'history', labelKey: 'history', Icon: Clock },
-    { id: 'cats', labelKey: 'cats', Icon: Settings },
-    { id: 'assistant', labelKey: 'assistantNav', Icon: Sparkles },
+    { id: 'reminders', labelKey: 'remindersNav', Icon: Bell },
+    { id: 'more', labelKey: 'more', Icon: LayoutGrid },
   ],
 ];
+
+const MORE_SUB_PAGES: Page[] = ['more', 'cats', 'settings', 'sharedCare', 'assistant'];
 
 type WeightRecord = {
   id: string;
@@ -200,7 +220,32 @@ const text = {
     weight: '體重',
     history: '歷史',
     vet: '獸醫',
-    cats: '系統',
+    more: '更多',
+    remindersNav: '提醒',
+    moreTitle: '更多',
+    moreLead: '帳號、方案、寵物資料與進階設定',
+    moreAccount: '帳號',
+    moreAccountDesc: '登入、同步與個人資料',
+    morePro: 'Pro 方案',
+    moreProDesc: '升級解鎖完整功能',
+    morePets: '寵物與檔案',
+    morePetsDesc: '寵物列表、基本資料、備份',
+    moreArchive: '封存寵物',
+    moreArchiveDesc: '查看或恢復已封存的寵物',
+    moreAssistant: 'AI 照護助理',
+    moreAssistantDesc: '快速分析、週報與隨口問',
+    moreExport: '匯出與備份',
+    moreExportDesc: '匯出 JSON 備份或還原資料',
+    moreAdvanced: '進階設定',
+    moreAdvancedDesc: 'AI 額度、方案與共同照護',
+    moreDev: '開發功能',
+    moreDevDesc: '本機測試用（僅開發模式）',
+    moreBack: '返回更多',
+    remindersTodaySection: '今日提醒',
+    remindersTodayEmpty: '今天沒有啟用中的提醒，可在下方「新增提醒」建立。',
+    remindersEnabledSection: '已啟用提醒',
+    remindersAddSection: '新增提醒',
+    remindersListSection: '提醒列表',
     currentCat: '目前照顧',
     switchCat: '切換寵物',
     date: '日期',
@@ -420,7 +465,7 @@ const text = {
     settingsTitle: '方案與設定',
     settingsAiQuotaTitle: '今日 AI 次數',
     settingsAiQuotaHint: '含獸醫報告「整理重點」、照護助理、週報與隨口問 AI；每日重新計算。',
-    settingsBack: '返回系統',
+    settingsBack: '返回更多',
     authAccountSection: '帳號與登入',
     authNotConfigured: '雲端登入尚未開放。請確認伺服器已完成雲端連線設定後，重新整理此頁面。',
     authLoggedInStrip: '已登入',
@@ -498,8 +543,8 @@ const text = {
     planFreeMultiCatBanner:
       '免費版最多支援 3 隻寵物。你目前的寵物數超過上限，請封存部分寵物或升級 Pro。',
     openSettings: '方案與設定',
-    remindersTitle: '提醒設定',
-    remindersBack: '返回設定',
+    remindersTitle: '提醒',
+    remindersBack: '返回更多',
     remindersLead: '本機瀏覽器通知（PWA / 開啟分頁時有效）。',
     remindersNotifyDenied: '尚未開啟通知權限',
     remindersNotifyEnable: '啟用提醒',
@@ -508,7 +553,7 @@ const text = {
     remindersCount: '提醒數量',
     remindersAdd: '新增提醒',
     remindersAddCustom: '自訂提醒',
-    remindersEmpty: '尚未設定提醒，可從下方快速新增。',
+    remindersEmpty: '尚未設定提醒，可從上方快速新增。',
     remindersForCat: '寵物',
     remindersTime: '時間',
     remindersRepeat: '重複',
@@ -605,7 +650,32 @@ const text = {
     weight: 'Weight',
     history: 'History',
     vet: 'Vet',
-    cats: 'System',
+    more: 'More',
+    remindersNav: 'Reminders',
+    moreTitle: 'More',
+    moreLead: 'Account, plan, pets, and advanced settings',
+    moreAccount: 'Account',
+    moreAccountDesc: 'Sign in, sync, and profile',
+    morePro: 'Pro plan',
+    moreProDesc: 'Unlock full features',
+    morePets: 'Pets & data',
+    morePetsDesc: 'Pet list, profile, and backup',
+    moreArchive: 'Archived pets',
+    moreArchiveDesc: 'View or restore archived pets',
+    moreAssistant: 'AI care assistant',
+    moreAssistantDesc: 'Quick analysis, weekly report, and Q&A',
+    moreExport: 'Export & backup',
+    moreExportDesc: 'Export JSON backup or restore data',
+    moreAdvanced: 'Advanced settings',
+    moreAdvancedDesc: 'AI quota, plan, and shared care',
+    moreDev: 'Developer',
+    moreDevDesc: 'Local testing only (dev mode)',
+    moreBack: 'Back to More',
+    remindersTodaySection: "Today's reminders",
+    remindersTodayEmpty: 'No enabled reminders for today. Add one in the section below.',
+    remindersEnabledSection: 'Enabled reminders',
+    remindersAddSection: 'Add reminder',
+    remindersListSection: 'All reminders',
     currentCat: 'Current cat',
     switchCat: 'Switch',
     date: 'Date',
@@ -826,7 +896,7 @@ const text = {
     settingsTitle: 'Plan & settings',
     settingsAiQuotaTitle: 'AI uses today',
     settingsAiQuotaHint: 'Shared across vet report highlights, care assistant, weekly report, and Q&A. Resets daily.',
-    settingsBack: 'Back to system',
+    settingsBack: 'Back to More',
     authAccountSection: 'Account',
     authNotConfigured:
       'Cloud sign-in is not available yet. Make sure cloud connection is set up on the server, then refresh this page.',
@@ -908,7 +978,7 @@ const text = {
       'Free plan supports up to 3 pets. You currently exceed that limit — archive some pets or upgrade to Pro.',
     openSettings: 'Plan & settings',
     remindersTitle: 'Reminders',
-    remindersBack: 'Back to settings',
+    remindersBack: 'Back to More',
     remindersLead: 'Local browser notifications (works in PWA while the app is open).',
     remindersNotifyDenied: 'Notification permission is off',
     remindersNotifyEnable: 'Enable reminders',
@@ -917,7 +987,7 @@ const text = {
     remindersCount: 'Reminders',
     remindersAdd: 'Add reminder',
     remindersAddCustom: 'Custom reminder',
-    remindersEmpty: 'No reminders yet — use quick add below.',
+    remindersEmpty: 'No reminders yet — use quick add above.',
     remindersForCat: 'Pet',
     remindersTime: 'Time',
     remindersRepeat: 'Repeat',
@@ -3914,7 +3984,7 @@ export default function App() {
       today={today}
       clientId={aiClientId}
       onOpenPhoto={setSelectedPhoto}
-      onGoSettings={() => setPage('settings')}
+      onGoSettings={() => setPage('more')}
       onAiUsageChanged={() => {
         refreshAssistantQuotaFromLocal();
         pushAiUsageIfCloud();
@@ -4027,6 +4097,16 @@ export default function App() {
     return (
       <>
         {renderCatSwitcher()}
+
+        <section className="mb-3">
+          <button
+            type="button"
+            onClick={() => setPage('more')}
+            className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
+          >
+            ← {tr.moreBack}
+          </button>
+        </section>
 
         <section className="mb-3 rounded-xl border border-orange-100/80 bg-white px-2.5 py-1.5 shadow-sm">
           <div className="flex items-center gap-2">
@@ -4523,10 +4603,10 @@ export default function App() {
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <button
             type="button"
-            onClick={() => setPage('cats')}
+            onClick={() => setPage('more')}
             className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
           >
-            ← {t.sharedCareBack}
+            ← {tr.moreBack}
           </button>
           <h1 className="text-xl font-bold text-stone-900">{t.sharedCareTitle}</h1>
           <p className="mt-1 text-sm text-stone-500">{selectedCat.name}</p>
@@ -4681,9 +4761,127 @@ export default function App() {
   };
 
 
+  const renderMorePage = () => {
+    const moreMenuRows: {
+      icon: LucideIcon;
+      title: string;
+      desc: string;
+      onClick: () => void;
+      accent?: boolean;
+    }[] = [
+      {
+        icon: User,
+        title: tr.moreAccount,
+        desc: tr.moreAccountDesc,
+        onClick: () => setPage('settings'),
+      },
+      {
+        icon: Crown,
+        title: tr.morePro,
+        desc: tr.moreProDesc,
+        accent: true,
+        onClick: () => (appPlan === 'free' ? openPremium('general') : setPage('settings')),
+      },
+      {
+        icon: Sparkles,
+        title: tr.moreAssistant,
+        desc: tr.moreAssistantDesc,
+        onClick: () => setPage('assistant'),
+      },
+      {
+        icon: Archive,
+        title: tr.moreArchive,
+        desc: tr.moreArchiveDesc,
+        onClick: () => setPage('cats'),
+      },
+      {
+        icon: Download,
+        title: tr.moreExport,
+        desc: tr.moreExportDesc,
+        onClick: () => setPage('cats'),
+      },
+      {
+        icon: LayoutGrid,
+        title: tr.moreAdvanced,
+        desc: tr.moreAdvancedDesc,
+        onClick: () => setPage('settings'),
+      },
+    ];
+
+    return (
+      <>
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <div className="text-3xl" aria-hidden>
+            ⚙️
+          </div>
+          <h1 className="mt-2 text-xl font-bold text-stone-900">{tr.moreTitle}</h1>
+          <p className="mt-1 text-sm text-stone-500">{tr.moreLead}</p>
+        </section>
+
+        <section className="mb-4 space-y-2">
+          {moreMenuRows.map((row) => {
+            const Icon = row.icon;
+            return (
+              <button
+                key={row.title}
+                type="button"
+                onClick={row.onClick}
+                className={`flex w-full items-center gap-3 rounded-2xl border p-4 text-left shadow-sm transition active:scale-[0.99] ${
+                  row.accent
+                    ? 'border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50'
+                    : 'border-stone-100 bg-white hover:border-orange-100'
+                }`}
+              >
+                <span
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                    row.accent ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600'
+                  }`}
+                >
+                  <Icon className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-stone-900">{row.title}</span>
+                  <span className="mt-0.5 block text-[12px] leading-snug text-stone-500">{row.desc}</span>
+                </span>
+                <span className="shrink-0 text-stone-300" aria-hidden>
+                  ›
+                </span>
+              </button>
+            );
+          })}
+        </section>
+
+        {import.meta.env.DEV ? (
+          <section className="mb-4 rounded-2xl border border-violet-200 bg-violet-50/80 p-4 shadow-sm">
+            <h2 className="mb-1 text-sm font-bold text-violet-900">{tr.moreDev}</h2>
+            <p className="mb-3 text-[11px] text-violet-800/90">{tr.moreDevDesc}</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => persistAppPlan('pro')}
+                className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white"
+              >
+                DEV → Pro
+              </button>
+              <button
+                type="button"
+                onClick={() => persistAppPlan('free')}
+                className="rounded-xl border border-violet-300 bg-white px-3 py-2 text-xs font-bold text-violet-800"
+              >
+                DEV → Free
+              </button>
+            </div>
+          </section>
+        ) : null}
+      </>
+    );
+  };
+
   const renderRemindersPage = () => {
     const perm = notificationPerm;
     const canNotify = perm === 'granted';
+    const enabledReminders = reminders.filter((r) => r.enabled);
+    const todayReminders = [...enabledReminders].sort((a, b) => a.time.localeCompare(b.time));
     const kindLabel = (k: ReminderKind) => {
       if (k === 'daily') return tr.remindersTypeDaily;
       if (k === 'weight') return tr.remindersTypeWeight;
@@ -4695,13 +4893,6 @@ export default function App() {
     return (
       <>
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setPage('settings')}
-            className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
-          >
-            ← {tr.remindersBack}
-          </button>
           <div className="text-3xl" aria-hidden>🔔</div>
           <h1 className="mt-2 text-xl font-bold text-stone-900">{tr.remindersTitle}</h1>
           <p className="mt-1 text-sm text-stone-500">{tr.remindersLead}</p>
@@ -4732,6 +4923,38 @@ export default function App() {
           )}
         </section>
 
+        <section className="mb-4 rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50/90 to-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-stone-900">{tr.remindersTodaySection}</h2>
+            <span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-orange-700 ring-1 ring-orange-100">
+              {tr.remindersEnabledSection} {enabledReminders.length}
+            </span>
+          </div>
+          {todayReminders.length === 0 ? (
+            <p className="text-[13px] leading-relaxed text-stone-600">{tr.remindersTodayEmpty}</p>
+          ) : (
+            <ul className="space-y-2">
+              {todayReminders.map((r) => {
+                const cat = cats.find((c) => c.id === r.catId);
+                return (
+                  <li
+                    key={`today-${r.id}`}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-orange-100 bg-white px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-stone-900">{r.title}</p>
+                      <p className="text-[11px] text-stone-500">
+                        {cat?.emoji} {cat?.name ?? r.catId}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-bold tabular-nums text-orange-600">{r.time}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
         <p className="mb-3 text-xs text-stone-500">
           {tr.remindersCount}：{reminders.length} / {reminderLimit}
         </p>
@@ -4741,7 +4964,7 @@ export default function App() {
             {appPlan === 'free' ? (
               <button
                 type="button"
-                onClick={() => setPage('settings')}
+                onClick={() => openPremium('general')}
                 className="mt-2 block font-semibold text-orange-600 hover:underline"
               >
                 {tr.openSettings}
@@ -4750,70 +4973,9 @@ export default function App() {
           </div>
         ) : null}
 
-        {reminders.length === 0 ? (
-          <div className="mb-4 animate-fade-in space-y-4 rounded-2xl border border-orange-100 bg-white p-8 text-center shadow-sm">
-            <p className="text-[15px] leading-relaxed text-stone-700">{tr.emptyRemindersTitle}</p>
-            <button
-              type="button"
-              onClick={() => document.getElementById('reminders-quick-add')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="w-full rounded-2xl bg-orange-500 py-3 text-[14px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99]"
-            >
-              {tr.emptyRemindersCta}
-            </button>
-          </div>
-        ) : (
-          <div className="mb-4 space-y-3">
-            {reminders.map((r) => {
-              const cat = cats.find((c) => c.id === r.catId);
-              return (
-                <article
-                  key={r.id}
-                  className={`rounded-2xl border p-4 shadow-sm ${r.enabled ? 'border-orange-100 bg-white' : 'border-stone-100 bg-stone-50/80 opacity-80'}`}
-                >
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-bold text-stone-900">{r.title}</p>
-                      <p className="mt-0.5 text-xs text-stone-500">
-                        {cat?.emoji} {cat?.name ?? r.catId} · {kindLabel(r.type)} ·{' '}
-                        {repeatTypeLabel(r.repeatType, lang)}
-                        {r.repeatInterval > 1 ? ` ×${r.repeatInterval}` : ''}
-                      </p>
-                    </div>
-                    <label className="flex shrink-0 items-center gap-1.5 text-xs font-bold text-stone-600">
-                      <input
-                        type="checkbox"
-                        checked={r.enabled}
-                        onChange={(e) => updateReminder(r.id, { enabled: e.target.checked })}
-                        className="h-4 w-4 rounded border-stone-300 text-orange-500"
-                      />
-                      {tr.remindersEnabled}
-                    </label>
-                  </div>
-                  <div className="flex flex-wrap items-end gap-2">
-                    <div>
-                      <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{tr.remindersTime}</label>
-                      <input
-                        type="time"
-                        value={r.time}
-                        onChange={(e) => updateReminder(r.id, { time: e.target.value })}
-                        className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => deleteReminder(r.id)}
-                      className="ml-auto rounded-xl border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
-                    >
-                      {tr.remindersDelete}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-
         <section id="reminders-quick-add" className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
+          <h2 className="mb-1 text-sm font-bold text-stone-900">{tr.remindersAddSection}</h2>
+          <p className="mb-3 text-[11px] text-stone-500">{tr.remindersQuickAdd}</p>
           <div className="mb-3">
             <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersForCat}</label>
             <select
@@ -4929,6 +5091,65 @@ export default function App() {
             {tr.remindersAdd}
           </button>
         </section>
+
+        <section className="mb-4">
+          <h2 className="mb-3 text-sm font-bold text-stone-900">{tr.remindersListSection}</h2>
+          {reminders.length === 0 ? (
+            <p className="rounded-2xl border border-stone-100 bg-white px-4 py-6 text-center text-sm leading-relaxed text-stone-600 shadow-sm">
+              {tr.remindersEmpty}
+            </p>
+          ) : (
+            <div className="space-y-3">
+            {reminders.map((r) => {
+              const cat = cats.find((c) => c.id === r.catId);
+              return (
+                <article
+                  key={r.id}
+                  className={`rounded-2xl border p-4 shadow-sm ${r.enabled ? 'border-orange-100 bg-white' : 'border-stone-100 bg-stone-50/80 opacity-80'}`}
+                >
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-stone-900">{r.title}</p>
+                      <p className="mt-0.5 text-xs text-stone-500">
+                        {cat?.emoji} {cat?.name ?? r.catId} · {kindLabel(r.type)} ·{' '}
+                        {repeatTypeLabel(r.repeatType, lang)}
+                        {r.repeatInterval > 1 ? ` ×${r.repeatInterval}` : ''}
+                      </p>
+                    </div>
+                    <label className="flex shrink-0 items-center gap-1.5 text-xs font-bold text-stone-600">
+                      <input
+                        type="checkbox"
+                        checked={r.enabled}
+                        onChange={(e) => updateReminder(r.id, { enabled: e.target.checked })}
+                        className="h-4 w-4 rounded border-stone-300 text-orange-500"
+                      />
+                      {tr.remindersEnabled}
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{tr.remindersTime}</label>
+                      <input
+                        type="time"
+                        value={r.time}
+                        onChange={(e) => updateReminder(r.id, { time: e.target.value })}
+                        className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteReminder(r.id)}
+                      className="ml-auto rounded-xl border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
+                    >
+                      {tr.remindersDelete}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            </div>
+          )}
+        </section>
       </>
     );
   };
@@ -5034,27 +5255,12 @@ export default function App() {
       <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
         <button
           type="button"
-          onClick={() => setPage('cats')}
+          onClick={() => setPage('more')}
           className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
         >
           ← {tr.settingsBack}
         </button>
         <h1 className="text-xl font-bold text-stone-900">{tr.settingsTitle}</h1>
-      </section>
-
-      <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.remindersTitle}</h2>
-        <p className="mb-3 text-xs leading-relaxed text-stone-500">{tr.remindersLead}</p>
-        <button
-          type="button"
-          onClick={() => setPage('reminders')}
-          className="w-full rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
-        >
-          {tr.remindersTitle}
-        </button>
-        {appPlan === 'free' ? (
-          <p className="mt-2 text-[11px] leading-relaxed text-stone-400">{tr.remindersLimitFree}</p>
-        ) : null}
       </section>
 
       <section className="mb-4">
@@ -5148,17 +5354,15 @@ export default function App() {
 
   const renderCatsPage = () => (
     <>
-      <section className="mb-3 flex flex-wrap items-center gap-2">
+      <section className="mb-3">
         <button
           type="button"
-          onClick={() => setPage('settings')}
-          className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 shadow-sm"
+          onClick={() => setPage('more')}
+          className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
         >
-          ⚙ {tr.openSettings}
+          ← {tr.moreBack}
         </button>
       </section>
-
-      {renderAuthAccountSection()}
 
       {appPlan === 'free' && activeCats.length > FREE_MAX_ACTIVE_PETS ? (
         <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950 shadow-sm">
@@ -5535,13 +5739,8 @@ export default function App() {
                 className={`grid grid-cols-3 gap-2 ${rowIndex > 0 ? 'border-t border-orange-100/90 pt-2.5' : ''}`}
               >
               {row.map((tab) => {
-                const systemActive =
-                  tab.id === 'cats' &&
-                  (page === 'cats' ||
-                    page === 'settings' ||
-                    page === 'sharedCare' ||
-                    page === 'reminders');
-                const active = tab.id === 'cats' ? systemActive : page === tab.id;
+                const moreActive = tab.id === 'more' && MORE_SUB_PAGES.includes(page);
+                const active = tab.id === 'more' ? moreActive : page === tab.id;
                 const TabIcon = tab.Icon;
                 const label = tr[tab.labelKey];
                 return (
@@ -5656,9 +5855,10 @@ export default function App() {
         {page === 'weight' && renderWeightPage()}
         {page === 'vet' && renderVetPage()}
         {page === 'history' && renderHistoryPage()}
+        {page === 'reminders' && renderRemindersPage()}
+        {page === 'more' && renderMorePage()}
         {page === 'cats' && renderCatsPage()}
         {page === 'settings' && renderSettingsPage()}
-        {page === 'reminders' && renderRemindersPage()}
         {page === 'sharedCare' && renderSharedCarePage()}
         {page === 'assistant' && renderAssistantPage()}
         </div>
