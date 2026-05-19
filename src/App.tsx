@@ -6,10 +6,12 @@ import {
   Clock,
   Crown,
   Download,
+  FileText,
   LayoutGrid,
   Lock,
   Scale,
   Settings,
+  Shield,
   Sparkles,
   Stethoscope,
   User,
@@ -18,6 +20,7 @@ import {
 import { Onboarding } from './components/Onboarding';
 import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
 import { isOnboardingDone, markOnboardingDone } from './onboardingStorage';
+import { navigateTo } from './legalNavigate';
 import { useToast } from './context/ToastContext';
 import {
   type AssistantContext,
@@ -360,14 +363,14 @@ const text = {
     exportDone: '備份檔已下載',
     importDone: '備份已匯入，頁面將重新整理',
     importFailed: '匯入失敗，請確認檔案是寵物日曆匯出的 JSON 備份',
-    privacyTitle: '隱私政策',
-    privacyDesc: '目前版本不需要登入，資料主要保存在你的手機 / 電腦瀏覽器內，不會主動上傳到伺服器。',
-    privacyPoint1: '我們不會要求你填寫真實姓名、電話或地址。',
-    privacyPoint2: '寵物資料、體重、異常紀錄、備註與照片會保存在本機瀏覽器。',
-    privacyPoint3: '如果你清除瀏覽器資料、換手機或更換瀏覽器，紀錄可能會消失，請先使用備份匯出。',
-    privacyPoint4: '列印、截圖、複製獸醫報告或備份檔分享出去後，請自行注意照片與健康紀錄隱私。',
-    copyPrivacy: '複製隱私政策',
-    privacyCopied: '隱私政策已複製',
+    legalSectionTitle: '法律與隱私',
+    legalSectionDesc: '查看完整隱私政策與服務條款。',
+    legalPrivacyLink: '隱私政策',
+    legalTermsLink: '服務條款',
+    moreLegalPrivacy: '隱私政策',
+    moreLegalPrivacyDesc: '了解我們如何收集與保護你的資料',
+    moreLegalTerms: '服務條款',
+    moreLegalTermsDesc: '使用本 App 的相關規範',
     langButton: 'EN',
     removePhoto: '刪除',
     close: '關閉',
@@ -806,14 +809,14 @@ const text = {
     exportDone: 'Backup file downloaded',
     importDone: 'Backup imported. The page will reload.',
     importFailed: 'Import failed. Please choose a valid Pet Calendar JSON backup file.',
-    privacyTitle: 'Privacy policy',
-    privacyDesc: 'This version does not require login. Records are mainly saved in your phone / computer browser and are not actively uploaded to a server.',
-    privacyPoint1: 'We do not ask for your real name, phone number, or address.',
-    privacyPoint2: 'Pet profile, weight, abnormal notes, daily notes, and photos are saved in this local browser.',
-    privacyPoint3: 'If you clear browser data, switch phones, or change browsers, records may be lost. Please export a backup first.',
-    privacyPoint4: 'After you print, screenshot, copy a vet report, or share a backup file, please manage the privacy of photos and health records yourself.',
-    copyPrivacy: 'Copy privacy policy',
-    privacyCopied: 'Privacy policy copied',
+    legalSectionTitle: 'Legal & privacy',
+    legalSectionDesc: 'Read the full privacy policy and terms of service.',
+    legalPrivacyLink: 'Privacy policy',
+    legalTermsLink: 'Terms of service',
+    moreLegalPrivacy: 'Privacy policy',
+    moreLegalPrivacyDesc: 'How we collect and protect your data',
+    moreLegalTerms: 'Terms of service',
+    moreLegalTermsDesc: 'Rules for using this app',
     langButton: '中',
     removePhoto: 'Remove',
     close: 'Close',
@@ -3224,26 +3227,6 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const copyPrivacyPolicy = async () => {
-    const policy = [
-      tr.privacyTitle,
-      '',
-      tr.privacyDesc,
-      '',
-      `1. ${tr.privacyPoint1}`,
-      `2. ${tr.privacyPoint2}`,
-      `3. ${tr.privacyPoint3}`,
-      `4. ${tr.privacyPoint4}`,
-    ].join('\n');
-
-    try {
-      await navigator.clipboard.writeText(policy);
-      showToast(tr.privacyCopied, 'success');
-    } catch {
-      showToast(tr.copyFailed, 'error');
-    }
-  };
-
   const resetToday = () => {
     if (confirm(tr.confirmClearToday)) {
       setDaily({});
@@ -4921,6 +4904,18 @@ export default function App() {
         desc: tr.moreAdvancedDesc,
         onClick: () => setPage('settings'),
       },
+      {
+        icon: Shield,
+        title: tr.moreLegalPrivacy,
+        desc: tr.moreLegalPrivacyDesc,
+        onClick: () => navigateTo('/privacy'),
+      },
+      {
+        icon: FileText,
+        title: tr.moreLegalTerms,
+        desc: tr.moreLegalTermsDesc,
+        onClick: () => navigateTo('/terms'),
+      },
     ];
 
     return (
@@ -5548,23 +5543,30 @@ export default function App() {
       </section>
 
       <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.privacyTitle}</h2>
-        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.privacyDesc}</p>
-
-        <div className="space-y-1.5 text-[13px] leading-snug text-stone-700">
-          <p>1. {tr.privacyPoint1}</p>
-          <p>2. {tr.privacyPoint2}</p>
-          <p>3. {tr.privacyPoint3}</p>
-          <p>4. {tr.privacyPoint4}</p>
+        <h2 className="mb-1 text-base font-bold text-stone-900">{tr.legalSectionTitle}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.legalSectionDesc}</p>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => navigateTo('/privacy')}
+            className="flex w-full items-center justify-between rounded-xl border border-orange-100 bg-gradient-to-r from-amber-50/80 to-orange-50/50 px-4 py-3 text-left transition active:scale-[0.99]"
+          >
+            <span className="text-sm font-bold text-stone-900">{tr.legalPrivacyLink}</span>
+            <span className="text-orange-500" aria-hidden>
+              →
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigateTo('/terms')}
+            className="flex w-full items-center justify-between rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 text-left transition active:scale-[0.99]"
+          >
+            <span className="text-sm font-bold text-stone-900">{tr.legalTermsLink}</span>
+            <span className="text-stone-400" aria-hidden>
+              →
+            </span>
+          </button>
         </div>
-
-        <button
-          type="button"
-          onClick={copyPrivacyPolicy}
-          className="mt-3 w-full rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-600"
-        >
-          {tr.copyPrivacy}
-        </button>
       </section>
     </>
   );
