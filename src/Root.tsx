@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import App from './App.tsx';
+import { AppLaunchGate } from './AppLaunchGate.tsx';
 import { AuthCallbackPage } from './AuthCallbackPage.tsx';
 import { AppStoreScreenshotMode } from './pages/AppStoreScreenshotMode.tsx';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage.tsx';
@@ -39,5 +39,5 @@ export function Root() {
     return <AppStoreScreenshotMode />;
   }
 
-  return <App />;
+  return <AppLaunchGate />;
 }

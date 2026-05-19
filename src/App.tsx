@@ -21,6 +21,7 @@ import { Onboarding } from './components/Onboarding';
 import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
 import { isOnboardingDone, markOnboardingDone } from './onboardingStorage';
 import { navigateTo } from './legalNavigate';
+import { useAppBootstrap } from './AppBootstrapContext';
 import { useToast } from './context/ToastContext';
 import {
   type AssistantContext,
@@ -143,8 +144,6 @@ import {
   formatDueDateDisplay,
   formatReminderSchedule,
   getLocalDateKey,
-  getNotificationPermission,
-  getNotificationSupport,
   getReminderLimit,
   getUpcomingOnceReminders,
   loadReminders,
@@ -152,12 +151,19 @@ import {
   processDueReminders,
   reminderAppliesOnDate,
   REMINDER_TEMPLATES,
-  requestNotificationPermission,
   saveReminders,
   type Reminder,
   type ReminderKind,
   type ReminderRepeatType,
 } from './reminders';
+import {
+  getNotificationPermission,
+  getNotificationServiceStatus,
+  getNotificationSupport,
+  permissionStatusLabel,
+  requestNotificationPermission,
+  sendTestNotification,
+} from './services/notifications';
 import { VetReportPage } from './VetReportPage';
 import {
   exportReportElementAsPdf,
@@ -581,6 +587,17 @@ const text = {
     remindersNotifyEnable: '啟用提醒',
     remindersNotifyGranted: '通知已開啟',
     remindersNotifyUnsupported: '此裝置暫不支援通知',
+    remindersNotifySectionTitle: '推播與通知',
+    remindersNotifyStatusLabel: '通知權限狀態',
+    remindersNotifyAllowedLabel: '是否已允許通知',
+    remindersNotifyAllowedYes: '是',
+    remindersNotifyAllowedNo: '否',
+    remindersNotifyChannelLabel: '目前管道',
+    remindersNotifyChannelLocal: '本機通知（Local）',
+    remindersNotifyChannelRemoteHint: '遠端推播（APNs / FCM）將於正式版 App 啟用',
+    remindersNotifyTest: '發送測試通知',
+    remindersNotifyTestOk: '已發送測試通知',
+    remindersNotifyTestFail: '無法發送，請先允許通知權限',
     remindersCount: '提醒數量',
     remindersAdd: '新增提醒',
     remindersAddCustom: '自訂提醒',
@@ -1030,6 +1047,17 @@ const text = {
     remindersNotifyEnable: 'Enable reminders',
     remindersNotifyGranted: 'Notifications enabled',
     remindersNotifyUnsupported: 'Notifications are not supported on this device',
+    remindersNotifySectionTitle: 'Push & notifications',
+    remindersNotifyStatusLabel: 'Permission status',
+    remindersNotifyAllowedLabel: 'Notifications allowed',
+    remindersNotifyAllowedYes: 'Yes',
+    remindersNotifyAllowedNo: 'No',
+    remindersNotifyChannelLabel: 'Delivery channel',
+    remindersNotifyChannelLocal: 'Local notifications',
+    remindersNotifyChannelRemoteHint: 'Remote push (APNs / FCM) will ship with the native app',
+    remindersNotifyTest: 'Send test notification',
+    remindersNotifyTestOk: 'Test notification sent',
+    remindersNotifyTestFail: 'Could not send — allow notifications first',
     remindersCount: 'Reminders',
     remindersAdd: 'Add reminder',
     remindersAddCustom: 'Custom reminder',
@@ -1446,12 +1474,15 @@ function formatAuthErrorMessage(lang: Lang, err: unknown): string {
 }
 
 export default function App() {
+  const bootstrap = useAppBootstrap();
+  const skipBootstrapCloudSyncRef = useRef(bootstrap.cloudSyncDone);
+
   const today = todayKey();
   const month = monthKey();
 
   const [lang, setLang] = useState<Lang>(() => loadLang());
-  const [cats, setCats] = useState<Cat[]>([]);
-  const [petsBootReady, setPetsBootReady] = useState(false);
+  const [cats, setCats] = useState<Cat[]>(() => bootstrap.cats);
+  const [petsBootReady, setPetsBootReady] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   const tr = text[lang];
@@ -1465,15 +1496,7 @@ export default function App() {
     return n || u.email || '';
   }, [supabaseAuth.user, supabaseAuth.profile]);
 
-  const [selectedCatId, setSelectedCatId] = useState<string>(() => {
-    const savedSelectedId = safeGetItem(SELECTED_CAT_KEY);
-    const bootCats = normalizeAndPersistCats();
-    const savedCats = bootCats.filter((c) => !c.isArchived);
-    if (savedSelectedId && savedCats.some((cat) => cat.id === savedSelectedId)) {
-      return savedSelectedId;
-    }
-    return savedCats[0]?.id ?? DEFAULT_CATS[0].id;
-  });
+  const [selectedCatId, setSelectedCatId] = useState<string>(() => bootstrap.selectedCatId);
 
   const activeCats = useMemo(() => cats.filter((c) => !c.isArchived), [cats]);
   const archivedCats = useMemo(() => cats.filter((c) => c.isArchived), [cats]);
@@ -1519,7 +1542,7 @@ export default function App() {
   const [historyDateEnd, setHistoryDateEnd] = useState('');
   const [historyDatePreset, setHistoryDatePreset] = useState<HistoryDatePreset>('none');
   const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
-  const [reminders, setReminders] = useState<Reminder[]>(() => loadReminders());
+  const [reminders, setReminders] = useState<Reminder[]>(() => bootstrap.reminders);
   const [notificationPerm, setNotificationPerm] = useState(() => getNotificationPermission());
   const [reminderLimitHint, setReminderLimitHint] = useState<string | null>(null);
   const [customReminderTitle, setCustomReminderTitle] = useState('');
@@ -1528,8 +1551,8 @@ export default function App() {
   const [customReminderDueDate, setCustomReminderDueDate] = useState(() => defaultDueDateDaysFromNow(7));
   const [customReminderInterval, setCustomReminderInterval] = useState(1);
   const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
-  const [aiClientId] = useState(() => getOrCreateClientId());
-  const [appPlan, setAppPlan] = useState<AppPlan>(() => getSubscriptionStatus());
+  const [aiClientId] = useState(() => bootstrap.aiClientId);
+  const [appPlan, setAppPlan] = useState<AppPlan>(() => bootstrap.appPlan);
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const maxDailyPhotos = useMemo(() => getMaxDailyPhotos(appPlan), [appPlan]);
   const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
@@ -1596,7 +1619,7 @@ export default function App() {
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
 
-  const [catRolesMap, setCatRolesMap] = useState<Record<string, CatAccessRole>>({});
+  const [catRolesMap, setCatRolesMap] = useState<Record<string, CatAccessRole>>(() => bootstrap.catRolesMap);
   const [sharedCareMembers, setSharedCareMembers] = useState<SharedCareMember[]>([]);
   const [sharedCareInviteCode, setSharedCareInviteCode] = useState<string | null>(null);
   const [selectedCatRole, setSelectedCatRole] = useState<CatAccessRole>(null);
@@ -1625,20 +1648,6 @@ export default function App() {
     },
     []
   );
-
-  useEffect(() => {
-    const uid = supabaseAuth.user?.id ?? '';
-    const boot = normalizeAndPersistCats(uid);
-    setCats(boot);
-    const active = boot.filter((c) => !c.isArchived);
-    const savedSelectedId = safeGetItem(SELECTED_CAT_KEY);
-    const nextId =
-      savedSelectedId && active.some((c) => c.id === savedSelectedId)
-        ? savedSelectedId
-        : active[0]?.id ?? boot[0]?.id ?? DEFAULT_CATS[0].id;
-    setSelectedCatId(nextId);
-    setPetsBootReady(true);
-  }, []);
 
   const reloadCatsFromCloud = useCallback(async (): Promise<Cat[]> => {
     const sb = supabaseAuth.supabase;
@@ -1931,8 +1940,8 @@ export default function App() {
   const [assistantApiReady, setAssistantApiReady] = useState<boolean | null>(null);
   /** false = health fetch failed; true = got JSON (openaiReady may still be false). */
   const [assistantHealthReachable, setAssistantHealthReachable] = useState<boolean | null>(null);
-  const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(() =>
-    buildAssistantHealthFromLocal(getAiPlan(), getOrCreateClientId(), todayKey())
+  const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(
+    () => bootstrap.assistantQuota
   );
   const persistAppPlan = (p: AppPlan) => {
     if (p === 'free') downgradeToFree();
@@ -2447,6 +2456,15 @@ export default function App() {
   }, [lang, catNameById]);
 
   useEffect(() => {
+    const syncPerm = () => setNotificationPerm(getNotificationPermission());
+    const onVis = () => {
+      if (document.visibilityState === 'visible') syncPerm();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  useEffect(() => {
     safeSetItem(LANG_KEY, lang);
   }, [lang]);
 
@@ -2456,6 +2474,12 @@ export default function App() {
 
   useEffect(() => {
     if (!supabaseAuth.authReady) return;
+    if (skipBootstrapCloudSyncRef.current) {
+      skipBootstrapCloudSyncRef.current = false;
+      setCatsCloudBusy(false);
+      setPetsBootReady(true);
+      return;
+    }
     if (!supabaseAuth.user || !supabaseAuth.supabase) {
       setCatsCloudBusy(false);
       setCatsCloudErr(null);
@@ -4990,6 +5014,7 @@ export default function App() {
   const renderRemindersPage = () => {
     const perm = notificationPerm;
     const canNotify = perm === 'granted';
+    const notifyStatus = getNotificationServiceStatus();
     const todayKey = getLocalDateKey();
     const enabledReminders = reminders.filter((r) => r.enabled);
     const todayReminders = enabledReminders
@@ -5013,14 +5038,39 @@ export default function App() {
         </section>
 
         <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-bold text-stone-900">{tr.remindersNotifySectionTitle}</h2>
           {!getNotificationSupport() ? (
-            <p className="text-sm text-stone-600">{tr.remindersNotifyUnsupported}</p>
-          ) : canNotify ? (
-            <p className="text-sm font-medium text-emerald-700">{tr.remindersNotifyGranted}</p>
+            <p className="mt-2 text-sm text-stone-600">{tr.remindersNotifyUnsupported}</p>
           ) : (
+            <dl className="mt-3 space-y-2.5 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-stone-500">{tr.remindersNotifyStatusLabel}</dt>
+                <dd className="font-semibold text-stone-900">{permissionStatusLabel(perm, lang)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-stone-500">{tr.remindersNotifyAllowedLabel}</dt>
+                <dd
+                  className={`font-semibold ${canNotify ? 'text-emerald-700' : 'text-amber-800'}`}
+                >
+                  {canNotify ? tr.remindersNotifyAllowedYes : tr.remindersNotifyAllowedNo}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-stone-500">{tr.remindersNotifyChannelLabel}</dt>
+                <dd className="text-right font-medium text-stone-800">
+                  {notifyStatus.activeChannel === 'remote'
+                    ? 'Remote'
+                    : tr.remindersNotifyChannelLocal}
+                </dd>
+              </div>
+            </dl>
+          )}
+          {canNotify ? (
+            <p className="mt-3 text-sm font-medium text-emerald-700">{tr.remindersNotifyGranted}</p>
+          ) : getNotificationSupport() ? (
             <>
               {perm === 'denied' ? (
-                <p className="text-sm font-medium text-amber-800">{tr.remindersNotifyDenied}</p>
+                <p className="mt-3 text-sm font-medium text-amber-800">{tr.remindersNotifyDenied}</p>
               ) : null}
               <button
                 type="button"
@@ -5034,7 +5084,23 @@ export default function App() {
                 {tr.remindersNotifyEnable}
               </button>
             </>
-          )}
+          ) : null}
+          <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
+            {tr.remindersNotifyChannelRemoteHint}
+          </p>
+          {getNotificationSupport() ? (
+            <button
+              type="button"
+              disabled={!canNotify}
+              onClick={() => {
+                const ok = sendTestNotification(lang);
+                showToast(ok ? tr.remindersNotifyTestOk : tr.remindersNotifyTestFail, ok ? 'success' : 'error');
+              }}
+              className="mt-3 w-full rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-sm font-bold text-orange-800 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {tr.remindersNotifyTest}
+            </button>
+          ) : null}
         </section>
 
         <section className="mb-4 rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50/90 to-white p-4 shadow-sm">
@@ -5883,7 +5949,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       {showOnboarding ? <Onboarding lang={lang} onComplete={completeOnboarding} /> : null}
-      {supabaseAuth.configured && !supabaseAuth.authReady ? (
+      {supabaseAuth.configured && !supabaseAuth.authReady && !petsBootReady ? (
         <div className="mx-auto max-w-md space-y-5 px-2 py-14 animate-fade-in">
           <p className="text-center text-[14px] font-semibold text-stone-600">{tr.authBootTitle}</p>
           <SkeletonCard rows={5} />
