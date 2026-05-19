@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .animate-fade-in {
+    animation: appFadeIn 0.35s ease-out both;
+  }
+  .animate-skeleton {
+    animation: skeletonShimmer 1.25s ease-in-out infinite;
+  }
+  .toast-slide-in {
+    animation: toastSlideIn 0.32s ease-out both;
+  }
+  .page-tab-fade {
+    animation: appFadeIn 0.28s ease-out both;
+  }
+  .ai-quota-attention {
+    animation: aiQuotaSoftPulse 2.8s ease-in-out infinite;
+  }
+  .ai-quota-bar-pulse {
+    animation: aiQuotaBarGlow 2.8s ease-in-out infinite;
+  }
+}
+
+@keyframes appFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes aiQuotaSoftPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(251, 146, 60, 0.2),
+      0 4px 16px -6px rgba(234, 88, 12, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(251, 146, 60, 0.45),
+      0 8px 28px -6px rgba(234, 88, 12, 0.22);
+  }
+}
+
+@keyframes aiQuotaBarGlow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.08);
+  }
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*
+ * Native-like iOS / PWA: form fields ≥16px to avoid Safari focus auto-zoom.
+ * After all Tailwind + @layer so this wins over utilities like text-sm on inputs.
+ */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='range']):not(
+    [type='color']
+  ),
+textarea,
+select {
+  font-size: max(16px, 1rem) !important;
+}
