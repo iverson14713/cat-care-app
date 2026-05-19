@@ -15,7 +15,9 @@ import {
   User,
   type LucideIcon,
 } from 'lucide-react';
+import { Onboarding } from './components/Onboarding';
 import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
+import { isOnboardingDone, markOnboardingDone } from './onboardingStorage';
 import { useToast } from './context/ToastContext';
 import {
   type AssistantContext,
@@ -471,6 +473,9 @@ const text = {
     settingsAiQuotaTitle: '今日 AI 次數',
     settingsAiQuotaHint: '含獸醫報告「整理重點」、照護助理、週報與隨口問 AI；每日重新計算。',
     settingsBack: '返回設定',
+    settingsOnboardingTitle: '使用導覽',
+    settingsOnboardingDesc: '再次查看首次開啟 App 時的功能介紹。',
+    settingsReplayOnboarding: '重新觀看導覽',
     authAccountSection: '帳號與登入',
     authNotConfigured: '雲端登入尚未開放。請確認伺服器已完成雲端連線設定後，重新整理此頁面。',
     authLoggedInStrip: '已登入',
@@ -906,6 +911,9 @@ const text = {
     settingsAiQuotaTitle: 'AI uses today',
     settingsAiQuotaHint: 'Shared across vet report highlights, care assistant, weekly report, and Q&A. Resets daily.',
     settingsBack: 'Back to Settings',
+    settingsOnboardingTitle: 'App tour',
+    settingsOnboardingDesc: 'Watch the first-launch introduction again.',
+    settingsReplayOnboarding: 'Replay onboarding',
     authAccountSection: 'Account',
     authNotConfigured:
       'Cloud sign-in is not available yet. Make sure cloud connection is set up on the server, then refresh this page.',
@@ -1463,6 +1471,7 @@ export default function App() {
     [supabaseAuth.user, supabaseAuth.supabase, selectedCat?.id]
   );
 
+  const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingDone());
   const [page, setPage] = useState<Page>('today');
   const [newCatName, setNewCatName] = useState('');
   const [addCatNameError, setAddCatNameError] = useState<string | null>(null);
@@ -1491,6 +1500,15 @@ export default function App() {
   const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
   const [premiumSheetReason, setPremiumSheetReason] = useState<PremiumUpsellReason>('general');
   const [aiPremiumCardVisible, setAiPremiumCardVisible] = useState(false);
+  const completeOnboarding = useCallback(() => {
+    markOnboardingDone();
+    setShowOnboarding(false);
+  }, []);
+
+  const replayOnboarding = useCallback(() => {
+    setShowOnboarding(true);
+  }, []);
+
   const openPremium = useCallback((reason: PremiumUpsellReason = 'general') => {
     setPremiumSheetReason(reason);
     setPremiumSheetOpen(true);
@@ -5401,6 +5419,18 @@ export default function App() {
         <p className="mt-2 text-[11px] leading-snug text-stone-400">{tr.importBackupDesc}</p>
       </section>
 
+      <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
+        <h2 className="mb-1 text-base font-bold text-stone-900">{tr.settingsOnboardingTitle}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.settingsOnboardingDesc}</p>
+        <button
+          type="button"
+          onClick={replayOnboarding}
+          className="w-full rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-sm font-bold text-orange-800 transition active:scale-[0.99]"
+        >
+          {tr.settingsReplayOnboarding}
+        </button>
+      </section>
+
       <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.privacyTitle}</h2>
         <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.privacyDesc}</p>
@@ -5734,6 +5764,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
+      {showOnboarding ? <Onboarding lang={lang} onComplete={completeOnboarding} /> : null}
       {supabaseAuth.configured && !supabaseAuth.authReady ? (
         <div className="mx-auto max-w-md space-y-5 px-2 py-14 animate-fade-in">
           <p className="text-center text-[14px] font-semibold text-stone-600">{tr.authBootTitle}</p>
