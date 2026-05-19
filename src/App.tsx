@@ -136,14 +136,19 @@ import {
 import {
   createCustomReminder,
   createReminderFromTemplate,
+  defaultDueDateDaysFromNow,
+  formatDueDateDisplay,
+  formatReminderSchedule,
+  getLocalDateKey,
   getNotificationPermission,
   getNotificationSupport,
   getReminderLimit,
+  getUpcomingOnceReminders,
   loadReminders,
   remindersWithoutCat,
   processDueReminders,
+  reminderAppliesOnDate,
   REMINDER_TEMPLATES,
-  repeatTypeLabel,
   requestNotificationPermission,
   saveReminders,
   type Reminder,
@@ -590,6 +595,10 @@ const text = {
     remindersRepeatDaily: '每天',
     remindersRepeatWeekly: '每週',
     remindersRepeatMonthly: '每月',
+    remindersRepeatOnce: '指定日期',
+    remindersDueDate: '提醒日期',
+    remindersUpcomingSection: '即將到期',
+    remindersUpcomingEmpty: '沒有之後的指定日期提醒。',
     remindersInterval: '間隔',
     remindersTypeDaily: '每日照護',
     remindersTypeWeight: '體重',
@@ -1035,6 +1044,10 @@ const text = {
     remindersRepeatDaily: 'Daily',
     remindersRepeatWeekly: 'Weekly',
     remindersRepeatMonthly: 'Monthly',
+    remindersRepeatOnce: 'Specific date',
+    remindersDueDate: 'Reminder date',
+    remindersUpcomingSection: 'Upcoming',
+    remindersUpcomingEmpty: 'No upcoming dated reminders.',
     remindersInterval: 'Every',
     remindersTypeDaily: 'Daily care',
     remindersTypeWeight: 'Weight',
@@ -1509,6 +1522,7 @@ export default function App() {
   const [customReminderTitle, setCustomReminderTitle] = useState('');
   const [customReminderTime, setCustomReminderTime] = useState('09:00');
   const [customReminderRepeat, setCustomReminderRepeat] = useState<ReminderRepeatType>('daily');
+  const [customReminderDueDate, setCustomReminderDueDate] = useState(() => defaultDueDateDaysFromNow(7));
   const [customReminderInterval, setCustomReminderInterval] = useState(1);
   const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
   const [aiClientId] = useState(() => getOrCreateClientId());
@@ -4981,8 +4995,12 @@ export default function App() {
   const renderRemindersPage = () => {
     const perm = notificationPerm;
     const canNotify = perm === 'granted';
+    const todayKey = getLocalDateKey();
     const enabledReminders = reminders.filter((r) => r.enabled);
-    const todayReminders = [...enabledReminders].sort((a, b) => a.time.localeCompare(b.time));
+    const todayReminders = enabledReminders
+      .filter((r) => reminderAppliesOnDate(r, todayKey))
+      .sort((a, b) => a.time.localeCompare(b.time));
+    const upcomingReminders = getUpcomingOnceReminders(reminders, todayKey);
     const kindLabel = (k: ReminderKind) => {
       if (k === 'daily') return tr.remindersTypeDaily;
       if (k === 'weight') return tr.remindersTypeWeight;
@@ -5046,9 +5064,38 @@ export default function App() {
                       <p className="truncate text-sm font-semibold text-stone-900">{r.title}</p>
                       <p className="text-[11px] text-stone-500">
                         {cat?.emoji} {cat?.name ?? r.catId}
+                        {r.repeatType === 'once' && r.dueDate ? ` · ${formatDueDateDisplay(r.dueDate, lang)}` : ''}
                       </p>
                     </div>
                     <span className="shrink-0 text-sm font-bold tabular-nums text-orange-600">{r.time}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section className="mb-4 rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50/90 to-white p-4 shadow-sm">
+          <h2 className="mb-3 text-sm font-bold text-stone-900">{tr.remindersUpcomingSection}</h2>
+          {upcomingReminders.length === 0 ? (
+            <p className="text-[13px] leading-relaxed text-stone-600">{tr.remindersUpcomingEmpty}</p>
+          ) : (
+            <ul className="space-y-2">
+              {upcomingReminders.map((r) => {
+                const cat = cats.find((c) => c.id === r.catId);
+                return (
+                  <li
+                    key={`upcoming-${r.id}`}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-stone-900">{r.title}</p>
+                      <p className="text-[11px] text-stone-500">
+                        {cat?.emoji} {cat?.name ?? r.catId}
+                        {r.dueDate ? ` · ${formatDueDateDisplay(r.dueDate, lang)}` : ''}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-bold tabular-nums text-sky-700">{r.time}</span>
                   </li>
                 );
               })}
@@ -5138,9 +5185,21 @@ export default function App() {
                 <option value="daily">{tr.remindersRepeatDaily}</option>
                 <option value="weekly">{tr.remindersRepeatWeekly}</option>
                 <option value="monthly">{tr.remindersRepeatMonthly}</option>
+                <option value="once">{tr.remindersRepeatOnce}</option>
               </select>
             </div>
           </div>
+          {customReminderRepeat === 'once' ? (
+            <div className="mb-2">
+              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersDueDate}</label>
+              <input
+                type="date"
+                value={customReminderDueDate}
+                onChange={(e) => setCustomReminderDueDate(e.target.value)}
+                className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
+              />
+            </div>
+          ) : null}
           <div className="mb-3 grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersForCat}</label>
@@ -5156,17 +5215,19 @@ export default function App() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersInterval}</label>
-              <input
-                type="number"
-                min={1}
-                max={12}
-                value={customReminderInterval}
-                onChange={(e) => setCustomReminderInterval(Math.max(1, Number(e.target.value) || 1))}
-                className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
-              />
-            </div>
+            {customReminderRepeat !== 'once' ? (
+              <div>
+                <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.remindersInterval}</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={customReminderInterval}
+                  onChange={(e) => setCustomReminderInterval(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm"
+                />
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
@@ -5181,6 +5242,7 @@ export default function App() {
                     time: customReminderTime,
                     repeatType: customReminderRepeat,
                     repeatInterval: customReminderInterval,
+                    dueDate: customReminderRepeat === 'once' ? customReminderDueDate : null,
                   })
                 )
               ) {
@@ -5212,9 +5274,7 @@ export default function App() {
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-stone-900">{r.title}</p>
                       <p className="mt-0.5 text-xs text-stone-500">
-                        {cat?.emoji} {cat?.name ?? r.catId} · {kindLabel(r.type)} ·{' '}
-                        {repeatTypeLabel(r.repeatType, lang)}
-                        {r.repeatInterval > 1 ? ` ×${r.repeatInterval}` : ''}
+                        {cat?.emoji} {cat?.name ?? r.catId} · {kindLabel(r.type)} · {formatReminderSchedule(r, lang)}
                       </p>
                     </div>
                     <label className="flex shrink-0 items-center gap-1.5 text-xs font-bold text-stone-600">
@@ -5237,6 +5297,55 @@ export default function App() {
                         className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
                       />
                     </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{tr.remindersRepeat}</label>
+                      <select
+                        value={r.repeatType}
+                        onChange={(e) => {
+                          const next = e.target.value as ReminderRepeatType;
+                          if (next === 'once') {
+                            updateReminder(r.id, {
+                              repeatType: next,
+                              dueDate: r.dueDate ?? getLocalDateKey(),
+                              repeatInterval: 1,
+                            });
+                          } else {
+                            updateReminder(r.id, { repeatType: next, dueDate: null });
+                          }
+                        }}
+                        className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
+                      >
+                        <option value="daily">{tr.remindersRepeatDaily}</option>
+                        <option value="weekly">{tr.remindersRepeatWeekly}</option>
+                        <option value="monthly">{tr.remindersRepeatMonthly}</option>
+                        <option value="once">{tr.remindersRepeatOnce}</option>
+                      </select>
+                    </div>
+                    {r.repeatType === 'once' ? (
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{tr.remindersDueDate}</label>
+                        <input
+                          type="date"
+                          value={r.dueDate ?? getLocalDateKey()}
+                          onChange={(e) => updateReminder(r.id, { dueDate: e.target.value })}
+                          className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-bold text-stone-500">{tr.remindersInterval}</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          value={r.repeatInterval}
+                          onChange={(e) =>
+                            updateReminder(r.id, { repeatInterval: Math.max(1, Number(e.target.value) || 1) })
+                          }
+                          className="w-16 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-orange-300"
+                        />
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => deleteReminder(r.id)}
