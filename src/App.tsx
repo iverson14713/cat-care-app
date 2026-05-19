@@ -34,6 +34,15 @@ import {
 import { AiDailyQuotaCard } from './components/AiDailyQuotaCard';
 import { PremiumUpgradeCard } from './components/PremiumUpgradeCard';
 import { PremiumUpsellSheet, type PremiumUpsellReason } from './components/PremiumUpsellSheet';
+import { ProSubscriptionPanel } from './components/ProSubscriptionPanel';
+import {
+  getSubscriptionStatus,
+  purchasePro,
+  restorePurchases,
+  setSubscriptionStatus,
+  downgradeToFree,
+  type BillingPeriod,
+} from './subscription';
 import {
   AssistantApiError,
   type AssistantHealthPayload,
@@ -543,11 +552,15 @@ const text = {
     settingsPlanCurrent: '目前方案',
     settingsPlanFree: '免費版',
     settingsPlanPro: 'Pro',
-    settingsPlanHint: '正式上架後將透過 App Store 訂閱；目前可先在此開通 Pro，體驗完整功能。',
+    settingsPlanHint: '正式上架後將透過 App Store 訂閱；目前升級為測試開通，不會實際扣款。',
     settingsSwitchPro: '升級 Pro',
     settingsSwitchFree: '切回免費版',
     settingsPlanServerHint: '若畫面上顯示的方案狀態異常，可嘗試重新整理或重新登入帳號。',
-    settingsPaymentNote: '目前未串接金流，不會實際扣款。',
+    settingsPaymentNote: '正式上架後將透過 App Store 訂閱結帳。',
+    restorePurchaseOk: '已恢復 Pro 訂閱（本機）',
+    restorePurchaseNone: '找不到可恢復的購買紀錄',
+    restorePurchaseFail: '恢復購買失敗，請稍後再試',
+    purchaseProOk: '已開通 Pro（測試）',
     settingsClientIdCaption: '裝置識別（排除問題時可能會請你提供）',
     planMultiCatUpgrade: '免費版最多可新增 3 隻寵物。升級 Pro 可管理更多寵物，並享有更多 AI 次數與進階功能。',
     planFreeMultiCatBanner:
@@ -987,7 +1000,11 @@ const text = {
     settingsSwitchPro: 'Upgrade to Pro',
     settingsSwitchFree: 'Switch back to Free',
     settingsPlanServerHint: 'If your plan status looks wrong, try refreshing the page or signing in again.',
-    settingsPaymentNote: 'No billing is connected yet — nothing is charged.',
+    settingsPaymentNote: 'Billing via the App Store after launch.',
+    restorePurchaseOk: 'Pro subscription restored (on this device)',
+    restorePurchaseNone: 'No purchases found to restore',
+    restorePurchaseFail: 'Could not restore purchases. Try again later.',
+    purchaseProOk: 'Pro enabled (test)',
     settingsClientIdCaption: 'Device ID (support may ask for this if something looks wrong)',
     planMultiCatUpgrade:
       'Free plan supports up to 3 pets. Upgrade to Pro to manage more pets and unlock higher AI limits and advanced tools.',
@@ -1495,7 +1512,8 @@ export default function App() {
   const [customReminderInterval, setCustomReminderInterval] = useState(1);
   const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
   const [aiClientId] = useState(() => getOrCreateClientId());
-  const [appPlan, setAppPlan] = useState<AppPlan>(() => getAiPlan());
+  const [appPlan, setAppPlan] = useState<AppPlan>(() => getSubscriptionStatus());
+  const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const maxDailyPhotos = useMemo(() => getMaxDailyPhotos(appPlan), [appPlan]);
   const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
   const [premiumSheetReason, setPremiumSheetReason] = useState<PremiumUpsellReason>('general');
@@ -1513,6 +1531,37 @@ export default function App() {
     setPremiumSheetReason(reason);
     setPremiumSheetOpen(true);
   }, []);
+
+  const handlePurchasePro = useCallback(
+    async (period: BillingPeriod) => {
+      setSubscriptionBusy(true);
+      const result = await purchasePro(period);
+      setSubscriptionBusy(false);
+      if (result.ok) {
+        persistAppPlan('pro');
+        setPremiumSheetOpen(false);
+        showToast(tr.purchaseProOk, 'success');
+      }
+    },
+    [showToast, tr.purchaseProOk]
+  );
+
+  const handleRestorePurchases = useCallback(async () => {
+    setSubscriptionBusy(true);
+    const result = await restorePurchases();
+    setSubscriptionBusy(false);
+    if (result.ok) {
+      persistAppPlan('pro');
+      setPremiumSheetOpen(false);
+      showToast(tr.restorePurchaseOk, 'success');
+      return;
+    }
+    if (result.errorCode === 'NO_PURCHASES' || result.errorCode === 'IAP_NOT_CONFIGURED') {
+      showToast(tr.restorePurchaseNone, 'error');
+    } else {
+      showToast(tr.restorePurchaseFail, 'error');
+    }
+  }, [showToast, tr.restorePurchaseOk, tr.restorePurchaseNone, tr.restorePurchaseFail]);
   const applyLocalAssistantQuota = useCallback(
     (plan: AppPlan, clientId: string, usageDate: string, prev: AssistantHealthPayload | null) => {
       const q = buildLocalAiQuota(plan, clientId, usageDate);
@@ -1869,8 +1918,9 @@ export default function App() {
     buildAssistantHealthFromLocal(getAiPlan(), getOrCreateClientId(), todayKey())
   );
   const persistAppPlan = (p: AppPlan) => {
-    setAiPlan(p);
-    setAppPlan(p);
+    if (p === 'free') downgradeToFree();
+    else setSubscriptionStatus('pro', { source: 'test' });
+    setAppPlan(getSubscriptionStatus());
     if (p === 'free') {
       setHistoryKeyword('');
       setHistoryFilter('all');
@@ -5334,60 +5384,17 @@ export default function App() {
 
       {renderAuthAccountSection()}
 
-      <section className="mb-4 overflow-hidden rounded-3xl border border-amber-200/80 bg-gradient-to-b from-amber-50/95 via-white to-orange-50/90 p-5 shadow-[0_12px_40px_-18px_rgba(234,88,12,0.35)]">
-        <div className="mb-3 flex items-center gap-2">
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-amber-500 text-white shadow-md">
-            <Crown className="h-5 w-5" strokeWidth={2.2} aria-hidden />
-          </span>
-          <div>
-            <h2 className="text-base font-bold text-stone-900">{tr.settingsPlanSection}</h2>
-            <p className="text-[11px] text-stone-500">{tr.settingsPaymentNote}</p>
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/80 bg-white/85 px-4 py-3 shadow-inner">
-          <p className="text-sm text-stone-700">
-            {tr.settingsPlanCurrent}：
-            <span className="font-bold text-orange-600">
-              {appPlan === 'pro' ? (
-                <span className="inline-flex items-center gap-1">
-                  <Crown className="inline h-3.5 w-3.5 text-amber-500" aria-hidden />
-                  {tr.settingsPlanPro}
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1">
-                  <Lock className="inline h-3.5 w-3.5 text-stone-400" aria-hidden />
-                  {tr.settingsPlanFree}
-                </span>
-              )}
-            </span>
-          </p>
-        </div>
-        <p className="mt-3 text-xs leading-relaxed text-stone-600">{tr.settingsPlanHint}</p>
-
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          {appPlan === 'free' ? (
-            <button
-              type="button"
-              onClick={() => openPremium('general')}
-              className="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3.5 text-sm font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99]"
-            >
-              {tr.settingsSwitchPro}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => persistAppPlan('free')}
-              className="rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition active:scale-[0.99]"
-            >
-              {tr.settingsSwitchFree}
-            </button>
-          )}
-        </div>
-
-        <p className="mt-4 text-[11px] leading-relaxed text-stone-400">{tr.settingsPlanServerHint}</p>
-        <p className="mt-2 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
-        <p className="mt-1 break-all rounded-lg bg-stone-50/90 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
-      </section>
+      <ProSubscriptionPanel
+        lang={lang}
+        status={appPlan}
+        busy={subscriptionBusy}
+        onUpgrade={(period) => void handlePurchasePro(period)}
+        onDowngrade={() => persistAppPlan('free')}
+        onRestore={() => void handleRestorePurchases()}
+      />
+      <p className="mb-4 px-0.5 text-[11px] leading-relaxed text-stone-500">{tr.settingsPlanServerHint}</p>
+      <p className="mb-4 px-0.5 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
+      <p className="mb-4 break-all rounded-lg bg-stone-50/90 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
 
       <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.backupTitle}</h2>
@@ -5966,8 +5973,10 @@ export default function App() {
         open={premiumSheetOpen}
         lang={lang}
         reason={premiumSheetReason}
+        busy={subscriptionBusy}
         onClose={() => setPremiumSheetOpen(false)}
-        onUpgrade={() => persistAppPlan('pro')}
+        onUpgrade={(period) => void handlePurchasePro(period)}
+        onRestore={() => void handleRestorePurchases()}
       />
         </>
       )}

@@ -1,4 +1,7 @@
 import { Crown } from 'lucide-react';
+import { useState } from 'react';
+import { SUBSCRIPTION_PRICING } from '../subscription/constants';
+import type { BillingPeriod } from '../subscription/types';
 
 export type PremiumUpsellReason =
   | 'ai'
@@ -22,6 +25,10 @@ export const premiumUpsellCopy: Record<
     yearlySave: string;
     later: string;
     upgrade: string;
+    restore: string;
+    restoring: string;
+    appStoreNote: string;
+    testNote: string;
     subtitle: Record<PremiumUpsellReason, string>;
   }
 > = {
@@ -36,11 +43,15 @@ export const premiumUpsellCopy: Record<
       'PDF 獸醫報告',
       '更多照片空間',
     ],
-    priceMonthly: 'NT$69／月',
-    priceYearly: 'NT$649／年',
-    yearlySave: '省約 22%',
+    priceMonthly: SUBSCRIPTION_PRICING.monthly.labelZh,
+    priceYearly: SUBSCRIPTION_PRICING.yearly.labelZh,
+    yearlySave: SUBSCRIPTION_PRICING.yearlySaveZh,
     later: '稍後再說',
-    upgrade: '升級 Pro',
+    upgrade: '升級 Pro（測試開通）',
+    restore: '恢復購買',
+    restoring: '恢復中…',
+    appStoreNote: '正式上架後將透過 App Store 訂閱結帳。',
+    testNote: '目前不會實際扣款，僅在本機開通 Pro 體驗。',
     subtitle: {
       ai: '今日 AI 次數已用完，升級後可獲得更多照護建議。',
       reminders: '提醒數量已達免費版上限。',
@@ -63,11 +74,15 @@ export const premiumUpsellCopy: Record<
       'PDF vet report',
       'More photo slots per day',
     ],
-    priceMonthly: 'NT$69 / month',
-    priceYearly: 'NT$649 / year',
-    yearlySave: 'Save ~22%',
+    priceMonthly: SUBSCRIPTION_PRICING.monthly.labelEn,
+    priceYearly: SUBSCRIPTION_PRICING.yearly.labelEn,
+    yearlySave: SUBSCRIPTION_PRICING.yearlySaveEn,
     later: 'Not now',
-    upgrade: 'Upgrade to Pro',
+    upgrade: 'Upgrade to Pro (test)',
+    restore: 'Restore purchases',
+    restoring: 'Restoring…',
+    appStoreNote: 'After launch, billing will go through the App Store.',
+    testNote: 'No charge in this build — test unlock on this device only.',
     subtitle: {
       ai: "You've used today's AI quota on the free plan.",
       reminders: "You've reached the free reminder limit.",
@@ -85,12 +100,22 @@ export type PremiumUpsellSheetProps = {
   open: boolean;
   lang: Lang;
   reason: PremiumUpsellReason;
+  busy?: boolean;
   onClose: () => void;
-  /** Test flow: persist Pro locally (no real IAP yet). */
-  onUpgrade: () => void;
+  onUpgrade: (period: BillingPeriod) => void;
+  onRestore: () => void;
 };
 
-export function PremiumUpsellSheet({ open, lang, reason, onClose, onUpgrade }: PremiumUpsellSheetProps) {
+export function PremiumUpsellSheet({
+  open,
+  lang,
+  reason,
+  busy = false,
+  onClose,
+  onUpgrade,
+  onRestore,
+}: PremiumUpsellSheetProps) {
+  const [period, setPeriod] = useState<BillingPeriod>('yearly');
   if (!open) return null;
   const t = premiumUpsellCopy[lang];
   const sub = t.subtitle[reason] ?? t.subtitle.general;
@@ -129,30 +154,52 @@ export function PremiumUpsellSheet({ open, lang, reason, onClose, onUpgrade }: P
             ))}
           </ul>
 
-          <div className="mt-4 flex flex-col items-center gap-1 rounded-2xl border border-amber-200/70 bg-amber-50/50 px-4 py-3">
-            <p className="text-[15px] font-bold text-stone-900">{t.priceMonthly}</p>
-            <p className="text-[15px] font-bold text-stone-900">{t.priceYearly}</p>
-            <p className="rounded-full bg-orange-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-orange-800">{t.yearlySave}</p>
-            <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">
-              {lang === 'zh' ? '正式上架後將以 App 內購買結帳；目前為測試版開通。' : 'App Store billing later; test unlock for now.'}
-            </p>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {(['monthly', 'yearly'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                disabled={busy}
+                onClick={() => setPeriod(p)}
+                className={`rounded-2xl border px-3 py-2.5 text-center transition active:scale-[0.99] ${
+                  period === p
+                    ? 'border-orange-400 bg-orange-50 ring-2 ring-orange-200'
+                    : 'border-stone-200 bg-white'
+                }`}
+              >
+                <p className="text-sm font-bold text-stone-900">{p === 'monthly' ? t.priceMonthly : t.priceYearly}</p>
+                {p === 'yearly' ? (
+                  <p className="mt-1 text-[10px] font-semibold text-orange-800">{t.yearlySave}</p>
+                ) : null}
+              </button>
+            ))}
           </div>
 
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse sm:justify-center">
+          <p className="mt-3 text-center text-[11px] leading-snug text-stone-600">{t.appStoreNote}</p>
+          <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">{t.testNote}</p>
+
+          <div className="mt-5 flex flex-col gap-2">
             <button
               type="button"
-              onClick={() => {
-                onUpgrade();
-                onClose();
-              }}
-              className="w-full rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 py-3.5 text-[15px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99] sm:min-w-[160px]"
+              disabled={busy}
+              onClick={() => onUpgrade(period)}
+              className="w-full rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 py-3.5 text-[15px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99] disabled:opacity-60"
             >
               {t.upgrade}
             </button>
             <button
               type="button"
+              disabled={busy}
+              onClick={onRestore}
+              className="w-full rounded-2xl border border-orange-200 bg-orange-50 py-3 text-[14px] font-bold text-orange-800 transition active:scale-[0.99] disabled:opacity-60"
+            >
+              {busy ? t.restoring : t.restore}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
               onClick={onClose}
-              className="w-full rounded-2xl border border-stone-200 bg-white/90 py-3.5 text-[15px] font-semibold text-stone-700 transition hover:bg-stone-50 active:scale-[0.99] sm:min-w-[140px]"
+              className="w-full rounded-2xl border border-stone-200 bg-white/90 py-3 text-[15px] font-semibold text-stone-700 transition hover:bg-stone-50 active:scale-[0.99]"
             >
               {t.later}
             </button>

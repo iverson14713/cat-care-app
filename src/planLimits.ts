@@ -1,4 +1,7 @@
-export type AppPlan = 'free' | 'pro';
+import type { SubscriptionStatus } from './subscription/types';
+
+/** @alias SubscriptionStatus — used across feature gates */
+export type AppPlan = SubscriptionStatus;
 
 export const FREE_MAX_ACTIVE_PETS = 3;
 export const MAX_PHOTOS_FREE = 3;

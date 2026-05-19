@@ -1,5 +1,6 @@
-﻿const CLIENT_KEY = 'cat-ai-client-id';
-const PLAN_KEY = 'cat-ai-plan';
+﻿import { getSubscriptionStatus, setSubscriptionStatus } from './subscription';
+
+const CLIENT_KEY = 'cat-ai-client-id';
 const CARE_PREFIX = 'cat-ai-care:v2:';
 
 /** Daily AI pool size (care-bundle + Q&A share one counter). */
@@ -137,22 +138,13 @@ export function getOrCreateClientId(): string {
   }
 }
 
-/** Stored in localStorage; drives client UI and is sent as `plan` to the assistant API. */
+/** Stored plan; backed by `petcare_subscription_status` (see `subscription/`). */
 export function getAiPlan(): 'free' | 'pro' {
-  try {
-    return localStorage.getItem(PLAN_KEY) === 'pro' ? 'pro' : 'free';
-  } catch {
-    return 'free';
-  }
+  return getSubscriptionStatus();
 }
 
 export function setAiPlan(plan: 'free' | 'pro'): void {
-  try {
-    if (plan === 'pro') localStorage.setItem(PLAN_KEY, 'pro');
-    else localStorage.removeItem(PLAN_KEY);
-  } catch {
-    // ignore
-  }
+  setSubscriptionStatus(plan);
 }
 
 export function djb2Hash(str: string): string {

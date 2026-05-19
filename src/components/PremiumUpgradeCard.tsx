@@ -61,6 +61,7 @@ export function PremiumUpgradeCard({
             <p className="rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold text-orange-800">
               {t.yearlySave}
             </p>
+            <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">{t.appStoreNote}</p>
           </div>
           <button
             type="button"
