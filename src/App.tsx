@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   Lock,
   Scale,
+  Settings,
   Sparkles,
   Stethoscope,
   User,
@@ -195,11 +196,11 @@ const MAIN_TAB_ROWS: {
   [
     { id: 'history', labelKey: 'history', Icon: Clock },
     { id: 'reminders', labelKey: 'remindersNav', Icon: Bell },
-    { id: 'more', labelKey: 'more', Icon: LayoutGrid },
+    { id: 'more', labelKey: 'more', Icon: Settings },
   ],
 ];
 
-const MORE_SUB_PAGES: Page[] = ['more', 'cats', 'settings', 'sharedCare', 'assistant'];
+const MORE_SUB_PAGES: Page[] = ['more', 'settings', 'assistant'];
 
 type WeightRecord = {
   id: string;
@@ -220,10 +221,10 @@ const text = {
     weight: '體重',
     history: '歷史',
     vet: '獸醫',
-    more: '更多',
+    more: '設定',
     remindersNav: '提醒',
-    moreTitle: '更多',
-    moreLead: '帳號、方案、寵物資料與進階設定',
+    moreTitle: '設定',
+    moreLead: '帳號、Pro、AI 助理與進階設定',
     moreAccount: '帳號',
     moreAccountDesc: '登入、同步與個人資料',
     morePro: 'Pro 方案',
@@ -237,10 +238,14 @@ const text = {
     moreExport: '匯出與備份',
     moreExportDesc: '匯出 JSON 備份或還原資料',
     moreAdvanced: '進階設定',
-    moreAdvancedDesc: 'AI 額度、方案與共同照護',
+    moreAdvancedDesc: 'AI 額度、備份與方案',
     moreDev: '開發功能',
     moreDevDesc: '本機測試用（僅開發模式）',
-    moreBack: '返回更多',
+    moreBack: '返回設定',
+    managePets: '管理寵物',
+    catsPageTitle: '寵物管理',
+    catsPageLead: '新增、編輯、封存寵物與共同照護',
+    catsBack: '返回今日',
     remindersTodaySection: '今日提醒',
     remindersTodayEmpty: '今天沒有啟用中的提醒，可在下方「新增提醒」建立。',
     remindersEnabledSection: '已啟用提醒',
@@ -465,7 +470,7 @@ const text = {
     settingsTitle: '方案與設定',
     settingsAiQuotaTitle: '今日 AI 次數',
     settingsAiQuotaHint: '含獸醫報告「整理重點」、照護助理、週報與隨口問 AI；每日重新計算。',
-    settingsBack: '返回更多',
+    settingsBack: '返回設定',
     authAccountSection: '帳號與登入',
     authNotConfigured: '雲端登入尚未開放。請確認伺服器已完成雲端連線設定後，重新整理此頁面。',
     authLoggedInStrip: '已登入',
@@ -650,10 +655,10 @@ const text = {
     weight: 'Weight',
     history: 'History',
     vet: 'Vet',
-    more: 'More',
+    more: 'Settings',
     remindersNav: 'Reminders',
-    moreTitle: 'More',
-    moreLead: 'Account, plan, pets, and advanced settings',
+    moreTitle: 'Settings',
+    moreLead: 'Account, Pro, AI assistant, and advanced options',
     moreAccount: 'Account',
     moreAccountDesc: 'Sign in, sync, and profile',
     morePro: 'Pro plan',
@@ -667,10 +672,14 @@ const text = {
     moreExport: 'Export & backup',
     moreExportDesc: 'Export JSON backup or restore data',
     moreAdvanced: 'Advanced settings',
-    moreAdvancedDesc: 'AI quota, plan, and shared care',
+    moreAdvancedDesc: 'AI quota, backup, and plan',
     moreDev: 'Developer',
     moreDevDesc: 'Local testing only (dev mode)',
-    moreBack: 'Back to More',
+    moreBack: 'Back to Settings',
+    managePets: 'Manage pets',
+    catsPageTitle: 'Pet management',
+    catsPageLead: 'Add, edit, archive pets, and shared care',
+    catsBack: 'Back to Today',
     remindersTodaySection: "Today's reminders",
     remindersTodayEmpty: 'No enabled reminders for today. Add one in the section below.',
     remindersEnabledSection: 'Enabled reminders',
@@ -896,7 +905,7 @@ const text = {
     settingsTitle: 'Plan & settings',
     settingsAiQuotaTitle: 'AI uses today',
     settingsAiQuotaHint: 'Shared across vet report highlights, care assistant, weekly report, and Q&A. Resets daily.',
-    settingsBack: 'Back to More',
+    settingsBack: 'Back to Settings',
     authAccountSection: 'Account',
     authNotConfigured:
       'Cloud sign-in is not available yet. Make sure cloud connection is set up on the server, then refresh this page.',
@@ -1597,6 +1606,12 @@ export default function App() {
     setSharedCareCopied(true);
     if (sharedCareCopyTimerRef.current) clearTimeout(sharedCareCopyTimerRef.current);
     sharedCareCopyTimerRef.current = setTimeout(() => setSharedCareCopied(false), 2000);
+  }, []);
+
+  const scrollToSharedCareSection = useCallback(() => {
+    requestAnimationFrame(() => {
+      document.getElementById('shared-care-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }, []);
 
   const canManageCatLifecycle = useCallback(
@@ -2509,7 +2524,7 @@ export default function App() {
   }, [supabaseAuth.profile?.display_name]);
 
   useEffect(() => {
-    if (!selectedCat || page !== 'sharedCare') return;
+    if (!selectedCat || (page !== 'sharedCare' && page !== 'cats')) return;
     void refreshSharedCareForCat(selectedCat.id);
   }, [selectedCat?.id, page, refreshSharedCareForCat, cloudSyncTick]);
 
@@ -2538,7 +2553,8 @@ export default function App() {
         setWeightRecords(loadWeightRecords(joined.id));
       }
       setSharedCareFeedback(text[lang].sharedCareJoinOk);
-      setPage('sharedCare');
+      setPage('cats');
+      scrollToSharedCareSection();
       params.delete('invite');
       const qs = params.toString();
       const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
@@ -2551,6 +2567,7 @@ export default function App() {
     reloadCatsFromCloud,
     today,
     month,
+    scrollToSharedCareSection,
   ]);
 
   useEffect(() => {
@@ -3276,13 +3293,27 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex shrink-0 gap-2">
-          <button onClick={toggleLanguage} className="rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-700">
+        <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+          <button
+            type="button"
+            onClick={toggleLanguage}
+            className="rounded-full bg-stone-100 px-3 py-2 text-sm font-bold text-stone-700"
+          >
             {tr.langButton}
           </button>
-
-          <button onClick={() => setPage('cats')} className="rounded-full bg-orange-100 px-4 py-2 text-sm font-bold text-orange-700">
+          <button
+            type="button"
+            onClick={() => setPage('cats')}
+            className="rounded-full bg-orange-100 px-3 py-2 text-sm font-bold text-orange-700"
+          >
             {tr.switchCat}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage('cats')}
+            className="rounded-full bg-stone-800 px-3 py-2 text-sm font-bold text-white"
+          >
+            {tr.managePets}
           </button>
         </div>
       </div>
@@ -4501,7 +4532,7 @@ export default function App() {
   };
 
 
-  const renderSharedCarePage = () => {
+  const renderSharedCareContent = () => {
     if (!selectedCat) return null;
     const t = text[lang];
     const sb = supabaseAuth.supabase;
@@ -4599,20 +4630,6 @@ export default function App() {
 
     return (
       <>
-        {renderCatSwitcher()}
-        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setPage('more')}
-            className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
-          >
-            ← {tr.moreBack}
-          </button>
-          <h1 className="text-xl font-bold text-stone-900">{t.sharedCareTitle}</h1>
-          <p className="mt-1 text-sm text-stone-500">{selectedCat.name}</p>
-          <p className="mt-2 text-[12px] leading-relaxed text-amber-800">{t.sharedCareNavHint}</p>
-        </section>
-
         {!cloudReady ? (
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-snug text-amber-950">
             {t.sharedCareCloudRequired}
@@ -4760,6 +4777,28 @@ export default function App() {
     );
   };
 
+  const renderSharedCarePage = () => {
+    if (!selectedCat) return null;
+    const t = text[lang];
+    return (
+      <>
+        {renderCatSwitcher()}
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setPage('cats')}
+            className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
+          >
+            ← {tr.catsBack}
+          </button>
+          <h1 className="text-xl font-bold text-stone-900">{t.sharedCareTitle}</h1>
+          <p className="mt-1 text-sm text-stone-500">{selectedCat.name}</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-amber-800">{t.sharedCareNavHint}</p>
+        </section>
+        {renderSharedCareContent()}
+      </>
+    );
+  };
 
   const renderMorePage = () => {
     const moreMenuRows: {
@@ -4789,16 +4828,10 @@ export default function App() {
         onClick: () => setPage('assistant'),
       },
       {
-        icon: Archive,
-        title: tr.moreArchive,
-        desc: tr.moreArchiveDesc,
-        onClick: () => setPage('cats'),
-      },
-      {
         icon: Download,
         title: tr.moreExport,
         desc: tr.moreExportDesc,
-        onClick: () => setPage('cats'),
+        onClick: () => setPage('settings'),
       },
       {
         icon: LayoutGrid,
@@ -5338,15 +5371,53 @@ export default function App() {
         <p className="mt-1 break-all rounded-lg bg-stone-50/90 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
       </section>
 
-      <section className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.sharedCareTitle}</h2>
-        <p className="mb-3 text-xs leading-relaxed text-stone-500">{tr.sharedCareNavHint}</p>
+      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.backupTitle}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.backupDesc}</p>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={exportBackup}
+            className="rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white shadow-sm"
+          >
+            {tr.exportBackup}
+          </button>
+
+          <label className="cursor-pointer rounded-xl bg-stone-800 py-2.5 text-center text-sm font-bold text-white shadow-sm">
+            {tr.importBackup}
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                importBackup(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+
+        <p className="mt-2 text-[11px] leading-snug text-stone-400">{tr.importBackupDesc}</p>
+      </section>
+
+      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
+        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.privacyTitle}</h2>
+        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.privacyDesc}</p>
+
+        <div className="space-y-1.5 text-[13px] leading-snug text-stone-700">
+          <p>1. {tr.privacyPoint1}</p>
+          <p>2. {tr.privacyPoint2}</p>
+          <p>3. {tr.privacyPoint3}</p>
+          <p>4. {tr.privacyPoint4}</p>
+        </div>
+
         <button
           type="button"
-          onClick={() => setPage('sharedCare')}
-          className="w-full rounded-xl bg-orange-400 px-4 py-3 text-sm font-bold text-white shadow-sm"
+          onClick={copyPrivacyPolicy}
+          className="mt-3 w-full rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-600"
         >
-          {tr.sharedCareTitle}
+          {tr.copyPrivacy}
         </button>
       </section>
     </>
@@ -5354,14 +5425,16 @@ export default function App() {
 
   const renderCatsPage = () => (
     <>
-      <section className="mb-3">
+      <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
         <button
           type="button"
-          onClick={() => setPage('more')}
-          className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
+          onClick={() => setPage('today')}
+          className="mb-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-bold text-stone-700"
         >
-          ← {tr.moreBack}
+          ← {tr.catsBack}
         </button>
+        <h1 className="text-xl font-bold text-stone-900">{tr.catsPageTitle}</h1>
+        <p className="mt-1 text-sm text-stone-500">{tr.catsPageLead}</p>
       </section>
 
       {appPlan === 'free' && activeCats.length > FREE_MAX_ACTIVE_PETS ? (
@@ -5436,7 +5509,7 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     selectCat(cat.id);
-                    setPage('sharedCare');
+                    scrollToSharedCareSection();
                   }}
                   className="shrink-0 rounded-full bg-orange-100 px-2 py-1.5 text-[11px] font-bold leading-tight text-orange-800"
                 >
@@ -5567,16 +5640,6 @@ export default function App() {
         )}
       </section>
 
-      <div className="mb-3 flex items-center gap-2.5 rounded-2xl bg-white px-3 py-2 shadow-sm">
-        <span className="text-2xl leading-none" aria-hidden>
-          🐱
-        </span>
-        <div className="min-w-0">
-          <h1 className="text-base font-bold leading-tight text-stone-900">{tr.myCats}</h1>
-          <p className="text-[11px] leading-snug text-stone-500">{tr.catsDesc}</p>
-        </div>
-      </div>
-
       <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.catProfile}</h2>
         <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.catProfileDesc}</p>
@@ -5659,58 +5722,12 @@ export default function App() {
           {renderProfileTextarea(tr.profileNote, selectedCat?.profileNote, 'profileNote')}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setPage('sharedCare')}
-          className="mt-4 w-full rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-sm font-bold text-orange-800 shadow-sm"
-        >
-          {tr.sharedCareTitle}
-        </button>
       </section>
 
-      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.backupTitle}</h2>
-        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.backupDesc}</p>
-
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={exportBackup} className="rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white shadow-sm">
-            {tr.exportBackup}
-          </button>
-
-          <label className="cursor-pointer rounded-xl bg-stone-800 py-2.5 text-center text-sm font-bold text-white shadow-sm">
-            {tr.importBackup}
-            <input
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => {
-                importBackup(e.target.files);
-                e.target.value = '';
-              }}
-            />
-          </label>
-        </div>
-
-        <p className="mt-2 text-[11px] leading-snug text-stone-400">{tr.importBackupDesc}</p>
-      </section>
-
-      <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
-        <h2 className="mb-2 text-base font-bold text-stone-900">{tr.privacyTitle}</h2>
-        <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.privacyDesc}</p>
-
-        <div className="space-y-1.5 text-[13px] leading-snug text-stone-700">
-          <p>1. {tr.privacyPoint1}</p>
-          <p>2. {tr.privacyPoint2}</p>
-          <p>3. {tr.privacyPoint3}</p>
-          <p>4. {tr.privacyPoint4}</p>
-        </div>
-
-        <button
-          onClick={copyPrivacyPolicy}
-          className="mt-3 w-full rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-600"
-        >
-          {tr.copyPrivacy}
-        </button>
+      <section id="shared-care-section" className="mb-4 rounded-2xl border border-orange-100 bg-white p-4 shadow-sm">
+        <h2 className="mb-1 text-base font-bold text-stone-900">{tr.sharedCareTitle}</h2>
+        <p className="mb-3 text-xs leading-relaxed text-stone-500">{tr.sharedCareNavHint}</p>
+        {renderSharedCareContent()}
       </section>
     </>
   );
