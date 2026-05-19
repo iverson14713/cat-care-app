@@ -290,7 +290,6 @@ const text = {
     remindersAddSection: '新增提醒',
     remindersListSection: '提醒列表',
     currentCat: '目前照顧',
-    switchCat: '切換寵物',
     date: '日期',
     month: '月份',
     todayProgress: '今日完成度',
@@ -764,7 +763,6 @@ const text = {
     remindersAddSection: 'Add reminder',
     remindersListSection: 'All reminders',
     currentCat: 'Current cat',
-    switchCat: 'Switch pet',
     date: 'Date',
     month: 'Month',
     todayProgress: 'Today progress',
@@ -3537,20 +3535,13 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex max-w-[58%] shrink-0 flex-row flex-nowrap items-center justify-end gap-2 overflow-x-auto">
+        <div className="flex shrink-0 flex-row flex-nowrap items-center justify-end gap-2">
           <button
             type="button"
             onClick={toggleLanguage}
             className="touch-manipulation whitespace-nowrap rounded-full bg-stone-100 px-3.5 py-2 text-[13px] font-bold text-stone-700"
           >
             {tr.langButton}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPage('cats')}
-            className="touch-manipulation whitespace-nowrap rounded-full bg-orange-100 px-3.5 py-2 text-[13px] font-bold text-orange-700"
-          >
-            {tr.switchCat}
           </button>
           <button
             type="button"
