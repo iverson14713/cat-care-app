@@ -4,6 +4,7 @@ import { SplashScreen } from './components/SplashScreen.tsx';
 import { delay, runAppBootstrap, SPLASH_MIN_MS, type AppBootstrapResult } from './appBootstrap.ts';
 import { AppBootstrapProvider } from './AppBootstrapContext.tsx';
 import { ensureAppStoreFontsReady } from './components/appStore/fonts.ts';
+import { trackEvent } from './services/analytics.ts';
 
 type Phase = 'splash' | 'app';
 
@@ -37,6 +38,7 @@ export function AppLaunchGate() {
 
       setBootstrap(result);
       setPhase('app');
+      trackEvent('app_open');
       document.body.style.overflow = prevOverflow;
     };
 

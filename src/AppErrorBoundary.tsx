@@ -4,6 +4,8 @@ type Props = { children: ReactNode };
 
 type State = { hasError: boolean; message: string };
 
+const isDev = import.meta.env.DEV;
+
 export class AppErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, message: '' };
 
@@ -42,17 +44,20 @@ export class AppErrorBoundary extends Component<Props, State> {
       <div
         role="alert"
         className="flex min-h-screen flex-col items-center justify-center bg-orange-50 px-6 py-10 text-center"
+        style={{ minHeight: '100dvh' }}
       >
         <p className="text-5xl" aria-hidden>
           🐱
         </p>
         <h1 className="mt-4 text-lg font-semibold text-stone-900">應用程式暫時無法顯示</h1>
-        <p className="mt-2 max-w-sm text-sm text-stone-600">
-          可能是本機資料損壞。請重新整理；若仍失敗可清除快取資料後再試。
+        <p className="mt-2 max-w-sm text-sm leading-relaxed text-stone-600">
+          請重新整理，若仍失敗可清除本機快取後再試。
         </p>
-        <p className="mt-3 max-w-md break-all rounded-lg bg-white/80 px-3 py-2 font-mono text-[11px] text-red-800">
-          {this.state.message}
-        </p>
+        {isDev ? (
+          <p className="mt-3 max-w-md break-all rounded-lg bg-white/80 px-3 py-2 font-mono text-[11px] text-red-800">
+            {this.state.message}
+          </p>
+        ) : null}
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button
             type="button"
@@ -66,10 +71,9 @@ export class AppErrorBoundary extends Component<Props, State> {
             onClick={this.handleResetStorage}
             className="rounded-full border border-orange-300 bg-white px-5 py-2.5 text-sm font-semibold text-orange-800"
           >
-            清除本機貓咪資料並重試
+            清除本機資料並重試
           </button>
         </div>
-        <p className="mt-6 text-xs text-stone-400">App could not render — check console for details.</p>
       </div>
     );
   }

@@ -20,6 +20,18 @@ import {
 import { Onboarding } from './components/Onboarding';
 import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
 import { isOnboardingDone, markOnboardingDone } from './onboardingStorage';
+import { AppleSignInButton } from './components/AppleSignInButton';
+import { OfflineBanner } from './components/OfflineBanner';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { trackEvent } from './services/analytics';
+import { handleAppleSignIn } from './services/auth/appleSignIn';
+import {
+  applyDailyPendingSync,
+  countPendingSyncItems,
+  flushPendingSync,
+  markDailyPendingSync,
+  markWeightsPendingSync,
+} from './services/offlineSync';
 import { navigateTo } from './legalNavigate';
 import { useAppBootstrap } from './AppBootstrapContext';
 import { useToast } from './context/ToastContext';
@@ -526,6 +538,13 @@ const text = {
     authSignedInOk: '登入成功。',
     authSignedOutOk: '已登出。',
     authLocalDataHint: '登入後會與雲端同步寵物、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
+    authAppleSignIn: '使用 Apple 登入',
+    authAppleComingSoon: 'Apple 登入將於 iOS 正式版開放',
+    offlineBanner: '目前離線，資料會先保存在本機',
+    offlineSyncFailed: '部分資料同步失敗，請稍後重試',
+    offlineSyncRetry: '重試同步',
+    offlineSyncOk: '離線資料已同步至雲端',
+    offlinePendingHint: '有待同步的離線變更',
     catsCloudLoading: '正在同步雲端寵物…',
     petsListSyncing: '正在整理寵物清單…',
     petsListSyncingHint: '同步完成後即可管理與封存寵物',
@@ -985,6 +1004,13 @@ const text = {
     authSignedOutOk: 'Signed out.',
     authLocalDataHint:
       'When signed in, pets, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
+    authAppleSignIn: 'Sign in with Apple',
+    authAppleComingSoon: 'Sign in with Apple will be available in the iOS app',
+    offlineBanner: 'You are offline — data is saved on this device first',
+    offlineSyncFailed: 'Some offline changes could not sync. Try again.',
+    offlineSyncRetry: 'Retry sync',
+    offlineSyncOk: 'Offline changes synced to the cloud',
+    offlinePendingHint: 'Offline changes waiting to sync',
     catsCloudLoading: 'Syncing pets from the cloud…',
     petsListSyncing: 'Preparing your pet list…',
     petsListSyncingHint: 'You can manage and archive pets once sync finishes',
@@ -1256,8 +1282,10 @@ function loadLang(): Lang {
 
 function loadDailyRecord(catId: string, date: string): DailyRecord {
   const key = dailyStorageKey(catId, date);
-  const parsed = safeLoadJson<DailyRecord>(key, {}, `daily ${date}`);
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  const parsed = safeLoadJson<DailyRecord & { pending_sync?: boolean }>(key, {}, `daily ${date}`);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const { pending_sync: _pending, ...rest } = parsed;
+  return rest;
 }
 
 function loadMonthlyRecord(catId: string, month: string): MonthlyRecord {
@@ -1275,11 +1303,12 @@ function loadWeightRecords(catId: string): WeightRecord[] {
     parsed
       .map((item) => {
         const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        const { pendingSync: _ps, ...rowClean } = row;
         return {
-          id: typeof row.id === 'string' ? row.id : makeId(),
-          date: typeof row.date === 'string' ? row.date : todayKey(),
-          weight: Number(row.weight),
-          note: typeof row.note === 'string' ? row.note : '',
+          id: typeof rowClean.id === 'string' ? rowClean.id : makeId(),
+          date: typeof rowClean.date === 'string' ? rowClean.date : todayKey(),
+          weight: Number(rowClean.weight),
+          note: typeof rowClean.note === 'string' ? rowClean.note : '',
         };
       })
       .filter((item) => Number.isFinite(item.weight) && item.weight > 0)
@@ -1544,6 +1573,10 @@ export default function App() {
   const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>(() => bootstrap.reminders);
   const [notificationPerm, setNotificationPerm] = useState(() => getNotificationPermission());
+  const isOnline = useOnlineStatus();
+  const [offlineSyncError, setOfflineSyncError] = useState<string | null>(null);
+  const [offlineSyncBusy, setOfflineSyncBusy] = useState(false);
+  const [appleSignInNotice, setAppleSignInNotice] = useState<string | null>(null);
   const [reminderLimitHint, setReminderLimitHint] = useState<string | null>(null);
   const [customReminderTitle, setCustomReminderTitle] = useState('');
   const [customReminderTime, setCustomReminderTime] = useState('09:00');
@@ -1561,6 +1594,7 @@ export default function App() {
   const completeOnboarding = useCallback(() => {
     markOnboardingDone();
     setShowOnboarding(false);
+    trackEvent('onboarding_complete');
   }, []);
 
   const replayOnboarding = useCallback(() => {
@@ -1570,10 +1604,12 @@ export default function App() {
   const openPremium = useCallback((reason: PremiumUpsellReason = 'general') => {
     setPremiumSheetReason(reason);
     setPremiumSheetOpen(true);
+    trackEvent('premium_view', { reason });
   }, []);
 
   const handlePurchasePro = useCallback(
     async (period: BillingPeriod) => {
+      trackEvent('premium_upgrade_click', { source: period });
       setSubscriptionBusy(true);
       const result = await purchasePro(period);
       setSubscriptionBusy(false);
@@ -2108,6 +2144,7 @@ export default function App() {
       const { bundle, quota } = await generateAssistantCareBundleOpenAi(ctx, meta, ac.signal);
       setAiCareBundle(bundle);
       setAiBundleSavedHash(getCareBundleContextHash(ctx));
+      trackEvent('ai_used', { feature: 'care_bundle' });
       showToast(tr.toastAiReportDone, 'success');
       if (quota) {
         setAssistantQuota((prev) =>
@@ -2186,6 +2223,7 @@ export default function App() {
         ac.signal
       );
       setAiReply(`${answer.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
+      trackEvent('ai_used', { feature: 'qa' });
       if (!quota) {
         showToast(
           lang === 'zh' ? 'AI 次數資料尚未載入，請稍後再試' : 'AI quota data is not ready yet. Please try again.',
@@ -2419,6 +2457,7 @@ export default function App() {
       }
       setReminderLimitHint(null);
       persistReminders([r, ...reminders]);
+      trackEvent('reminder_created', { source: r.type });
       showToast(tr.toastReminderCreated, 'success');
       return true;
     },
@@ -2566,15 +2605,63 @@ export default function App() {
     void runFullCloudSync(cats, accessibleIds, sb, uid).then(() => reloadSelectedCatFromLocal(selectedCatId));
   }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id, runFullCloudSync, reloadSelectedCatFromLocal, selectedCatId]);
 
+  const cloudCatIds = useMemo(
+    () => cats.filter((c) => isCloudCatId(c.id)).map((c) => c.id),
+    [cats]
+  );
+
+  const flushOfflinePending = useCallback(async () => {
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (!sb || !uid || !isOnline) return;
+    if (cloudCatIds.length === 0) return;
+    if (countPendingSyncItems(cloudCatIds) === 0) {
+      setOfflineSyncError(null);
+      return;
+    }
+    setOfflineSyncBusy(true);
+    setOfflineSyncError(null);
+    try {
+      const res = await flushPendingSync(sb, uid, cloudCatIds);
+      if (!res.ok) {
+        setOfflineSyncError(tr.offlineSyncFailed);
+        return;
+      }
+      if (res.syncedDaily > 0 || res.syncedWeights > 0) {
+        reloadSelectedCatFromLocal(selectedCatId);
+        showToast(tr.offlineSyncOk, 'success');
+      }
+    } finally {
+      setOfflineSyncBusy(false);
+    }
+  }, [
+    supabaseAuth.supabase,
+    supabaseAuth.user?.id,
+    isOnline,
+    cloudCatIds,
+    reloadSelectedCatFromLocal,
+    selectedCatId,
+    showToast,
+    tr.offlineSyncFailed,
+    tr.offlineSyncOk,
+  ]);
+
+  useEffect(() => {
+    if (!isOnline || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    void flushOfflinePending();
+  }, [isOnline, supabaseAuth.user?.id, supabaseAuth.supabase, flushOfflinePending]);
+
   useEffect(() => {
     safeSetItem(SELECTED_CAT_KEY, selectedCatId);
   }, [selectedCatId]);
 
   useEffect(() => {
     if (!selectedCat) return;
-    safeSetItem(dailyStorageKey(selectedCat.id, today), JSON.stringify(daily));
+    const shouldMarkPending = !isOnline && useCloudDaily;
+    const payload = applyDailyPendingSync(daily as unknown as DailyJson, shouldMarkPending);
+    safeSetItem(dailyStorageKey(selectedCat.id, today), JSON.stringify(payload));
     setHistoryRefreshKey((v) => v + 1);
-  }, [daily, selectedCat, today]);
+  }, [daily, selectedCat, today, isOnline, useCloudDaily]);
 
   useEffect(() => {
     if (!useCloudDaily || !selectedCat || !supabaseAuth.supabase) return;
@@ -2680,7 +2767,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    if (!isOnline || !useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
     const sb = supabaseAuth.supabase;
     const uid = supabaseAuth.user.id;
     const handle = window.setTimeout(() => {
@@ -2698,6 +2785,7 @@ export default function App() {
         });
         if (error) {
           console.warn('[daily_records upsert]', error.message);
+          markDailyPendingSync(selectedCat.id, today);
           return;
         }
         lastCloudDailyStripRef.current = json;
@@ -2726,10 +2814,11 @@ export default function App() {
     supabaseAuth.profile?.display_name,
     supabaseAuth.user?.email,
     lang,
+    isOnline,
   ]);
 
   useEffect(() => {
-    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    if (!isOnline || !useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
     if (cloudDailyHydratingRef.current) return;
     if (!cloudDailyHydratedRef.current) return;
     const abnormal = getPhotoList(daily.abnormalPhotos);
@@ -2745,7 +2834,10 @@ export default function App() {
         dailyPhotos,
         updatedBy: uid,
       }).then(({ error }) => {
-        if (error) console.warn('[daily_record_photos upsert]', error.message);
+        if (error) {
+          console.warn('[daily_record_photos upsert]', error.message);
+          markDailyPendingSync(selectedCat.id, today);
+        }
       });
     }, 850);
     return () => window.clearTimeout(handle);
@@ -2758,6 +2850,7 @@ export default function App() {
     supabaseAuth.user?.id,
     supabaseAuth.supabase,
     cloudSyncTick,
+    isOnline,
   ]);
 
   useEffect(() => {
@@ -2767,21 +2860,28 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedCat) return;
-    safeSetItem(weightStorageKey(selectedCat.id), JSON.stringify(weightRecords));
-  }, [weightRecords, selectedCat]);
+    const shouldMarkPending = !isOnline && useCloudDaily;
+    const payload = shouldMarkPending
+      ? weightRecords.map((r) => ({ ...r, pendingSync: true }))
+      : weightRecords;
+    safeSetItem(weightStorageKey(selectedCat.id), JSON.stringify(payload));
+  }, [weightRecords, selectedCat, isOnline, useCloudDaily]);
 
   useEffect(() => {
-    if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    if (!isOnline || !useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
     if (!cloudDailyHydratedRef.current) return;
     const sb = supabaseAuth.supabase;
     const uid = supabaseAuth.user.id;
     const handle = window.setTimeout(() => {
       void upsertWeightRecordsForCat(sb, selectedCat.id, weightRecords, uid).then(({ error }) => {
-        if (error) console.warn('[weight_records upsert]', error.message);
+        if (error) {
+          console.warn('[weight_records upsert]', error.message);
+          markWeightsPendingSync(selectedCat.id);
+        }
       });
     }, 700);
     return () => window.clearTimeout(handle);
-  }, [weightRecords, useCloudDaily, selectedCat?.id, supabaseAuth.user?.id, supabaseAuth.supabase, cloudSyncTick]);
+  }, [weightRecords, useCloudDaily, selectedCat?.id, supabaseAuth.user?.id, supabaseAuth.supabase, cloudSyncTick, isOnline]);
 
   useEffect(() => {
     if (!useCloudDaily || !selectedCat || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
@@ -2835,6 +2935,7 @@ export default function App() {
         const { error } = await supabaseAuth.signInWithEmail(email, authPassword);
         if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
         else {
+          trackEvent('login', { mode: 'email' });
           setAuthMessage(text[lang].authSignedInOk);
           showToast(text[lang].authSignedInOk, 'success');
           setAuthPassword('');
@@ -2847,6 +2948,7 @@ export default function App() {
         );
         if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
         else {
+          trackEvent('signup', { mode: 'email' });
           setAuthMessage(text[lang].authSignUpSent);
           setAuthPassword('');
         }
@@ -2855,6 +2957,15 @@ export default function App() {
       setAuthBusy(false);
     }
   }, [authEmail, authPassword, authDisplayNameReg, authMode, supabaseAuth, lang, showToast]);
+
+  const handleAppleSignInClick = useCallback(async () => {
+    setAppleSignInNotice(null);
+    setAuthFormError(null);
+    const result = await handleAppleSignIn(supabaseAuth.supabase);
+    if (result.message === 'coming_soon') {
+      setAppleSignInNotice(tr.authAppleComingSoon);
+    }
+  }, [supabaseAuth.supabase, tr.authAppleComingSoon, showToast]);
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
     if (!selectedCat) return;
@@ -2916,6 +3027,7 @@ export default function App() {
       setMonthly({});
       setWeightRecords([]);
       setHistoryRefreshKey((v) => v + 1);
+      trackEvent('pet_created', { source: 'cloud' });
       showToast(tr.toastSaved, 'success');
       setPage('cats');
       return;
@@ -2928,6 +3040,7 @@ export default function App() {
     setMonthly({});
     setWeightRecords([]);
     setHistoryRefreshKey((v) => v + 1);
+    trackEvent('pet_created', { source: 'local' });
     showToast(tr.toastSaved, 'success');
     setPage('cats');
   };
@@ -5517,6 +5630,15 @@ export default function App() {
         >
           {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
         </button>
+        <p className="my-3 text-center text-[11px] font-medium text-stone-400">— {lang === 'zh' ? '或' : 'or'} —</p>
+        <AppleSignInButton
+          label={tr.authAppleSignIn}
+          disabled={authBusy}
+          onClick={() => void handleAppleSignInClick()}
+        />
+        {appleSignInNotice ? (
+          <p className="mt-2 text-center text-[12px] leading-relaxed text-stone-600">{appleSignInNotice}</p>
+        ) : null}
       </section>
     );
   };
@@ -5960,6 +6082,16 @@ export default function App() {
       ) : (
         <>
           <div className="mx-auto max-w-md pb-24">
+        {!isOnline ? (
+          <OfflineBanner message={tr.offlineBanner} />
+        ) : offlineSyncError ? (
+          <OfflineBanner
+            message={tr.offlineSyncFailed}
+            syncError={offlineSyncError}
+            retryLabel={offlineSyncBusy ? tr.authProcessing : tr.offlineSyncRetry}
+            onRetry={() => void flushOfflinePending()}
+          />
+        ) : null}
         <nav
           className="mb-4 select-none rounded-3xl border border-orange-100/90 bg-white p-2.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"
           aria-label={lang === 'zh' ? '主要功能' : 'Main'}
