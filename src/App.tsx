@@ -3293,25 +3293,25 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+        <div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-1">
           <button
             type="button"
             onClick={toggleLanguage}
-            className="rounded-full bg-stone-100 px-3 py-2 text-sm font-bold text-stone-700"
+            className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700"
           >
             {tr.langButton}
           </button>
           <button
             type="button"
             onClick={() => setPage('cats')}
-            className="rounded-full bg-orange-100 px-3 py-2 text-sm font-bold text-orange-700"
+            className="rounded-full bg-orange-100 px-2 py-1 text-[11px] font-bold text-orange-700"
           >
             {tr.switchCat}
           </button>
           <button
             type="button"
             onClick={() => setPage('cats')}
-            className="rounded-full bg-stone-800 px-3 py-2 text-sm font-bold text-white"
+            className="rounded-full bg-orange-100 px-2 py-1 text-[11px] font-bold text-orange-700"
           >
             {tr.managePets}
           </button>
