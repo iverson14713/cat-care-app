@@ -94,3 +94,12 @@ textarea,
 select {
   font-size: max(16px, 1rem) !important;
 }
+
+/* App Store screenshot mode — CJK fonts for preview & html2canvas export */
+.app-store-slide,
+.app-store-slide *,
+.app-store-mock-screen,
+.app-store-mock-screen * {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC',
+    'Segoe UI', sans-serif !important;
+}
