@@ -1,22 +1,27 @@
 import { useEffect, useState } from 'react';
+import { trackEvent } from './services/analytics';
 import { getSupabaseClient } from './supabaseClient';
 import { Spinner } from './components/SkeletonCard';
+
+/** Handles Supabase PKCE return (`?code=`) for Google OAuth and hash/session for email flows. */
 
 type Status = 'pending' | 'ok' | 'fail';
 
 const copy = {
   zh: {
-    pending: '正在確認驗證連結…',
-    okTitle: '✅ Email 驗證成功',
+    pending: '正在完成登入…',
+    okTitleEmail: '✅ Email 驗證成功',
+    okTitleOauth: '✅ 登入成功',
     okSub: '正在返回 App…',
-    fail: '驗證連結已失效，請重新寄送驗證信。',
+    fail: '連結已失效或無法登入，請稍後再試。',
     noClient: '無法連線驗證服務，請稍後再試。',
   },
   en: {
-    pending: 'Confirming your verification link…',
-    okTitle: '✅ Email verified',
+    pending: 'Finishing sign-in…',
+    okTitleEmail: '✅ Email verified',
+    okTitleOauth: '✅ Signed in',
     okSub: 'Returning to the app…',
-    fail: 'This verification link has expired. Please resend the verification email.',
+    fail: 'This link is invalid or sign-in failed. Please try again.',
     noClient: 'Verification service is unavailable. Please try again later.',
   },
 } as const;
@@ -28,6 +33,7 @@ function detectLang(): keyof typeof copy {
 
 export function AuthCallbackPage() {
   const [status, setStatus] = useState<Status>('pending');
+  const [oauthReturn, setOauthReturn] = useState(false);
   const lang = detectLang();
   const t = copy[lang];
 
@@ -60,6 +66,8 @@ export function AuthCallbackPage() {
         if (code) {
           const { error } = await sb.auth.exchangeCodeForSession(code);
           if (error) throw error;
+          setOauthReturn(true);
+          trackEvent('login', { mode: 'google' });
         } else {
           const first = await sb.auth.getSession();
           if (first.error) throw first.error;
@@ -103,7 +111,9 @@ export function AuthCallbackPage() {
           </>
         ) : status === 'ok' ? (
           <>
-            <h1 className="text-xl font-bold text-stone-900">{t.okTitle}</h1>
+            <h1 className="text-xl font-bold text-stone-900">
+              {oauthReturn ? t.okTitleOauth : t.okTitleEmail}
+            </h1>
             <p className="mt-3 text-[15px] text-stone-600">{t.okSub}</p>
           </>
         ) : (

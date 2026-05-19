@@ -11,7 +11,7 @@ export function AppleSignInButton({ label, disabled, onClick }: AppleSignInButto
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-black py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-55"
+      className="flex w-full items-center justify-center gap-2 rounded-xl bg-black py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-55"
       aria-label={label}
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

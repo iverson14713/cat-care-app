@@ -118,6 +118,18 @@ export function useSupabaseAuth() {
     return supabase.auth.signOut();
   }, [supabase]);
 
+  /** Google OAuth — enable provider in Supabase (Auth → Providers → Google) and set OAuth Client ID / Secret. */
+  const signInWithGoogle = useCallback(() => {
+    if (!supabase) return Promise.resolve({ data: null, error: new Error('not_configured') });
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${origin}/auth/callback`,
+      },
+    });
+  }, [supabase]);
+
   const updateDisplayName = useCallback(
     async (displayName: string): Promise<{ error: Error | null }> => {
       if (!supabase || !session?.user) return { error: new Error('not_authenticated') };
@@ -145,6 +157,7 @@ export function useSupabaseAuth() {
     updateDisplayName,
     signInWithEmail,
     signUpWithEmail,
+    signInWithGoogle,
     signOut,
   };
 }

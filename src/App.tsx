@@ -21,6 +21,7 @@ import { Onboarding } from './components/Onboarding';
 import { SkeletonCard, SkeletonLine, Spinner } from './components/SkeletonCard';
 import { isOnboardingDone, markOnboardingDone } from './onboardingStorage';
 import { AppleSignInButton } from './components/AppleSignInButton';
+import { GoogleSignInButton } from './components/GoogleSignInButton';
 import { OfflineBanner } from './components/OfflineBanner';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { trackEvent } from './services/analytics';
@@ -425,6 +426,14 @@ const text = {
     gender: '性別',
     breed: '品種',
     neutered: '結紮狀態',
+    profileGenderTap: '點擊選擇性別',
+    profileNeuteredTap: '點擊選擇結紮狀態',
+    profilePickGenderTitle: '選擇性別',
+    profilePickNeuteredTitle: '選擇結紮狀態',
+    petGenderMale: '公',
+    petGenderFemale: '母',
+    petNeuteredYes: '已結紮',
+    petNeuteredNo: '未結紮',
     chipNo: '晶片號碼',
     chronicNote: '慢性病 / 用藥',
     allergyNote: '過敏 / 禁忌',
@@ -540,6 +549,9 @@ const text = {
     authLocalDataHint: '登入後會與雲端同步寵物、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
     authAppleSignIn: '使用 Apple 登入',
     authAppleComingSoon: 'Apple 登入將於 iOS 正式版開放',
+    authGoogleSignIn: '使用 Google 登入',
+    authGoogleSetupHint:
+      '若 Google 登入無反應：請至 Supabase Dashboard → Authentication → Providers → Google 啟用，並設定 Google OAuth Client ID 與 Secret；同時將本站網址與 /auth/callback 加入 Google Cloud 與 Supabase 的 Redirect 白名單。',
     offlineBanner: '目前離線，資料會先保存在本機',
     offlineSyncFailed: '部分資料同步失敗，請稍後重試',
     offlineSyncRetry: '重試同步',
@@ -752,7 +764,7 @@ const text = {
     remindersAddSection: 'Add reminder',
     remindersListSection: 'All reminders',
     currentCat: 'Current cat',
-    switchCat: 'Switch',
+    switchCat: 'Switch pet',
     date: 'Date',
     month: 'Month',
     todayProgress: 'Today progress',
@@ -889,6 +901,14 @@ const text = {
     gender: 'Gender',
     breed: 'Breed',
     neutered: 'Neutered',
+    profileGenderTap: 'Tap to select gender',
+    profileNeuteredTap: 'Tap to select spay/neuter',
+    profilePickGenderTitle: 'Select gender',
+    profilePickNeuteredTitle: 'Spay / neuter status',
+    petGenderMale: 'Male',
+    petGenderFemale: 'Female',
+    petNeuteredYes: 'Neutered',
+    petNeuteredNo: 'Not neutered',
     chipNo: 'Microchip No.',
     chronicNote: 'Chronic conditions / medication',
     allergyNote: 'Allergies / restrictions',
@@ -1006,6 +1026,9 @@ const text = {
       'When signed in, pets, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
     authAppleSignIn: 'Sign in with Apple',
     authAppleComingSoon: 'Sign in with Apple will be available in the iOS app',
+    authGoogleSignIn: 'Sign in with Google',
+    authGoogleSetupHint:
+      'If Google sign-in fails: enable Google under Supabase Dashboard → Authentication → Providers, add your OAuth Client ID and Secret, and allow this site URL and /auth/callback in both Google Cloud and Supabase redirect settings.',
     offlineBanner: 'You are offline — data is saved on this device first',
     offlineSyncFailed: 'Some offline changes could not sync. Try again.',
     offlineSyncRetry: 'Retry sync',
@@ -1577,6 +1600,8 @@ export default function App() {
   const [offlineSyncError, setOfflineSyncError] = useState<string | null>(null);
   const [offlineSyncBusy, setOfflineSyncBusy] = useState(false);
   const [appleSignInNotice, setAppleSignInNotice] = useState<string | null>(null);
+  const [googleOauthBusy, setGoogleOauthBusy] = useState(false);
+  const [profileFieldPicker, setProfileFieldPicker] = useState<'gender' | 'neutered' | null>(null);
   const [reminderLimitHint, setReminderLimitHint] = useState<string | null>(null);
   const [customReminderTitle, setCustomReminderTitle] = useState('');
   const [customReminderTime, setCustomReminderTime] = useState('09:00');
@@ -2965,7 +2990,24 @@ export default function App() {
     if (result.message === 'coming_soon') {
       setAppleSignInNotice(tr.authAppleComingSoon);
     }
-  }, [supabaseAuth.supabase, tr.authAppleComingSoon, showToast]);
+  }, [supabaseAuth.supabase, tr.authAppleComingSoon]);
+
+  const handleGoogleSignInClick = useCallback(async () => {
+    setAppleSignInNotice(null);
+    setAuthFormError(null);
+    setAuthMessage(null);
+    if (!supabaseAuth.supabase) {
+      setAuthFormError(text[lang].authErrNotConfigured);
+      return;
+    }
+    setGoogleOauthBusy(true);
+    try {
+      const { error } = await supabaseAuth.signInWithGoogle();
+      if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
+    } finally {
+      setGoogleOauthBusy(false);
+    }
+  }, [supabaseAuth, lang]);
 
   const updateSelectedCat = (patch: Partial<Cat>) => {
     if (!selectedCat) return;
@@ -3495,25 +3537,25 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-1">
+        <div className="flex max-w-[58%] shrink-0 flex-row flex-nowrap items-center justify-end gap-2 overflow-x-auto">
           <button
             type="button"
             onClick={toggleLanguage}
-            className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700"
+            className="touch-manipulation whitespace-nowrap rounded-full bg-stone-100 px-3.5 py-2 text-[13px] font-bold text-stone-700"
           >
             {tr.langButton}
           </button>
           <button
             type="button"
             onClick={() => setPage('cats')}
-            className="rounded-full bg-orange-100 px-2 py-1 text-[11px] font-bold text-orange-700"
+            className="touch-manipulation whitespace-nowrap rounded-full bg-orange-100 px-3.5 py-2 text-[13px] font-bold text-orange-700"
           >
             {tr.switchCat}
           </button>
           <button
             type="button"
             onClick={() => setPage('cats')}
-            className="rounded-full bg-orange-100 px-2 py-1 text-[11px] font-bold text-orange-700"
+            className="touch-manipulation whitespace-nowrap rounded-full bg-orange-100 px-3.5 py-2 text-[13px] font-bold text-orange-700"
           >
             {tr.managePets}
           </button>
@@ -4225,6 +4267,29 @@ export default function App() {
       onRequestPro={() => openPremium('pdf')}
       catSwitcher={renderCatSwitcher()}
     />
+  );
+
+  const renderProfileChoiceField = (
+    field: 'gender' | 'neutered',
+    label: string,
+    value: string | undefined,
+    placeholder: string
+  ) => (
+    <div>
+      <label className="mb-0.5 block text-[11px] font-bold text-stone-500">{label}</label>
+      <button
+        type="button"
+        onClick={() => setProfileFieldPicker(field)}
+        className="flex w-full touch-manipulation items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-left text-[13px] outline-none ring-orange-300/30 focus-visible:border-orange-300 focus-visible:ring-2"
+      >
+        <span className={`min-w-0 truncate ${(value ?? '').trim() ? 'font-medium text-stone-900' : 'text-stone-400'}`}>
+          {(value ?? '').trim() || placeholder}
+        </span>
+        <span className="shrink-0 text-stone-400" aria-hidden>
+          ▼
+        </span>
+      </button>
+    </div>
   );
 
   const renderProfileInput = (
@@ -5569,6 +5634,28 @@ export default function App() {
       <section className="mb-4 rounded-2xl border-2 border-sky-200 bg-white p-4 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.authAccountSection}</h2>
         <p className="mb-3 text-[11px] leading-relaxed text-stone-500">{tr.authLocalDataHint}</p>
+
+        <div className="mb-3 space-y-2.5">
+          <GoogleSignInButton
+            label={tr.authGoogleSignIn}
+            disabled={authBusy || googleOauthBusy}
+            onClick={() => void handleGoogleSignInClick()}
+          />
+          <AppleSignInButton
+            label={tr.authAppleSignIn}
+            disabled={authBusy || googleOauthBusy}
+            onClick={() => void handleAppleSignInClick()}
+          />
+        </div>
+        {appleSignInNotice ? (
+          <p className="mb-3 text-center text-[12px] leading-relaxed text-stone-600">{appleSignInNotice}</p>
+        ) : null}
+        <p className="mb-3 rounded-xl bg-stone-50/90 px-3 py-2.5 text-[10px] leading-relaxed text-stone-500 ring-1 ring-stone-100/80">
+          {tr.authGoogleSetupHint}
+        </p>
+
+        <p className="my-3 text-center text-[11px] font-medium text-stone-400">— {lang === 'zh' ? '或' : 'or'} —</p>
+
         <div className="mb-3 flex gap-2">
           <button
             type="button"
@@ -5624,21 +5711,12 @@ export default function App() {
         {authMessage ? <p className="mb-2 text-[13px] font-medium text-green-700">{authMessage}</p> : null}
         <button
           type="button"
-          disabled={authBusy}
+          disabled={authBusy || googleOauthBusy}
           onClick={() => void handleAuthSubmit()}
           className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-55"
         >
           {authBusy ? tr.authProcessing : authMode === 'signIn' ? tr.authSignIn : tr.authSignUp}
         </button>
-        <p className="my-3 text-center text-[11px] font-medium text-stone-400">— {lang === 'zh' ? '或' : 'or'} —</p>
-        <AppleSignInButton
-          label={tr.authAppleSignIn}
-          disabled={authBusy}
-          onClick={() => void handleAppleSignInClick()}
-        />
-        {appleSignInNotice ? (
-          <p className="mt-2 text-center text-[12px] leading-relaxed text-stone-600">{appleSignInNotice}</p>
-        ) : null}
       </section>
     );
   };
@@ -6045,11 +6123,11 @@ export default function App() {
                 className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[13px] outline-none focus:border-orange-300"
               />
             </div>
-            {renderProfileInput(tr.gender, selectedCat?.gender, 'gender', lang === 'zh' ? '公 / 母' : 'Male / Female')}
+            {renderProfileChoiceField('gender', tr.gender, selectedCat?.gender, tr.profileGenderTap)}
           </div>
           <div className="grid grid-cols-2 gap-2">
             {renderProfileInput(tr.breed, selectedCat?.breed, 'breed', lang === 'zh' ? '米克斯 / 英短' : 'Mix / British Shorthair')}
-            {renderProfileInput(tr.neutered, selectedCat?.neutered, 'neutered', lang === 'zh' ? '已結紮 / 未結紮' : 'Yes / No')}
+            {renderProfileChoiceField('neutered', tr.neutered, selectedCat?.neutered, tr.profileNeuteredTap)}
           </div>
           {renderProfileInput(tr.chipNo, selectedCat?.chipNo, 'chipNo')}
           {renderProfileTextarea(tr.chronicNote, selectedCat?.chronicNote, 'chronicNote', lang === 'zh' ? '例如：腎臟病、心臟病、長期用藥' : 'Example: kidney disease, heart disease, medication')}
@@ -6263,6 +6341,81 @@ export default function App() {
                 {permanentDeleteBusy ? tr.permanentDeleteBusy : tr.permanentlyDelete}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {profileFieldPicker ? (
+        <div
+          className="fixed inset-0 z-[61] flex items-end justify-center bg-black/50 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="profile-picker-title"
+          onClick={() => setProfileFieldPicker(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="profile-picker-title" className="text-base font-bold text-stone-900">
+              {profileFieldPicker === 'gender' ? tr.profilePickGenderTitle : tr.profilePickNeuteredTitle}
+            </h2>
+            <div className="mt-4 grid gap-2">
+              {profileFieldPicker === 'gender' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSelectedCat({ gender: tr.petGenderMale });
+                      setProfileFieldPicker(null);
+                    }}
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50 py-3 text-sm font-bold text-stone-800 active:bg-orange-50"
+                  >
+                    {tr.petGenderMale}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSelectedCat({ gender: tr.petGenderFemale });
+                      setProfileFieldPicker(null);
+                    }}
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50 py-3 text-sm font-bold text-stone-800 active:bg-orange-50"
+                  >
+                    {tr.petGenderFemale}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSelectedCat({ neutered: tr.petNeuteredYes });
+                      setProfileFieldPicker(null);
+                    }}
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50 py-3 text-sm font-bold text-stone-800 active:bg-orange-50"
+                  >
+                    {tr.petNeuteredYes}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSelectedCat({ neutered: tr.petNeuteredNo });
+                      setProfileFieldPicker(null);
+                    }}
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50 py-3 text-sm font-bold text-stone-800 active:bg-orange-50"
+                  >
+                    {tr.petNeuteredNo}
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setProfileFieldPicker(null)}
+              className="mt-3 w-full rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-600"
+            >
+              {tr.cancel}
+            </button>
           </div>
         </div>
       ) : null}
