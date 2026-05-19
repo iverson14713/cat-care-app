@@ -58,9 +58,22 @@ import {
   restoreCatForOwner,
   insertCatForOwner,
   isCloudCatId,
-  mergeCloudCatsWithLocal,
   updateCatForOwner,
+  type AppCat,
 } from './supabaseCats';
+import {
+  appCatToNormalized,
+  CATS_STORAGE_KEY,
+  formatArchiveErrorMessage,
+  formatRestoreErrorMessage,
+  isValidPetForArchive,
+  loadRawCatsFromStorage,
+  mergeAndNormalizeCats,
+  normalizeAllCats,
+  normalizeAndPersistCats,
+  normalizeCat,
+  type NormalizedCat,
+} from './catNormalize';
 import {
   defaultEmojiForPetType,
   getDailyItemsForPetType,
@@ -134,7 +147,6 @@ import {
   saveWeeklyReport,
   type SavedWeeklyReport,
 } from './weeklyReportStorage';
-import { getPhotoList } from './supabasePhotos';
 import { normalizeWeeklyReport } from './weeklyReportModel';
 import {
   safeGetItem,
@@ -147,23 +159,7 @@ import {
 
 type Lang = 'zh' | 'en';
 
-type Cat = {
-  id: string;
-  name: string;
-  petType: PetType;
-  emoji: string;
-  profilePhoto?: string;
-  birthday?: string;
-  gender?: string;
-  breed?: string;
-  neutered?: string;
-  chipNo?: string;
-  chronicNote?: string;
-  allergyNote?: string;
-  vetClinic?: string;
-  profileNote?: string;
-  isArchived?: boolean;
-};
+type Cat = NormalizedCat;
 
 type DailyRecord = Record<string, boolean | string | string[]>;
 type MonthlyRecord = Record<string, boolean>;
@@ -199,7 +195,6 @@ type WeightRecord = {
   note: string;
 };
 
-const CATS_KEY = 'cat-calendar-cats';
 const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const LANG_KEY = 'cat-calendar-lang';
 
@@ -460,7 +455,10 @@ const text = {
     authSignedOutOk: '已登出。',
     authLocalDataHint: '登入後會與雲端同步寵物、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
     catsCloudLoading: '正在同步雲端寵物…',
-    catsCloudLoadErr: '雲端寵物載入失敗：',
+    petsListSyncing: '正在整理寵物清單…',
+    petsListSyncingHint: '同步完成後即可管理與封存寵物',
+    catsCloudLoadErr: '雲端寵物載入失敗',
+    archiveErrPermission: '你沒有封存這隻寵物的權限（可能為共同照護成員）。',
     cloudSyncLoading: '正在從雲端載入…',
     cloudSyncSyncing: '正在同步照護資料…',
     cloudSyncReady: '已與雲端同步',
@@ -864,7 +862,10 @@ const text = {
     authLocalDataHint:
       'When signed in, pets, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
     catsCloudLoading: 'Syncing pets from the cloud…',
-    catsCloudLoadErr: 'Could not load pets from the cloud: ',
+    petsListSyncing: 'Preparing your pet list…',
+    petsListSyncingHint: 'You can manage and archive pets once sync finishes',
+    catsCloudLoadErr: 'Could not load pets from the cloud',
+    archiveErrPermission: 'You cannot archive this pet (shared care member).',
     cloudSyncLoading: 'Loading from cloud…',
     cloudSyncSyncing: 'Syncing care data…',
     cloudSyncReady: 'Synced with cloud',
@@ -1090,48 +1091,24 @@ function dedupeWeightRecordsByDate(records: WeightRecord[]): WeightRecord[] {
 }
 
 const DEFAULT_CATS: Cat[] = [
-  { id: 'default-cat', name: '我的寵物', petType: 'cat', emoji: '🐱' },
+  {
+    id: 'default-cat',
+    name: '我的寵物',
+    petType: 'cat',
+    emoji: '🐱',
+    isArchived: false,
+    createdAt: new Date().toISOString(),
+    ownerId: '',
+  },
 ];
 
-function mapStoredCat(cat: unknown): Cat {
-  const c = (cat && typeof cat === 'object' ? cat : {}) as Record<string, unknown>;
-  return {
-    id: typeof c.id === 'string' ? c.id : makeId(),
-    name: typeof c.name === 'string' ? c.name : '我的寵物',
-    petType: normalizePetType(c.petType),
-    emoji:
-      typeof c.emoji === 'string' && c.emoji
-        ? c.emoji
-        : defaultEmojiForPetType(normalizePetType(c.petType)),
-    profilePhoto: typeof c.profilePhoto === 'string' ? c.profilePhoto : '',
-    birthday: typeof c.birthday === 'string' ? c.birthday : '',
-    gender: typeof c.gender === 'string' ? c.gender : '',
-    breed: typeof c.breed === 'string' ? c.breed : '',
-    neutered: typeof c.neutered === 'string' ? c.neutered : '',
-    chipNo: typeof c.chipNo === 'string' ? c.chipNo : '',
-    chronicNote: typeof c.chronicNote === 'string' ? c.chronicNote : '',
-    allergyNote: typeof c.allergyNote === 'string' ? c.allergyNote : '',
-    vetClinic: typeof c.vetClinic === 'string' ? c.vetClinic : '',
-    profileNote: typeof c.profileNote === 'string' ? c.profileNote : '',
-    isArchived: Boolean(c.isArchived),
-  };
+function loadCats(): Cat[] {
+  return normalizeAndPersistCats();
 }
 
 function loadLang(): Lang {
   const saved = safeGetItem(LANG_KEY);
   return saved === 'en' ? 'en' : 'zh';
-}
-
-function loadCats(): Cat[] {
-  const parsed = safeLoadJson<unknown>(CATS_KEY, null, 'cats');
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    if (parsed !== null) {
-      storageError('loadCats: resetting invalid cat list', new Error('invalid array'), CATS_KEY);
-      safeSetItem(CATS_KEY, JSON.stringify(DEFAULT_CATS));
-    }
-    return [...DEFAULT_CATS];
-  }
-  return parsed.map(mapStoredCat);
 }
 
 function loadDailyRecord(catId: string, date: string): DailyRecord {
@@ -1416,7 +1393,8 @@ export default function App() {
   const month = monthKey();
 
   const [lang, setLang] = useState<Lang>(() => loadLang());
-  const [cats, setCats] = useState<Cat[]>(() => loadCats());
+  const [cats, setCats] = useState<Cat[]>([]);
+  const [petsBootReady, setPetsBootReady] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   const tr = text[lang];
@@ -1431,8 +1409,9 @@ export default function App() {
   }, [supabaseAuth.user, supabaseAuth.profile]);
 
   const [selectedCatId, setSelectedCatId] = useState<string>(() => {
-    const savedCats = loadCats().filter((c) => !c.isArchived);
     const savedSelectedId = safeGetItem(SELECTED_CAT_KEY);
+    const bootCats = normalizeAndPersistCats();
+    const savedCats = bootCats.filter((c) => !c.isArchived);
     if (savedSelectedId && savedCats.some((cat) => cat.id === savedSelectedId)) {
       return savedSelectedId;
     }
@@ -1458,7 +1437,7 @@ export default function App() {
     const nextActive = fallback.filter((c) => !c.isArchived);
     const nextId = nextActive[0]?.id ?? fallback[0]?.id ?? DEFAULT_CATS[0].id;
     setSelectedCatId(nextId);
-    safeSetItem(CATS_KEY, JSON.stringify(fallback));
+    safeSetItem(CATS_STORAGE_KEY, JSON.stringify(fallback));
     safeSetItem(SELECTED_CAT_KEY, nextId);
   }, [cats.length]);
 
@@ -1532,6 +1511,35 @@ export default function App() {
   const [permanentDeleteBusy, setPermanentDeleteBusy] = useState(false);
   const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const applyCatsState = useCallback(
+    (merged: Cat[], options?: { preferredSelectedId?: string }) => {
+      safeSetItem(CATS_STORAGE_KEY, JSON.stringify(merged));
+      setCats(merged);
+      const active = merged.filter((c) => !c.isArchived);
+      const preferred = options?.preferredSelectedId;
+      setSelectedCatId((prev) => {
+        const candidate = preferred ?? prev;
+        if (candidate && active.some((c) => c.id === candidate)) return candidate;
+        return active[0]?.id ?? merged[0]?.id ?? prev;
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    const uid = supabaseAuth.user?.id ?? '';
+    const boot = normalizeAndPersistCats(uid);
+    setCats(boot);
+    const active = boot.filter((c) => !c.isArchived);
+    const savedSelectedId = safeGetItem(SELECTED_CAT_KEY);
+    const nextId =
+      savedSelectedId && active.some((c) => c.id === savedSelectedId)
+        ? savedSelectedId
+        : active[0]?.id ?? boot[0]?.id ?? DEFAULT_CATS[0].id;
+    setSelectedCatId(nextId);
+    setPetsBootReady(true);
+  }, []);
+
   const reloadCatsFromCloud = useCallback(async (): Promise<Cat[]> => {
     const sb = supabaseAuth.supabase;
     const uid = supabaseAuth.user?.id;
@@ -1541,14 +1549,16 @@ export default function App() {
       console.warn('[cats refresh]', error.message);
       return cats;
     }
-    const localCats = loadCats().filter((c) => !isCloudCatId(c.id) || cloudList.some((x) => x.id === c.id));
-    const merged = mergeCloudCatsWithLocal(cloudList, localCats);
-    safeSetItem(CATS_KEY, JSON.stringify(merged));
-    setCats(merged);
+    const localCats = normalizeAllCats(loadRawCatsFromStorage(), uid);
+    const localFiltered = localCats.filter(
+      (c) => !isCloudCatId(c.id) || cloudList.some((x) => x.id === c.id)
+    );
+    const merged = mergeAndNormalizeCats(cloudList, localFiltered, uid);
+    applyCatsState(merged);
     const { data: roles } = await fetchMyCatRolesMap(sb, uid);
     setCatRolesMap(roles);
     return merged;
-  }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id]);
+  }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id, applyCatsState]);
 
   const refreshSharedCareForCat = useCallback(
     async (catId: string) => {
@@ -1594,6 +1604,8 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authFormError, setAuthFormError] = useState<string | null>(null);
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
+  const [archiveErrByCatId, setArchiveErrByCatId] = useState<Record<string, string>>({});
   const [catsCloudBusy, setCatsCloudBusy] = useState(false);
   const [catsCloudErr, setCatsCloudErr] = useState<string | null>(null);
   const [cloudSyncPhase, setCloudSyncPhase] = useState<CloudSyncPhase>('idle');
@@ -1831,6 +1843,13 @@ export default function App() {
         if (error) console.warn('[user_preferences upsert]', error.message);
       });
     }
+    if (sb && uid) {
+      void reloadCatsFromCloud();
+    } else {
+      const uidLocal = '';
+      const boot = normalizeAndPersistCats(uidLocal);
+      applyCatsState(boot);
+    }
   };
 
   const pushAiUsageIfCloud = useCallback(() => {
@@ -2047,6 +2066,13 @@ export default function App() {
         ac.signal
       );
       setAiReply(`${answer.trim()}\n\n${text[lang].aiDisclaimerFoot}`);
+      if (!quota) {
+        showToast(
+          lang === 'zh' ? 'AI 次數資料尚未載入，請稍後再試' : 'AI quota data is not ready yet. Please try again.',
+          'error'
+        );
+        return;
+      }
       setAssistantQuota((prev) =>
         mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
           countedSuccess: true,
@@ -2117,6 +2143,13 @@ export default function App() {
       cloudSaveWeeklyReport(ctx.catId, ctx.today, safeReport);
       showToast(tr.toastAiReportDone, 'success');
       setWeeklySaveHint(text[lang].weeklySavedOk);
+      if (!quota) {
+        showToast(
+          lang === 'zh' ? 'AI 次數資料尚未載入，請稍後再試' : 'AI quota data is not ready yet. Please try again.',
+          'error'
+        );
+        return;
+      }
       setAssistantQuota((prev) =>
         mergeAssistantQuotaFromSnapshot(prev, quota, appPlan, aiClientId, ctx.today, {
           countedSuccess: true,
@@ -2221,8 +2254,20 @@ export default function App() {
       }
       setCloudSyncTick((t) => t + 1);
       cloudDailyHydratedRef.current = true;
+      const { data: cloudList, error: catsErr } = await fetchCatsForUser(sb);
+      if (runId !== cloudSyncRunRef.current) return;
+      if (!catsErr && cloudList) {
+        const localNorm = normalizeAllCats(loadRawCatsFromStorage(), userId);
+        const localFiltered = localNorm.filter(
+          (c) => !isCloudCatId(c.id) || cloudList.some((x) => x.id === c.id)
+        );
+        const refreshed = mergeAndNormalizeCats(cloudList, localFiltered, userId);
+        applyCatsState(refreshed);
+        const { data: roles } = await fetchMyCatRolesMap(sb, userId);
+        setCatRolesMap(roles);
+      }
     },
-    [aiClientId, applyLocalAssistantQuota]
+    [aiClientId, applyLocalAssistantQuota, applyCatsState]
   );
 
   const persistReminders = useCallback(
@@ -2293,7 +2338,7 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    safeSetItem(CATS_KEY, JSON.stringify(cats));
+    safeSetItem(CATS_STORAGE_KEY, JSON.stringify(cats));
   }, [cats]);
 
   useEffect(() => {
@@ -2304,7 +2349,9 @@ export default function App() {
       setCloudSyncPhase('idle');
       setCloudSyncError(null);
       cloudDailyHydratedRef.current = false;
-      setCats(loadCats());
+      const localOnly = normalizeAndPersistCats('');
+      applyCatsState(localOnly);
+      setPetsBootReady(true);
       return;
     }
 
@@ -2317,44 +2364,42 @@ export default function App() {
       }
       setCatsCloudBusy(true);
       setCatsCloudErr(null);
-      const uid = supabaseAuth.user.id;
-      let localCats = loadCats();
+      const uid = supabaseAuth.user!.id;
+      let localCats = normalizeAllCats(loadRawCatsFromStorage(), uid);
       let migratedIdMap: Record<string, string> = {};
       const offline = localCats.filter((c) => !isCloudCatId(c.id));
       if (offline.length > 0) {
-        const mig = await migrateOfflineCatsToCloud(sb, uid, localCats);
+        const mig = await migrateOfflineCatsToCloud(sb, uid, localCats as unknown as AppCat[]);
         if (mig.errors.length > 0) console.warn('[offline cat migrate]', mig.errors.join('; '));
         migratedIdMap = mig.idMap;
-        localCats = mig.cats;
-        safeSetItem(CATS_KEY, JSON.stringify(localCats));
+        localCats = normalizeAllCats(
+          mig.cats.map((c) => normalizeCat(c, uid)).filter(Boolean) as Cat[],
+          uid
+        );
+        safeSetItem(CATS_STORAGE_KEY, JSON.stringify(localCats));
       }
       const { data: cloudList, error } = await fetchCatsForUser(sb);
       if (cancelled) return;
       if (error) {
         setCatsCloudErr(error.message);
         setCatsCloudBusy(false);
+        setPetsBootReady(true);
         return;
       }
       const cloudIdSet = new Set(cloudList.map((c) => c.id));
-      localCats = localCats.filter((c) => !isCloudCatId(c.id) || cloudIdSet.has(c.id));
-      const merged = mergeCloudCatsWithLocal(cloudList, localCats);
-      safeSetItem(CATS_KEY, JSON.stringify(merged));
-      setCats(merged);
+      const localFiltered = localCats.filter((c) => !isCloudCatId(c.id) || cloudIdSet.has(c.id));
+      const merged = mergeAndNormalizeCats(cloudList, localFiltered, uid);
       const { data: roles } = await fetchMyCatRolesMap(sb, uid);
       if (!cancelled) setCatRolesMap(roles);
       setCloudSyncPhase('loading');
       const activeMerged = merged.filter((c) => !c.isArchived);
-      let nextCatId = migratedIdMap[selectedCatId] ?? selectedCatId;
-      setSelectedCatId((prev) => {
-        const remapped = migratedIdMap[prev] ?? prev;
-        if (activeMerged.some((c) => c.id === remapped)) {
-          nextCatId = remapped;
-          return remapped;
-        }
-        nextCatId = activeMerged[0]?.id ?? merged[0]?.id ?? remapped;
-        return nextCatId;
-      });
+      const remapped = migratedIdMap[selectedCatId] ?? selectedCatId;
+      const nextCatId = activeMerged.some((c) => c.id === remapped)
+        ? remapped
+        : activeMerged[0]?.id ?? merged[0]?.id ?? remapped;
+      applyCatsState(merged, { preferredSelectedId: nextCatId });
       setCatsCloudBusy(false);
+      setPetsBootReady(true);
       if (!cancelled) {
         await runFullCloudSync(merged, cloudList.map((c) => c.id), sb, uid);
         if (!cancelled) {
@@ -2366,7 +2411,15 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [supabaseAuth.authReady, supabaseAuth.user?.id, supabaseAuth.supabase, runFullCloudSync, reloadSelectedCatFromLocal]);
+  }, [
+    supabaseAuth.authReady,
+    supabaseAuth.user?.id,
+    supabaseAuth.supabase,
+    runFullCloudSync,
+    reloadSelectedCatFromLocal,
+    applyCatsState,
+    selectedCatId,
+  ]);
 
   const retryCloudSync = useCallback(() => {
     const sb = supabaseAuth.supabase;
@@ -2704,6 +2757,9 @@ export default function App() {
       allergyNote: '',
       vetClinic: '',
       profileNote: '',
+      isArchived: false,
+      createdAt: new Date().toISOString(),
+      ownerId: supabaseAuth.user?.id ?? '',
     };
 
     if (supabaseAuth.user && supabaseAuth.supabase) {
@@ -2713,11 +2769,10 @@ export default function App() {
         return;
       }
       if (!data) return;
-      const created = data as Cat;
-      setCats((prev) => [...prev, created]);
+      const created = appCatToNormalized(data, supabaseAuth.user.id);
+      applyCatsState([...cats, created], { preferredSelectedId: created.id });
       setNewCatName('');
       setNewCatPetType('cat');
-      setSelectedCatId(created.id);
       setDaily({});
       setMonthly({});
       setWeightRecords([]);
@@ -2727,10 +2782,9 @@ export default function App() {
       return;
     }
 
-    setCats((prev) => [...prev, base]);
+    applyCatsState([...cats, base], { preferredSelectedId: base.id });
     setNewCatName('');
     setNewCatPetType('cat');
-    setSelectedCatId(base.id);
     setDaily({});
     setMonthly({});
     setWeightRecords([]);
@@ -2743,6 +2797,11 @@ export default function App() {
     const target = cats.find((cat) => cat.id === catId);
     if (!target || target.isArchived) return;
 
+    if (!isValidPetForArchive(target)) {
+      showToast(tr.toastGenericError, 'error');
+      return;
+    }
+
     if (activeCats.length <= 1) {
       showToast(tr.keepOneCat, 'error');
       return;
@@ -2752,23 +2811,33 @@ export default function App() {
       return;
     }
 
+    setArchiveErrByCatId((prev) => {
+      const next = { ...prev };
+      delete next[catId];
+      return next;
+    });
+    setArchiveBusyId(catId);
+
     if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
       const { error } = await archiveCatForOwner(supabaseAuth.supabase, catId);
       if (error) {
-        showToast(tr.toastGenericError, 'error');
+        const msg = formatArchiveErrorMessage(error, lang);
+        setArchiveErrByCatId((prev) => ({ ...prev, [catId]: msg }));
+        showToast(msg, 'error');
+        setArchiveBusyId(null);
         return;
       }
     }
 
     const nextCats = cats.map((cat) => (cat.id === catId ? { ...cat, isArchived: true } : cat));
-    setCats(nextCats);
+    applyCatsState(nextCats);
+    setArchiveBusyId(null);
     showToast(tr.toastArchived, 'success');
 
     if (selectedCatId === catId) {
       const nextActive = nextCats.filter((c) => !c.isArchived);
       const next = nextActive[0];
       if (next) {
-        setSelectedCatId(next.id);
         setDaily(loadDailyRecord(next.id, today));
         setMonthly(loadMonthlyRecord(next.id, month));
         setWeightRecords(loadWeightRecords(next.id));
@@ -2784,12 +2853,14 @@ export default function App() {
     if (supabaseAuth.user && supabaseAuth.supabase && isCloudCatId(catId)) {
       const { error } = await restoreCatForOwner(supabaseAuth.supabase, catId);
       if (error) {
-        showToast(tr.toastGenericError, 'error');
+        const msg = formatRestoreErrorMessage(error, lang);
+        showToast(msg, 'error');
         return;
       }
     }
 
-    setCats((prev) => prev.map((cat) => (cat.id === catId ? { ...cat, isArchived: false } : cat)));
+    const nextCats = cats.map((cat) => (cat.id === catId ? { ...cat, isArchived: false } : cat));
+    applyCatsState(nextCats);
     showToast(tr.toastRestored, 'success');
   };
 
@@ -5139,25 +5210,25 @@ export default function App() {
         </div>
       ) : null}
 
-      {supabaseAuth.user && supabaseAuth.supabase ? (
-        catsCloudBusy ? (
-          <div className="mb-3 space-y-2 animate-fade-in">
-            <div className="flex items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-[12px] text-sky-900 shadow-sm">
-              <Spinner className="h-4 w-4 border-2" />
-              <span>{tr.catsCloudLoading}</span>
-            </div>
-            <SkeletonCard rows={3} />
+      {!petsBootReady || (supabaseAuth.user && supabaseAuth.supabase && catsCloudBusy) ? (
+        <div className="mb-3 space-y-2 animate-fade-in">
+          <div className="flex items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-[12px] text-sky-900 shadow-sm">
+            <Spinner className="h-4 w-4 border-2" />
+            <span>{!petsBootReady ? tr.petsListSyncing : tr.catsCloudLoading}</span>
           </div>
-        ) : catsCloudErr ? (
-          <div className="mb-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] leading-snug text-red-900 shadow-sm">
-            {tr.catsCloudLoadErr}
-            <span className="sr-only">{catsCloudErr}</span>
-            <p className="mt-1 text-[11px] text-red-800/90">{tr.toastGenericError}</p>
-          </div>
-        ) : null
+          <p className="text-[11px] text-stone-500">{tr.petsListSyncingHint}</p>
+          <SkeletonCard rows={3} />
+        </div>
       ) : null}
 
-      {activeCats.length === 0 && !catsCloudBusy ? (
+      {petsBootReady && supabaseAuth.user && supabaseAuth.supabase && !catsCloudBusy && catsCloudErr ? (
+        <div className="mb-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] leading-snug text-red-900 shadow-sm">
+          <p className="m-0 font-medium">{tr.catsCloudLoadErr}</p>
+          <p className="mt-1 text-[11px] text-red-800/90">{tr.toastGenericError}</p>
+        </div>
+      ) : null}
+
+      {petsBootReady && activeCats.length === 0 && !catsCloudBusy ? (
         <div className="mb-4 animate-fade-in rounded-3xl border border-orange-100 bg-white p-8 text-center shadow-sm">
           <p className="text-[15px] font-semibold leading-relaxed text-stone-800">{tr.emptyPetsTitle}</p>
           <button
@@ -5170,6 +5241,7 @@ export default function App() {
         </div>
       ) : null}
 
+      {petsBootReady ? (
       <section className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.catList}</h2>
         <div className="space-y-2">
@@ -5204,20 +5276,34 @@ export default function App() {
                   {tr.sharedCareTitle}
                 </button>
 
-                {canManageCatLifecycle(cat.id) ? (
+                <div className="flex shrink-0 flex-col items-end gap-1">
                   <button
-                    onClick={() => archiveCat(cat.id)}
-                    className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1.5 text-xs font-bold text-stone-500"
+                    type="button"
+                    disabled={archiveBusyId === cat.id || !isValidPetForArchive(cat)}
+                    onClick={() => void archiveCat(cat.id)}
+                    className="rounded-full bg-stone-100 px-2.5 py-1.5 text-xs font-bold text-stone-600 transition active:scale-[0.98] disabled:opacity-50"
                   >
-                    {tr.archive}
+                    {archiveBusyId === cat.id ? tr.authProcessing : tr.archive}
                   </button>
-                ) : null}
+                  {!canManageCatLifecycle(cat.id) ? (
+                    <p className="max-w-[5.5rem] text-right text-[9px] leading-tight text-amber-800">
+                      {tr.archiveErrPermission}
+                    </p>
+                  ) : null}
+                  {archiveErrByCatId[cat.id] ? (
+                    <p className="max-w-[8rem] text-right text-[9px] leading-tight text-red-700">
+                      {archiveErrByCatId[cat.id]}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
           ))}
         </div>
       </section>
+      ) : null}
 
+      {petsBootReady ? (
       <section id="add-cat-form" className="mb-4 rounded-2xl bg-white p-3 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.addCat}</h2>
         <label className="mb-1 block text-[11px] font-bold text-stone-500">{tr.petType}</label>
@@ -5266,6 +5352,7 @@ export default function App() {
           <p className="mt-2 text-[12px] leading-snug text-amber-900">{tr.planMultiCatUpgrade}</p>
         ) : null}
       </section>
+      ) : null}
 
       <section className="mb-4 rounded-2xl border border-stone-200 bg-stone-50/80 p-3 shadow-sm">
         <h2 className="mb-1 text-base font-bold text-stone-900">{tr.archivedCatsSection}</h2>

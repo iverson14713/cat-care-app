@@ -4,6 +4,7 @@ import { defaultEmojiForPetType, normalizePetType, type PetType } from './petTyp
 export type CatRow = {
   id: string;
   owner_id: string;
+  pet_type?: string;
   name: string;
   emoji: string;
   profile_photo: string;
@@ -24,6 +25,7 @@ export type CatRow = {
 export type AppCat = {
   id: string;
   name: string;
+  petType: PetType;
   emoji: string;
   profilePhoto?: string;
   birthday?: string;
@@ -36,6 +38,8 @@ export type AppCat = {
   vetClinic?: string;
   profileNote?: string;
   isArchived?: boolean;
+  ownerId?: string;
+  createdAt?: string;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -87,6 +91,8 @@ export function rowToAppCat(row: CatRow): AppCat {
     vetClinic: row.vet_clinic ?? '',
     profileNote: row.profile_note ?? '',
     isArchived: Boolean(row.is_archived),
+    ownerId: row.owner_id ?? '',
+    createdAt: row.created_at ?? '',
   };
 }
 
