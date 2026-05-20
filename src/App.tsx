@@ -556,6 +556,8 @@ const text = {
     offlineSyncRetry: '重試同步',
     offlineSyncOk: '離線資料已同步至雲端',
     offlinePendingHint: '有待同步的離線變更',
+    bootstrapInitFailed: '部分資料暫時無法載入，已改用本機資料。你可照常使用，稍後會自動再試同步。',
+    bootstrapPreparing: '正在準備你的照護資料…',
     catsCloudLoading: '正在同步雲端寵物…',
     petsListSyncing: '正在整理寵物清單…',
     petsListSyncingHint: '同步完成後即可管理與封存寵物',
@@ -1032,6 +1034,9 @@ const text = {
     offlineSyncRetry: 'Retry sync',
     offlineSyncOk: 'Offline changes synced to the cloud',
     offlinePendingHint: 'Offline changes waiting to sync',
+    bootstrapInitFailed:
+      'Some data could not load — using saved data on this device. You can keep using the app; sync will retry.',
+    bootstrapPreparing: 'Preparing your care data…',
     catsCloudLoading: 'Syncing pets from the cloud…',
     petsListSyncing: 'Preparing your pet list…',
     petsListSyncingHint: 'You can manage and archive pets once sync finishes',
@@ -1532,7 +1537,7 @@ export default function App() {
 
   const [lang, setLang] = useState<Lang>(() => loadLang());
   const [cats, setCats] = useState<Cat[]>(() => bootstrap.cats);
-  const [petsBootReady, setPetsBootReady] = useState(true);
+  const [petsBootReady, setPetsBootReady] = useState(() => bootstrap.cloudSyncDone);
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   const tr = text[lang];
@@ -6150,9 +6155,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
       {showOnboarding ? <Onboarding lang={lang} onComplete={completeOnboarding} /> : null}
-      {supabaseAuth.configured && !supabaseAuth.authReady && !petsBootReady ? (
+      {!petsBootReady || (supabaseAuth.configured && !supabaseAuth.authReady) ? (
         <div className="mx-auto max-w-md space-y-5 px-2 py-14 animate-fade-in">
-          <p className="text-center text-[14px] font-semibold text-stone-600">{tr.authBootTitle}</p>
+          <p className="text-center text-[14px] font-semibold text-stone-600">
+            {!petsBootReady ? tr.bootstrapPreparing : tr.authBootTitle}
+          </p>
           <SkeletonCard rows={5} />
           <div className="flex justify-center pt-2">
             <Spinner className="h-10 w-10 border-[3px]" />
@@ -6161,6 +6168,14 @@ export default function App() {
       ) : (
         <>
           <div className="mx-auto max-w-md pb-24">
+        {bootstrap.bootstrapStatus === 'error' ? (
+          <div
+            className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-950"
+            role="status"
+          >
+            {tr.bootstrapInitFailed}
+          </div>
+        ) : null}
         {!isOnline ? (
           <OfflineBanner message={tr.offlineBanner} />
         ) : offlineSyncError ? (

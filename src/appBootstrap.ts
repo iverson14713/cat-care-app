@@ -22,8 +22,32 @@ import { getSupabaseClient } from './supabaseClient';
 const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const DEFAULT_CAT_ID = 'default-cat';
 
-export const SPLASH_MIN_MS = 1500;
-export const SPLASH_TARGET_MS = 1750;
+/** Minimum splash visibility (brand moment). */
+export const SPLASH_MIN_MS = 800;
+/** Hard cap — never block the user longer than this on splash. */
+export const SPLASH_MAX_MS = 2000;
+
+export type BootstrapStatus = 'ready' | 'partial' | 'error';
+
+export type AppBootstrapResult = {
+  session: Session | null;
+  cats: NormalizedCat[];
+  selectedCatId: string;
+  reminders: Reminder[];
+  aiClientId: string;
+  appPlan: AppPlan;
+  assistantQuota: AssistantHealthPayload;
+  catRolesMap: Record<string, CatAccessRole>;
+  cloudSyncDone: boolean;
+  bootstrapStatus: BootstrapStatus;
+  /** Set when bootstrapStatus is `error` (i18n key or short message). */
+  bootstrapError?: string;
+};
+
+export type RunAppBootstrapOptions = {
+  /** When false, only local/session essentials — no cloud pull/push (fast). */
+  cloudSync?: boolean;
+};
 
 function todayKey(): string {
   const d = new Date();
@@ -40,19 +64,24 @@ function pickSelectedCatId(cats: NormalizedCat[]): string {
   return active[0]?.id ?? cats[0]?.id ?? DEFAULT_CAT_ID;
 }
 
-export type AppBootstrapResult = {
-  session: Session | null;
-  cats: NormalizedCat[];
-  selectedCatId: string;
-  reminders: Reminder[];
-  aiClientId: string;
-  appPlan: AppPlan;
-  assistantQuota: AssistantHealthPayload;
-  catRolesMap: Record<string, CatAccessRole>;
-  cloudSyncDone: boolean;
-};
+function buildLocalCore(uid: string) {
+  const aiClientId = getOrCreateClientId();
+  const usageDate = todayKey();
+  const reminders = loadReminders();
+  const appPlan = getSubscriptionStatus();
+  const cats = normalizeAndPersistCats(uid);
+  const selectedCatId = pickSelectedCatId(cats);
+  const assistantQuota = buildAssistantHealthFromLocal(appPlan, aiClientId, usageDate);
+  saveReminders(reminders);
+  safeSetItem(SELECTED_CAT_KEY, selectedCatId);
+  return { reminders, appPlan, cats, selectedCatId, aiClientId, assistantQuota, usageDate };
+}
 
-export async function runAppBootstrap(): Promise<AppBootstrapResult> {
+/** Fast path: session + local storage only (no cloud network). */
+export async function runAppBootstrap(
+  options: RunAppBootstrapOptions = {}
+): Promise<AppBootstrapResult> {
+  const cloudSync = options.cloudSync !== false;
   const sb = getSupabaseClient();
   let session: Session | null = null;
 
@@ -62,17 +91,12 @@ export async function runAppBootstrap(): Promise<AppBootstrapResult> {
   }
 
   const uid = session?.user?.id ?? '';
-  const aiClientId = getOrCreateClientId();
-  const usageDate = todayKey();
-
-  let reminders = loadReminders();
-  let appPlan = getSubscriptionStatus();
-  let cats = normalizeAndPersistCats(uid);
-  let selectedCatId = pickSelectedCatId(cats);
+  const core = buildLocalCore(uid);
+  let { reminders, appPlan, cats, selectedCatId, aiClientId, assistantQuota, usageDate } = core;
   let catRolesMap: Record<string, CatAccessRole> = {};
   let cloudSyncDone = false;
 
-  if (sb && session?.user) {
+  if (cloudSync && sb && session?.user) {
     let localCats = normalizeAllCats(loadRawCatsFromStorage(), uid);
     const offline = localCats.filter((c) => !isCloudCatId(c.id));
     if (offline.length > 0) {
@@ -114,13 +138,7 @@ export async function runAppBootstrap(): Promise<AppBootstrapResult> {
       appPlan = getAiPlan();
       cloudSyncDone = true;
     }
-  } else {
-    safeSetItem(SELECTED_CAT_KEY, selectedCatId);
   }
-
-  saveReminders(reminders);
-
-  const assistantQuota = buildAssistantHealthFromLocal(appPlan, aiClientId, usageDate);
 
   return {
     session,
@@ -132,7 +150,58 @@ export async function runAppBootstrap(): Promise<AppBootstrapResult> {
     assistantQuota,
     catRolesMap,
     cloudSyncDone,
+    bootstrapStatus: cloudSyncDone ? 'ready' : 'partial',
   };
+}
+
+function createMinimalBootstrap(bootstrapError = 'init_failed'): AppBootstrapResult {
+  const core = buildLocalCore('');
+  return {
+    session: null,
+    cats: core.cats,
+    selectedCatId: core.selectedCatId,
+    reminders: core.reminders,
+    aiClientId: core.aiClientId,
+    appPlan: core.appPlan,
+    assistantQuota: core.assistantQuota,
+    catRolesMap: {},
+    cloudSyncDone: false,
+    bootstrapStatus: 'error',
+    bootstrapError,
+  };
+}
+
+/**
+ * Splash budget: wait up to SPLASH_MAX_MS for full bootstrap, then continue with local data.
+ */
+export async function runSplashBootstrap(): Promise<AppBootstrapResult> {
+  try {
+    const raced = await Promise.race([
+      runAppBootstrap({ cloudSync: true }).then((r) => ({ ok: true as const, r })),
+      delay(SPLASH_MAX_MS).then(() => ({ ok: false as const })),
+    ]);
+
+    if (raced.ok) {
+      return { ...raced.r, bootstrapStatus: 'ready', cloudSyncDone: true };
+    }
+
+    const local = await runAppBootstrap({ cloudSync: false });
+    return { ...local, bootstrapStatus: 'partial', cloudSyncDone: false };
+  } catch (err) {
+    console.error('[bootstrap]', err);
+    try {
+      const local = await runAppBootstrap({ cloudSync: false });
+      return {
+        ...local,
+        bootstrapStatus: 'error',
+        bootstrapError: 'init_failed',
+        cloudSyncDone: false,
+      };
+    } catch (inner) {
+      console.error('[bootstrap] local fallback failed', inner);
+      return createMinimalBootstrap('init_failed');
+    }
+  }
 }
 
 export function delay(ms: number): Promise<void> {

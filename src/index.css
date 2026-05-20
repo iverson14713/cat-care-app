@@ -123,3 +123,17 @@ select {
 .splash-screen__icon-wrap {
   animation: splash-content-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.05s both;
 }
+
+.splash-screen__status {
+  animation: splash-status-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes splash-status-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}

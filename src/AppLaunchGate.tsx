@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
 import App from './App.tsx';
 import { SplashScreen } from './components/SplashScreen.tsx';
-import { delay, runAppBootstrap, SPLASH_MIN_MS, type AppBootstrapResult } from './appBootstrap.ts';
+import {
+  delay,
+  runSplashBootstrap,
+  SPLASH_MIN_MS,
+  type AppBootstrapResult,
+} from './appBootstrap.ts';
 import { AppBootstrapProvider } from './AppBootstrapContext.tsx';
 import { ensureAppStoreFontsReady } from './components/appStore/fonts.ts';
 import { trackEvent } from './services/analytics.ts';
 
 type Phase = 'splash' | 'app';
+
+function splashSubtitle(): string {
+  const nav = typeof navigator !== 'undefined' ? navigator.language : 'zh';
+  return nav.toLowerCase().startsWith('zh') ? '正在準備你的照護資料...' : 'Preparing your care data...';
+}
 
 export function AppLaunchGate() {
   const [phase, setPhase] = useState<Phase>('splash');
@@ -22,11 +32,11 @@ export function AppLaunchGate() {
 
       let result: AppBootstrapResult;
       try {
-        const [boot] = await Promise.all([runAppBootstrap(), ensureAppStoreFontsReady()]);
+        const [boot] = await Promise.all([runSplashBootstrap(), ensureAppStoreFontsReady()]);
         result = boot;
       } catch (err) {
-        console.error('[bootstrap]', err);
-        result = await runAppBootstrap();
+        console.error('[bootstrap] launch gate', err);
+        result = await runSplashBootstrap();
       }
 
       const elapsed = Date.now() - started;
@@ -51,7 +61,7 @@ export function AppLaunchGate() {
   }, []);
 
   if (phase === 'splash' || !bootstrap) {
-    return <SplashScreen active />;
+    return <SplashScreen active statusText={splashSubtitle()} />;
   }
 
   return (
