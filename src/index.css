@@ -12,6 +12,9 @@
   .toast-slide-in {
     animation: toastSlideIn 0.32s ease-out both;
   }
+  .toast-slide-in-top {
+    animation: toastSlideInTop 0.28s ease-out both;
+  }
   .page-tab-fade {
     animation: appFadeIn 0.28s ease-out both;
   }
@@ -71,6 +74,17 @@
   from {
     opacity: 0;
     transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastSlideInTop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
   }
   to {
     opacity: 1;

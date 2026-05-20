@@ -570,6 +570,8 @@ const text = {
     cloudSyncEmpty: '雲端尚無資料（本機資料已保留）',
     cloudSyncFailed: '同步失敗',
     syncErrorFriendly: '同步未完成，請檢查網路後重試。',
+    syncToastSyncing: '正在同步資料…',
+    syncToastFailed: '部分資料同步失敗，稍後將自動重試',
     toastSaved: '已儲存',
     toastSynced: '已同步',
     toastPhotoOk: '照片上傳成功',
@@ -1049,6 +1051,8 @@ const text = {
     cloudSyncEmpty: 'No cloud data yet (local data kept)',
     cloudSyncFailed: 'Sync failed',
     syncErrorFriendly: 'Sync could not finish. Check your connection and try again.',
+    syncToastSyncing: 'Syncing your data…',
+    syncToastFailed: 'Some data could not sync. We will retry shortly.',
     toastSaved: 'Saved',
     toastSynced: 'Synced',
     toastPhotoOk: 'Photo uploaded',
@@ -1791,7 +1795,6 @@ export default function App() {
   const [cloudSyncPhase, setCloudSyncPhase] = useState<CloudSyncPhase>('idle');
   const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
   const [cloudSyncTick, setCloudSyncTick] = useState(0);
-  const [cloudDailyUiLoading, setCloudDailyUiLoading] = useState(false);
   const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
   const prevCloudPhaseRef = useRef<CloudSyncPhase>('idle');
   const [cloudCareEvents, setCloudCareEvents] = useState<CareEventRow[]>([]);
@@ -1804,14 +1807,16 @@ export default function App() {
   useEffect(() => {
     const prev = prevCloudPhaseRef.current;
     const cur = cloudSyncPhase;
-    if (prev === 'syncing' && (cur === 'ready' || cur === 'empty')) {
-      showToast(tr.toastSynced, 'success');
+    const isActive = cur === 'loading' || cur === 'syncing';
+    const wasActive = prev === 'loading' || prev === 'syncing';
+    if (isActive && !wasActive) {
+      showToast(tr.syncToastSyncing, 'info', { position: 'top', durationMs: 2000 });
     }
     if (cur === 'failed' && prev !== 'failed') {
-      showToast(tr.syncErrorFriendly, 'error');
+      showToast(tr.syncToastFailed, 'warning', { position: 'top', durationMs: 4000 });
     }
     prevCloudPhaseRef.current = cur;
-  }, [cloudSyncPhase, showToast, tr.toastSynced, tr.syncErrorFriendly]);
+  }, [cloudSyncPhase, showToast, tr.syncToastSyncing, tr.syncToastFailed]);
 
   const [daily, setDaily] = useState<DailyRecord>(() =>
     loadDailyRecord(selectedCatId, today)
@@ -2634,6 +2639,12 @@ export default function App() {
     void runFullCloudSync(cats, accessibleIds, sb, uid).then(() => reloadSelectedCatFromLocal(selectedCatId));
   }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id, runFullCloudSync, reloadSelectedCatFromLocal, selectedCatId]);
 
+  useEffect(() => {
+    if (!isOnline || cloudSyncPhase !== 'failed' || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
+    const handle = window.setTimeout(() => retryCloudSync(), 8000);
+    return () => window.clearTimeout(handle);
+  }, [isOnline, cloudSyncPhase, supabaseAuth.user?.id, supabaseAuth.supabase, retryCloudSync]);
+
   const cloudCatIds = useMemo(
     () => cats.filter((c) => isCloudCatId(c.id)).map((c) => c.id),
     [cats]
@@ -2697,20 +2708,17 @@ export default function App() {
     const sb = supabaseAuth.supabase;
     const mySeq = ++cloudDailyFetchSeqRef.current;
     cloudDailyHydratingRef.current = true;
-    setCloudDailyUiLoading(true);
     let cancelled = false;
     void (async () => {
       const { data: cloudPart, error } = await fetchDailyRecordRow(sb, selectedCat.id, today);
       if (cancelled || mySeq !== cloudDailyFetchSeqRef.current) {
         cloudDailyHydratingRef.current = false;
-        setCloudDailyUiLoading(false);
         return;
       }
       if (error) {
         console.warn('[daily_records fetch]', error.message);
         cloudDailyHydratingRef.current = false;
         cloudDailyHydratedRef.current = true;
-        setCloudDailyUiLoading(false);
         return;
       }
       const localFull = loadDailyRecord(selectedCat.id, today) as unknown as DailyJson;
@@ -2720,7 +2728,6 @@ export default function App() {
       lastCloudDailyStripRef.current = JSON.stringify(stripPhotoFieldsFromDaily(merged as unknown as DailyJson));
       cloudDailyHydratingRef.current = false;
       cloudDailyHydratedRef.current = true;
-      setCloudDailyUiLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -3593,12 +3600,12 @@ export default function App() {
     <>
       {renderCatSwitcher()}
 
-      {(photoUploadBusy || cloudDailyUiLoading) && (
+      {photoUploadBusy ? (
         <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-orange-100 bg-white/95 px-3 py-2.5 text-[12px] font-medium text-stone-600 shadow-sm backdrop-blur-sm animate-fade-in">
           <Spinner className="h-4 w-4 shrink-0 border-2" />
-          <span>{photoUploadBusy ? tr.photoUploading : tr.cloudSyncSyncing}</span>
+          <span>{tr.photoUploading}</span>
         </div>
-      )}
+      ) : null}
 
       <section className="mb-5 overflow-hidden rounded-3xl border border-amber-100 bg-amber-50/60 shadow-sm">
         <button
@@ -4003,11 +4010,7 @@ export default function App() {
           </div>
         </div>
 
-        {cloudDailyUiLoading && useCloudDaily ? (
-          <div className="mb-4 space-y-3 animate-fade-in">
-            <SkeletonCard rows={4} />
-          </div>
-        ) : history.length === 0 ? (
+        {history.length === 0 ? (
           <div className="animate-fade-in space-y-4 rounded-3xl border border-orange-100 bg-white p-8 text-center shadow-sm">
             <p className="text-[15px] leading-relaxed text-stone-700">{tr.emptyHistoryTitle}</p>
             <button
@@ -5878,17 +5881,6 @@ export default function App() {
         </div>
       ) : null}
 
-      {!petsBootReady || (supabaseAuth.user && supabaseAuth.supabase && catsCloudBusy) ? (
-        <div className="mb-3 space-y-2 animate-fade-in">
-          <div className="flex items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-[12px] text-sky-900 shadow-sm">
-            <Spinner className="h-4 w-4 border-2" />
-            <span>{!petsBootReady ? tr.petsListSyncing : tr.catsCloudLoading}</span>
-          </div>
-          <p className="text-[11px] text-stone-500">{tr.petsListSyncingHint}</p>
-          <SkeletonCard rows={3} />
-        </div>
-      ) : null}
-
       {petsBootReady && supabaseAuth.user && supabaseAuth.supabase && !catsCloudBusy && catsCloudErr ? (
         <div className="mb-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] leading-snug text-red-900 shadow-sm">
           <p className="m-0 font-medium">{tr.catsCloudLoadErr}</p>
@@ -6273,46 +6265,6 @@ export default function App() {
             >
               {tr.authSignOut}
             </button>
-          </div>
-        ) : null}
-
-        {supabaseAuth.user &&
-        supabaseAuth.supabase &&
-        (cloudSyncPhase === 'loading' || cloudSyncPhase === 'syncing' || cloudSyncPhase === 'failed') ? (
-          <div
-            className={`mb-3 rounded-xl border px-3 py-2 text-[11px] leading-snug shadow-sm ${
-              cloudSyncPhase === 'failed'
-                ? 'border-red-200 bg-red-50 text-red-900'
-                : 'border-orange-200 bg-orange-50/90 text-orange-900'
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <span>
-                  {cloudSyncPhase === 'loading' && tr.cloudSyncLoading}
-                  {cloudSyncPhase === 'syncing' && tr.cloudSyncSyncing}
-                  {cloudSyncPhase === 'failed' && tr.cloudSyncFailed}
-                </span>
-                {cloudSyncPhase === 'failed' && cloudSyncError ? (
-                  <p className="mt-1 text-[10px] text-red-800/90">{cloudSyncError}</p>
-                ) : null}
-              </div>
-              {cloudSyncPhase === 'failed' ? (
-                <button
-                  type="button"
-                  onClick={retryCloudSync}
-                  className="shrink-0 rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-orange-700 ring-1 ring-orange-200"
-                >
-                  {tr.cloudSyncRetry}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {(cloudSyncPhase === 'loading' || cloudSyncPhase === 'syncing') && supabaseAuth.user ? (
-          <div className="mb-4 animate-fade-in">
-            <SkeletonCard rows={2} />
           </div>
         ) : null}
 
