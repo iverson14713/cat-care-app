@@ -28,6 +28,7 @@ import { trackEvent } from './services/analytics';
 import { handleAppleSignIn } from './services/auth/appleSignIn';
 import {
   applyDailyPendingSync,
+  clearWeightsPendingSync,
   countPendingSyncItems,
   flushPendingSync,
   markDailyPendingSync,
@@ -2901,11 +2902,18 @@ export default function App() {
     const sb = supabaseAuth.supabase;
     const uid = supabaseAuth.user.id;
     const handle = window.setTimeout(() => {
-      void upsertWeightRecordsForCat(sb, selectedCat.id, weightRecords, uid).then(({ error }) => {
+      void upsertWeightRecordsForCat(sb, selectedCat.id, weightRecords, uid).then(({ error, records }) => {
         if (error) {
           console.warn('[weight_records upsert]', error.message);
           markWeightsPendingSync(selectedCat.id);
+          return;
         }
+        clearWeightsPendingSync(selectedCat.id);
+        setWeightRecords((prev) => {
+          const needsIdUpdate = prev.some((r) => !/^[0-9a-f-]{36}$/i.test(r.id));
+          if (!needsIdUpdate) return prev;
+          return records.length > 0 ? records : prev;
+        });
       });
     }, 700);
     return () => window.clearTimeout(handle);

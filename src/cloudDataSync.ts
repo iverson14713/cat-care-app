@@ -16,6 +16,7 @@ import {
 import { fetchUserReminders, mergeReminders, upsertUserReminders } from './supabaseReminders';
 import type { Reminder } from './reminders';
 import { insertCatForOwner, isCloudCatId, type AppCat } from './supabaseCats';
+import { clearWeightsPendingSync } from './services/offlineSync';
 import { safeGetItem, safeRemoveItem, safeSetItem } from './safeStorage';
 import {
   fetchAllDailyPhotosForCat,
@@ -401,8 +402,15 @@ export async function pushLocalDataToCloud(
       try {
         const parsed = JSON.parse(rawW) as AppWeightRecord[];
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const { error } = await upsertWeightRecordsForCat(supabase, catId, parsed, userId);
-          if (error) errors.push(`weight upsert ${catId}: ${error.message}`);
+          const { error, records } = await upsertWeightRecordsForCat(supabase, catId, parsed, userId);
+          if (error) {
+            errors.push(`weight upsert ${catId}: ${error.message}`);
+          } else {
+            clearWeightsPendingSync(catId);
+            if (records.length > 0) {
+              safeSetItem(weightStorageKey(catId), JSON.stringify(records));
+            }
+          }
         }
       } catch {
         /* ignore */

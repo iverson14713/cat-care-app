@@ -208,11 +208,14 @@ export async function flushPendingSync(
         const rows = JSON.parse(rawW) as WeightRecordWithSync[];
         if (Array.isArray(rows) && rows.some((r) => r.pendingSync)) {
           const cleaned: AppWeightRecord[] = rows.map(({ pendingSync: _p, ...r }) => r);
-          const { error } = await upsertWeightRecordsForCat(supabase, catId, cleaned, userId);
+          const { error, records } = await upsertWeightRecordsForCat(supabase, catId, cleaned, userId);
           if (error) {
             errors.push(`weight ${catId}: ${error.message}`);
           } else {
             clearWeightsPendingSync(catId);
+            if (records.length > 0) {
+              safeSetItem(weightStorageKey(catId), JSON.stringify(records));
+            }
             syncedWeights += 1;
           }
         }

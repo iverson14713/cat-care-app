@@ -79,17 +79,31 @@ await check('cats — select owned cat', async () => {
 if (!catId) fail('Could not resolve a cloud cat id');
 
 await check('weight_records — upsert + select', async () => {
+  const weightId = crypto.randomUUID();
   const { error: upErr } = await supabase.from('weight_records').upsert(
     {
+      id: weightId,
       cat_id: catId,
       record_date: today,
       weight_kg: 4.5,
       note: 'verify-cloud-sync',
       updated_by: userId,
     },
-    { onConflict: 'cat_id,record_date' }
+    { onConflict: 'id' }
   );
   if (upErr) throw new Error(upErr.message);
+  const { error: upErr2 } = await supabase.from('weight_records').upsert(
+    {
+      id: weightId,
+      cat_id: catId,
+      record_date: today,
+      weight_kg: 4.6,
+      note: 'verify-cloud-sync-retry',
+      updated_by: userId,
+    },
+    { onConflict: 'id' }
+  );
+  if (upErr2) throw new Error(`retry upsert: ${upErr2.message}`);
   const { data, error } = await supabase
     .from('weight_records')
     .select('weight_kg, note')
