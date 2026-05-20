@@ -3677,9 +3677,19 @@ export default function App() {
       </section>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="mb-3">
-          <h2 className="text-lg font-bold">{tr.abnormalRecord}</h2>
-          <p className="text-sm text-stone-500">{tr.abnormalDesc}</p>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-bold">{tr.abnormalRecord}</h2>
+            <p className="text-sm text-stone-500">{tr.abnormalDesc}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPage('assistant')}
+            className="flex shrink-0 touch-manipulation items-center gap-1.5 rounded-xl bg-violet-50 px-3 py-2 text-[12px] font-bold text-violet-800 ring-1 ring-violet-100 transition active:scale-[0.98] active:bg-violet-100"
+          >
+            <Sparkles className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+            <span className="whitespace-nowrap">{tr.moreAssistant}</span>
+          </button>
         </div>
 
         <textarea
@@ -6296,7 +6306,6 @@ export default function App() {
         {page === 'assistant' && renderAssistantPage()}
         </div>
 
-        <p className="mt-6 text-center text-xs text-stone-400">{tr.savedLocal}</p>
       </div>
 
       {permanentDeleteTarget ? (
