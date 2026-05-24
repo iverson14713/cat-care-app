@@ -4,7 +4,6 @@ import { buildAssistantHealthFromLocal, type AssistantHealthPayload } from './op
 import type { AppPlan } from './planLimits';
 import { getSubscriptionStatus } from './subscription';
 import {
-  CATS_STORAGE_KEY,
   loadRawCatsFromStorage,
   mergeAndNormalizeCats,
   normalizeAllCats,
@@ -15,11 +14,16 @@ import {
 import { migrateOfflineCatsToCloud, pullCloudDataIntoLocal, pushLocalDataToCloud } from './cloudDataSync';
 import { loadReminders, saveReminders, type Reminder } from './reminders';
 import { safeGetItem, safeSetItem } from './safeStorage';
+import {
+  catsStorageKey,
+  prepareStorageForUser,
+  selectedCatStorageKey,
+  setActiveStorageUser,
+} from './userStorageScope';
 import { fetchCatsForUser, isCloudCatId, type AppCat } from './supabaseCats';
 import { fetchMyCatRolesMap, type CatAccessRole } from './supabaseSharedCare';
 import { getSupabaseClient } from './supabaseClient';
 
-const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const DEFAULT_CAT_ID = 'default-cat';
 
 /** Minimum splash visibility (brand moment). */
@@ -57,9 +61,9 @@ function todayKey(): string {
   return `${y}-${m}-${day}`;
 }
 
-function pickSelectedCatId(cats: NormalizedCat[]): string {
+function pickSelectedCatId(cats: NormalizedCat[], userId?: string): string {
   const active = cats.filter((c) => !c.isArchived);
-  const saved = safeGetItem(SELECTED_CAT_KEY);
+  const saved = safeGetItem(selectedCatStorageKey(userId));
   if (saved && active.some((c) => c.id === saved)) return saved;
   return active[0]?.id ?? cats[0]?.id ?? DEFAULT_CAT_ID;
 }
@@ -67,13 +71,14 @@ function pickSelectedCatId(cats: NormalizedCat[]): string {
 function buildLocalCore(uid: string) {
   const aiClientId = getOrCreateClientId();
   const usageDate = todayKey();
+  setActiveStorageUser(uid || null);
   const reminders = loadReminders();
   const appPlan = getSubscriptionStatus();
-  const cats = normalizeAndPersistCats(uid);
-  const selectedCatId = pickSelectedCatId(cats);
+  const cats = normalizeAndPersistCats(uid, uid || undefined);
+  const selectedCatId = pickSelectedCatId(cats, uid || undefined);
   const assistantQuota = buildAssistantHealthFromLocal(appPlan, aiClientId, usageDate);
   saveReminders(reminders);
-  safeSetItem(SELECTED_CAT_KEY, selectedCatId);
+  safeSetItem(selectedCatStorageKey(uid || undefined), selectedCatId);
   return { reminders, appPlan, cats, selectedCatId, aiClientId, assistantQuota, usageDate };
 }
 
@@ -97,7 +102,24 @@ export async function runAppBootstrap(
   let cloudSyncDone = false;
 
   if (cloudSync && sb && session?.user) {
-    let localCats = normalizeAllCats(loadRawCatsFromStorage(), uid);
+    const prep = prepareStorageForUser(uid);
+    if (!prep.ok) {
+      return {
+        session,
+        cats: [],
+        selectedCatId: DEFAULT_CAT_ID,
+        reminders: [],
+        aiClientId: core.aiClientId,
+        appPlan: core.appPlan,
+        assistantQuota: core.assistantQuota,
+        catRolesMap: {},
+        cloudSyncDone: false,
+        bootstrapStatus: 'error',
+        bootstrapError: 'storage_owner_mismatch',
+      };
+    }
+
+    let localCats = normalizeAllCats(loadRawCatsFromStorage(uid), uid);
     const offline = localCats.filter((c) => !isCloudCatId(c.id));
     if (offline.length > 0) {
       const mig = await migrateOfflineCatsToCloud(sb, uid, localCats as unknown as AppCat[]);
@@ -106,7 +128,7 @@ export async function runAppBootstrap(
         mig.cats.map((c) => normalizeCat(c, uid)).filter(Boolean) as NormalizedCat[],
         uid
       );
-      safeSetItem(CATS_STORAGE_KEY, JSON.stringify(localCats));
+      safeSetItem(catsStorageKey(uid), JSON.stringify(localCats));
       const remapped = mig.idMap[selectedCatId];
       if (remapped) selectedCatId = remapped;
     }
@@ -116,7 +138,7 @@ export async function runAppBootstrap(
       const cloudIdSet = new Set(cloudList.map((c) => c.id));
       const localFiltered = localCats.filter((c) => !isCloudCatId(c.id) || cloudIdSet.has(c.id));
       cats = mergeAndNormalizeCats(cloudList, localFiltered, uid);
-      safeSetItem(CATS_STORAGE_KEY, JSON.stringify(cats));
+      safeSetItem(catsStorageKey(uid), JSON.stringify(cats));
 
       const rolesRes = await fetchMyCatRolesMap(sb, uid);
       catRolesMap = rolesRes.data;
@@ -125,7 +147,7 @@ export async function runAppBootstrap(
       selectedCatId = active.some((c) => c.id === selectedCatId)
         ? selectedCatId
         : active[0]?.id ?? cats[0]?.id ?? DEFAULT_CAT_ID;
-      safeSetItem(SELECTED_CAT_KEY, selectedCatId);
+      safeSetItem(selectedCatStorageKey(uid), selectedCatId);
 
       const cloudIds = cats.filter((c) => isCloudCatId(c.id) && cloudIdSet.has(c.id)).map((c) => c.id);
       if (cloudIds.length > 0) {

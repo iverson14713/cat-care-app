@@ -3,6 +3,7 @@ import {
   DEVICE_LOGICAL_W,
   PHONE_BEZEL,
   PHONE_FRAME_RADIUS,
+  PHONE_MOCKUP_SCALE,
   PHONE_SCREEN_H,
   PHONE_SCREEN_RADIUS,
   PHONE_SCREEN_W,
@@ -16,9 +17,11 @@ type IphoneMockupProps = {
 export function IphoneMockup({ children }: IphoneMockupProps) {
   const outerW = PHONE_SCREEN_W + PHONE_BEZEL * 2;
   const outerH = PHONE_SCREEN_H + PHONE_BEZEL * 2;
-  const islandTop = Math.round(18 * (PHONE_SCREEN_W / 612));
-  const islandW = Math.round(110 * (PHONE_SCREEN_W / 612));
-  const islandH = Math.round(28 * (PHONE_SCREEN_W / 612));
+  const islandTop = Math.round(16 * (PHONE_SCREEN_W / 612));
+  const islandW = Math.round(118 * (PHONE_SCREEN_W / 612));
+  const islandH = Math.round(30 * (PHONE_SCREEN_W / 612));
+  const sideBtnW = Math.max(3, Math.round(4 * PHONE_MOCKUP_SCALE));
+  const sideBtnH = Math.round(56 * (PHONE_SCREEN_W / 612));
 
   return (
     <section
@@ -27,20 +30,28 @@ export function IphoneMockup({ children }: IphoneMockupProps) {
       aria-hidden
     >
       <span
-        className="absolute inset-0 bg-stone-900"
+        className="absolute inset-0 bg-gradient-to-b from-stone-800 to-stone-950"
         style={{
           borderRadius: PHONE_FRAME_RADIUS,
           boxShadow:
-            '0 40px 80px -20px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08)',
+            '0 48px 96px -24px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(255,255,255,0.1), inset 0 1px 0 rgba(255,255,255,0.06)',
         }}
+      />
+      <span
+        className="absolute rounded-sm bg-stone-700"
+        style={{ left: -sideBtnW, top: '22%', width: sideBtnW, height: sideBtnH }}
+      />
+      <span
+        className="absolute rounded-sm bg-stone-700"
+        style={{ right: -sideBtnW, top: '28%', width: sideBtnW, height: sideBtnH * 0.72 }}
       />
       <span
         className="absolute left-1/2 z-20 -translate-x-1/2 rounded-full bg-black"
         style={{
-          top: islandTop,
+          top: islandTop + PHONE_BEZEL,
           width: islandW,
           height: islandH,
-          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)',
+          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)',
         }}
       />
       <span
@@ -65,6 +76,10 @@ export function IphoneMockup({ children }: IphoneMockupProps) {
         >
           {children}
         </span>
+        <span
+          className="pointer-events-none absolute bottom-2 left-1/2 z-10 h-1 -translate-x-1/2 rounded-full bg-stone-900/25"
+          style={{ width: Math.round(96 * (PHONE_SCREEN_W / 612)) }}
+        />
       </span>
     </section>
   );

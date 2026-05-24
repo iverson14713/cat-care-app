@@ -1,8 +1,10 @@
 import { defaultEmojiForPetType, normalizePetType, type PetType } from './petTypes';
 import type { AppCat } from './supabaseCats';
 import { isCloudCatId } from './supabaseCats';
-import { safeSetItem } from './safeStorage';
+import { catsStorageKey, getActiveStorageUserId } from './userStorageScope';
+import { safeSetItem, safeGetItem } from './safeStorage';
 
+/** @deprecated Use catsStorageKey(userId) — kept for grep compatibility. */
 export const CATS_STORAGE_KEY = 'cat-calendar-cats';
 
 export type NormalizedCat = {
@@ -136,9 +138,10 @@ export function mergeAndNormalizeCats(
   return normalizeAllCats(Array.from(byId.values()), fallbackOwnerId);
 }
 
-export function loadRawCatsFromStorage(): unknown[] {
+export function loadRawCatsFromStorage(userId?: string): unknown[] {
   try {
-    const raw = localStorage.getItem(CATS_STORAGE_KEY);
+    const key = catsStorageKey(userId);
+    const raw = safeGetItem(key) ?? (userId ? null : safeGetItem(CATS_STORAGE_KEY));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? parsed : [];
@@ -147,9 +150,9 @@ export function loadRawCatsFromStorage(): unknown[] {
   }
 }
 
-export function normalizeAndPersistCats(fallbackOwnerId = ''): NormalizedCat[] {
-  const normalized = normalizeAllCats(loadRawCatsFromStorage(), fallbackOwnerId);
-  safeSetItem(CATS_STORAGE_KEY, JSON.stringify(normalized));
+export function normalizeAndPersistCats(fallbackOwnerId = '', userId?: string): NormalizedCat[] {
+  const normalized = normalizeAllCats(loadRawCatsFromStorage(userId), fallbackOwnerId);
+  safeSetItem(catsStorageKey(userId ?? getActiveStorageUserId()), JSON.stringify(normalized));
   return normalized;
 }
 

@@ -1,7 +1,7 @@
 {
-  "name": "寵物日曆 Pet Calendar",
-  "short_name": "寵物日曆",
-  "description": "Pet care calendar",
+  "name": "寵物日記 Pet Care",
+  "short_name": "寵物日記",
+  "description": "陪伴毛孩的每一天 — 照護紀錄、體重追蹤、提醒與 AI 週報",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f97316",

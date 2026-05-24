@@ -34,51 +34,28 @@ import {
   writeLocalAiUsageCount,
 } from './aiClient';
 import {
+  assertStorageOwnerMatches,
+  dailyStorageKey,
+  getActiveStorageUserId,
+  listLocalDailyDatesForCat,
+  listLocalMonthlyKeysForCat,
+  monthlyStorageKey,
+  remindersStorageKey,
+  weightStorageKey,
+  weeklyReportStorageKey,
+} from './userStorageScope';
+import {
   listLocalWeeklyReportsForCat,
   loadSavedWeeklyReport,
   type SavedWeeklyReport,
-  weeklyReportStorageKey,
 } from './weeklyReportStorage';
 
-export function dailyStorageKey(catId: string, date: string): string {
-  return `cat-calendar-daily-${catId}-${date}`;
-}
-
-export function monthlyStorageKey(catId: string, month: string): string {
-  return `cat-calendar-monthly-${catId}-${month}`;
-}
-
-export function weightStorageKey(catId: string): string {
-  return `cat-calendar-weights-${catId}`;
-}
-
-function listLocalDailyDatesForCat(catId: string): string[] {
-  const prefix = `cat-calendar-daily-${catId}-`;
-  const dates: string[] = [];
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(prefix)) dates.push(key.slice(prefix.length));
-    }
-  } catch {
-    // ignore
-  }
-  return dates;
-}
-
-function listLocalMonthlyKeysForCat(catId: string): string[] {
-  const prefix = `cat-calendar-monthly-${catId}-`;
-  const months: string[] = [];
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(prefix)) months.push(key.slice(prefix.length));
-    }
-  } catch {
-    // ignore
-  }
-  return months;
-}
+export {
+  dailyStorageKey,
+  monthlyStorageKey,
+  weightStorageKey,
+  weeklyReportStorageKey,
+} from './userStorageScope';
 
 function parseLocalDaily(catId: string, date: string): DailyJson {
   const raw = safeGetItem(dailyStorageKey(catId, date));
@@ -134,17 +111,24 @@ export function purgeCatLocalStorage(catId: string): void {
     safeRemoveItem(monthlyStorageKey(catId, monthKey));
   }
   safeRemoveItem(weightStorageKey(catId));
+  const uid = getActiveStorageUserId();
+  const prefix = `weekly-ai-report-${uid}-${catId}-`;
+  for (const key of listKeysForPrefix(prefix)) {
+    safeRemoveItem(key);
+  }
+}
+
+function listKeysForPrefix(prefix: string): string[] {
+  const keys: string[] = [];
   try {
-    const prefix = `weekly-ai-report-${catId}-`;
-    const keys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
+    for (let i = 0; i < localStorage.length; i += 1) {
       const k = localStorage.key(i);
       if (k?.startsWith(prefix)) keys.push(k);
     }
-    for (const k of keys) safeRemoveItem(k);
   } catch {
     // ignore
   }
+  return keys;
 }
 
 /** Rewrite localStorage keys when an offline cat receives a cloud UUID. */
@@ -171,13 +155,9 @@ export function rewriteCatStorageKeys(oldId: string, newId: string): void {
     safeRemoveItem(wKey);
   }
   try {
-    const prefix = `weekly-ai-report-${oldId}-`;
-    const keys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(prefix)) keys.push(k);
-    }
-    for (const k of keys) {
+    const uid = getActiveStorageUserId();
+    const prefix = `weekly-ai-report-${uid}-${oldId}-`;
+    for (const k of listKeysForPrefix(prefix)) {
       const weekEnd = k.slice(prefix.length);
       const v = safeGetItem(k);
       if (v) {
@@ -196,6 +176,15 @@ export async function migrateOfflineCatsToCloud(
   userId: string,
   localCats: AppCat[]
 ): Promise<{ cats: AppCat[]; idMap: Record<string, string>; errors: string[] }> {
+  const ownerCheck = assertStorageOwnerMatches(userId);
+  if (!ownerCheck.ok) {
+    return {
+      cats: localCats.filter((c) => isCloudCatId(c.id)),
+      idMap: {},
+      errors: ['storage_owner_mismatch: local data belongs to another account'],
+    };
+  }
+
   const idMap: Record<string, string> = {};
   const errors: string[] = [];
   const cats: AppCat[] = [];
@@ -203,6 +192,14 @@ export async function migrateOfflineCatsToCloud(
   for (const cat of localCats) {
     if (isCloudCatId(cat.id)) {
       cats.push(cat);
+      continue;
+    }
+    const rawOwner =
+      (typeof (cat as { owner_id?: string }).owner_id === 'string' && (cat as { owner_id: string }).owner_id) ||
+      (typeof (cat as { ownerId?: string }).ownerId === 'string' && (cat as { ownerId: string }).ownerId) ||
+      '';
+    if (rawOwner && rawOwner !== userId) {
+      errors.push(`skip migrate ${cat.name}: owned by another user`);
       continue;
     }
     const { data, error } = await insertCatForOwner(supabase, userId, cat);
@@ -322,7 +319,7 @@ export async function pullCloudDataIntoLocal(
   const { data: cloudReminders, error: remErr } = await fetchUserReminders(supabase, userId);
   if (remErr) errors.push(`reminders: ${remErr.message}`);
   else {
-    const raw = safeGetItem('cat-calendar-reminders');
+    const raw = safeGetItem(remindersStorageKey(userId));
     let localReminders: Reminder[] = [];
     if (raw) {
       try {
@@ -333,7 +330,7 @@ export async function pullCloudDataIntoLocal(
       }
     }
     const merged = mergeReminders(cloudReminders, localReminders);
-    safeSetItem('cat-calendar-reminders', JSON.stringify(merged));
+    safeSetItem(remindersStorageKey(userId), JSON.stringify(merged));
     reminders = merged.length;
   }
 

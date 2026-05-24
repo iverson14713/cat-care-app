@@ -1,5 +1,6 @@
 import { getAiPlan } from './aiClient';
 import { safeGetItem, safeLoadJson, safeSetItem, storageError } from './safeStorage';
+import { remindersStorageKey } from './userStorageScope';
 
 export const REMINDER_LIMIT_FREE = 3;
 /** Effectively unlimited for Pro (test flow; no real billing yet). */
@@ -11,7 +12,8 @@ import {
   type NotificationPermissionState,
 } from './services/notifications';
 
-const STORAGE_KEY = 'cat-calendar-reminders';
+/** @deprecated use remindersStorageKey(userId) */
+const LEGACY_STORAGE_KEY = 'cat-calendar-reminders';
 
 export type { NotificationPermissionState };
 export {
@@ -71,14 +73,24 @@ export function getReminderLimit(plan?: 'free' | 'pro'): number {
 }
 
 export function loadReminders(): Reminder[] {
-  const parsed = safeLoadJson<unknown[]>(STORAGE_KEY, [], 'reminders');
+  const key = remindersStorageKey();
+  const legacy = safeGetItem(LEGACY_STORAGE_KEY);
+  const parsed = safeLoadJson<unknown[]>(key, [], 'reminders');
+  if (parsed.length === 0 && legacy) {
+    const fromLegacy = safeLoadJson<unknown[]>(LEGACY_STORAGE_KEY, [], 'reminders legacy');
+    if (fromLegacy.length > 0) {
+      saveReminders(fromLegacy.map(normalizeReminder).filter(Boolean) as Reminder[]);
+      return loadReminders();
+    }
+  }
   if (!Array.isArray(parsed)) return [];
   return parsed.map(normalizeReminder).filter(Boolean) as Reminder[];
 }
 
 export function saveReminders(list: Reminder[]): void {
-  if (!safeSetItem(STORAGE_KEY, JSON.stringify(list))) {
-    storageError('saveReminders failed', new Error('write failed'), STORAGE_KEY);
+  const key = remindersStorageKey();
+  if (!safeSetItem(key, JSON.stringify(list))) {
+    storageError('saveReminders failed', new Error('write failed'), key);
   }
 }
 

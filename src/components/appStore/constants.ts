@@ -5,8 +5,8 @@ export const ASPECT_H = 2796;
 /** Logical app width inside device screen (matches mobile layout). */
 export const DEVICE_LOGICAL_W = 390;
 
-/** Enlarge mockup ~7% so in-app UI is clearer; still fits 1290×2796 with headline layout. */
-export const PHONE_MOCKUP_SCALE = 1.07;
+/** Enlarge mockup so in-app UI is clearer on App Store slides. */
+export const PHONE_MOCKUP_SCALE = 1.12;
 
 const BASE_PHONE_SCREEN_W = 612;
 const BASE_PHONE_SCREEN_H = 1328;
@@ -20,8 +20,8 @@ export const PHONE_FRAME_RADIUS = Math.round(56 * PHONE_MOCKUP_SCALE);
 export const PHONE_SCREEN_RADIUS = Math.round(44 * PHONE_MOCKUP_SCALE);
 export const SCREEN_SCALE = PHONE_SCREEN_W / DEVICE_LOGICAL_W;
 
-/** Vertical offset for phone block (headline area ~500px). */
-export const PHONE_MOCKUP_TOP = 508;
+/** Vertical offset for phone block (compact headline area). */
+export const PHONE_MOCKUP_TOP = 468;
 
 export const BRAND_GRADIENT =
   'linear-gradient(165deg, #fdba74 0%, #fb923c 18%, #f97316 42%, #ea580c 72%, #c2410c 100%)';

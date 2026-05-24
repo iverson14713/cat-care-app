@@ -8,6 +8,7 @@
  */
 
 import { safeGetItem, safeSetItem } from '../safeStorage';
+import { APP_BRAND_ZH } from '../brand';
 import type { Reminder, ReminderKind } from '../reminders';
 
 const PERMISSION_ASKED_KEY = 'cat-calendar-notification-asked';
@@ -240,14 +241,14 @@ class NotificationService {
   sendTestNotification(lang: 'zh' | 'en'): boolean {
     if (lang === 'zh') {
       return this.sendLocal({
-        title: 'Pet Care',
+        title: APP_BRAND_ZH,
         body: '測試通知成功 🐾 提醒功能運作正常。',
         tag: 'pet-care-test-notification',
         data: { channel: 'local', test: true },
       });
     }
     return this.sendLocal({
-      title: 'Pet Care',
+      title: APP_BRAND_ZH,
       body: 'Test notification 🐾 Reminders are working.',
       tag: 'pet-care-test-notification',
       data: { channel: 'local', test: true },

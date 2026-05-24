@@ -99,7 +99,6 @@ import {
 } from './supabaseCats';
 import {
   appCatToNormalized,
-  CATS_STORAGE_KEY,
   formatArchiveErrorMessage,
   formatRestoreErrorMessage,
   isValidPetForArchive,
@@ -194,6 +193,16 @@ import {
 } from './weeklyReportStorage';
 import { normalizeWeeklyReport } from './weeklyReportModel';
 import { assessWeeklyReportData } from './weeklyReportEligibility';
+import { AiInsufficientDataPanel } from './components/AiInsufficientDataPanel';
+import { APP_BRAND_EN, APP_BRAND_FULL, APP_BRAND_ZH } from './brand';
+import {
+  assertStorageOwnerMatches,
+  catsStorageKey,
+  clearAllLocalDataOnSignOut,
+  prepareStorageForUser,
+  selectedCatStorageKey,
+  setActiveStorageUser,
+} from './userStorageScope';
 import {
   safeGetItem,
   safeLoadJson,
@@ -249,13 +258,12 @@ type WeightRecord = {
   note: string;
 };
 
-const SELECTED_CAT_KEY = 'cat-calendar-selected-cat-id';
 const LANG_KEY = 'cat-calendar-lang';
 
 const text = {
   zh: {
-    appTitle: '寵物日曆',
-    appSubtitle: 'Pet Calendar',
+    appTitle: APP_BRAND_ZH,
+    appSubtitle: APP_BRAND_EN,
     navProBadge: 'Pro 會員',
     today: '今日',
     weight: '體重',
@@ -379,10 +387,10 @@ const text = {
     backupDesc: '匯出目前所有寵物、每日紀錄、體重、照片與設定。資料會下載成 JSON 檔，換手機或清除瀏覽器前建議先備份。',
     exportBackup: '匯出備份',
     importBackup: '匯入備份',
-    importBackupDesc: '匯入之前下載的 JSON 備份檔，會覆蓋目前瀏覽器中的寵物日曆資料。',
+    importBackupDesc: '匯入之前下載的 JSON 備份檔，會覆蓋目前瀏覽器中的寵物日記資料。',
     exportDone: '備份檔已下載',
     importDone: '備份已匯入，頁面將重新整理',
-    importFailed: '匯入失敗，請確認檔案是寵物日曆匯出的 JSON 備份',
+    importFailed: '匯入失敗，請確認檔案是寵物日記匯出的 JSON 備份',
     legalSectionTitle: '法律與隱私',
     legalSectionDesc: '查看完整隱私政策與服務條款。',
     legalPrivacyLink: '隱私政策',
@@ -733,12 +741,17 @@ const text = {
     proTeaserAdvancedVet: '進階獸醫報告',
     aiErrRate: '問得太快啦，休息一下再試。',
     aiAssistantGenericFail: 'AI 暫時無法回覆，請稍後再試。',
+    aiInsufficientTitle:
+      '目前照護紀錄還不夠，請先記錄幾天的餵食、喝水、便便、尿尿或異常狀況後，再使用 AI 功能。',
+    storageOwnerMismatch:
+      '偵測到本機資料屬於其他帳號，已停止同步。請登出後重新登入，或聯絡支援清除本機快取。',
+    cloudSyncEmptyHint: '雲端尚無資料。開始記錄照護後會自動同步至你的帳號。',
     aiDisclaimerFoot:
       '以上僅為照護觀察與提醒，不能取代獸醫診斷；若症狀持續或惡化，請諮詢獸醫。',
   },
   en: {
-    appTitle: 'Pet Calendar',
-    appSubtitle: '',
+    appTitle: APP_BRAND_EN,
+    appSubtitle: APP_BRAND_ZH,
     navProBadge: 'Pro',
     today: 'Today',
     weight: 'Weight',
@@ -863,10 +876,10 @@ const text = {
     backupDesc: 'Export all pets, daily records, weights, photos, and settings as a JSON file. Please back up before switching phones or clearing browser data.',
     exportBackup: 'Export backup',
     importBackup: 'Import backup',
-    importBackupDesc: 'Import a JSON backup file downloaded from Pet Calendar. This will overwrite current Pet Calendar data in this browser.',
+    importBackupDesc: `Import a JSON backup from ${APP_BRAND_FULL}. This will overwrite current data in this browser.`,
     exportDone: 'Backup file downloaded',
     importDone: 'Backup imported. The page will reload.',
-    importFailed: 'Import failed. Please choose a valid Pet Calendar JSON backup file.',
+    importFailed: `Import failed. Please choose a valid ${APP_BRAND_FULL} JSON backup file.`,
     legalSectionTitle: 'Legal & privacy',
     legalSectionDesc: 'Read the full privacy policy and terms of service.',
     legalPrivacyLink: 'Privacy policy',
@@ -1221,6 +1234,11 @@ const text = {
     proTeaserAdvancedVet: 'Advanced vet report',
     aiErrRate: 'A little too fast — take a short break and try again.',
     aiAssistantGenericFail: 'The assistant could not reply. Please try again later.',
+    aiInsufficientTitle:
+      'Not enough care logs yet. Log feeding, water, poop, pee, or abnormal notes for a few days before using AI features.',
+    storageOwnerMismatch:
+      'Local data belongs to another account — sync stopped. Sign out and sign in again, or clear local cache.',
+    cloudSyncEmptyHint: 'No cloud data yet. Start logging care and it will sync to your account.',
     aiDisclaimerFoot:
       'The above is for care observation and reminders only — not a veterinary diagnosis. If symptoms persist or worsen, please consult a veterinarian.',
   },
@@ -1590,8 +1608,8 @@ export default function App() {
     const nextActive = fallback.filter((c) => !c.isArchived);
     const nextId = nextActive[0]?.id ?? fallback[0]?.id ?? DEFAULT_CATS[0].id;
     setSelectedCatId(nextId);
-    safeSetItem(CATS_STORAGE_KEY, JSON.stringify(fallback));
-    safeSetItem(SELECTED_CAT_KEY, nextId);
+    safeSetItem(catsStorageKey(), JSON.stringify(fallback));
+    safeSetItem(selectedCatStorageKey(), nextId);
   }, [cats.length]);
 
   const useCloudDaily = useMemo(
@@ -1718,7 +1736,7 @@ export default function App() {
 
   const applyCatsState = useCallback(
     (merged: Cat[], options?: { preferredSelectedId?: string }) => {
-      safeSetItem(CATS_STORAGE_KEY, JSON.stringify(merged));
+      safeSetItem(catsStorageKey(supabaseAuth.user?.id), JSON.stringify(merged));
       setCats(merged);
       const active = merged.filter((c) => !c.isArchived);
       const preferred = options?.preferredSelectedId;
@@ -1807,6 +1825,7 @@ export default function App() {
   const [catsCloudErr, setCatsCloudErr] = useState<string | null>(null);
   const [cloudSyncPhase, setCloudSyncPhase] = useState<CloudSyncPhase>('idle');
   const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [storageOwnerBlocked, setStorageOwnerBlocked] = useState(false);
   const [cloudSyncTick, setCloudSyncTick] = useState(0);
   const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
   const prevCloudPhaseRef = useRef<CloudSyncPhase>('idle');
@@ -2163,6 +2182,15 @@ export default function App() {
   const runOpenAiCareBundle = useCallback(async () => {
     const ctx = assistantContext;
     if (!ctx) return;
+    const dataAssessment = assessWeeklyReportData(ctx);
+    if (!dataAssessment.sufficient) {
+      console.log('care_bundle_blocked_insufficient_data', {
+        daysWithRecords: dataAssessment.daysWithRecords,
+        careEntryCount: dataAssessment.careEntryCount,
+      });
+      setOpenAiErr(null);
+      return;
+    }
     if (assistantApiReady !== true) {
       setOpenAiErr(
         assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
@@ -2201,6 +2229,7 @@ export default function App() {
       }
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
+      console.log('care_bundle_api_error', e instanceof AssistantApiError ? e.code : e);
       if (e instanceof AssistantApiError) {
         if (e.code === 'QUOTA') {
           notifyAiQuotaExhausted();
@@ -2431,6 +2460,13 @@ export default function App() {
       sb: NonNullable<typeof supabaseAuth.supabase>,
       userId: string
     ) => {
+      const ownerCheck = assertStorageOwnerMatches(userId);
+      if (!ownerCheck.ok) {
+        setStorageOwnerBlocked(true);
+        setCloudSyncPhase('failed');
+        setCloudSyncError(tr.storageOwnerMismatch);
+        return;
+      }
       const runId = ++cloudSyncRunRef.current;
       const accessible = new Set(accessibleCloudCatIds);
       const cloudIds = mergedCats
@@ -2483,7 +2519,7 @@ export default function App() {
         setCatRolesMap(roles);
       }
     },
-    [aiClientId, applyLocalAssistantQuota, applyCatsState]
+    [aiClientId, applyLocalAssistantQuota, applyCatsState, tr.storageOwnerMismatch]
   );
 
   const persistReminders = useCallback(
@@ -2564,8 +2600,8 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    safeSetItem(CATS_STORAGE_KEY, JSON.stringify(cats));
-  }, [cats]);
+    safeSetItem(catsStorageKey(supabaseAuth.user?.id), JSON.stringify(cats));
+  }, [cats, supabaseAuth.user?.id]);
 
   useEffect(() => {
     if (!supabaseAuth.authReady) return;
@@ -2580,7 +2616,9 @@ export default function App() {
       setCatsCloudErr(null);
       setCloudSyncPhase('idle');
       setCloudSyncError(null);
+      setStorageOwnerBlocked(false);
       cloudDailyHydratedRef.current = false;
+      setActiveStorageUser(null);
       const localOnly = normalizeAndPersistCats('');
       applyCatsState(localOnly);
       setPetsBootReady(true);
@@ -2597,18 +2635,37 @@ export default function App() {
       setCatsCloudBusy(true);
       setCatsCloudErr(null);
       const uid = supabaseAuth.user!.id;
-      let localCats = normalizeAllCats(loadRawCatsFromStorage(), uid);
+      setActiveStorageUser(uid);
+      const prep = prepareStorageForUser(uid);
+      if (!prep.ok) {
+        setStorageOwnerBlocked(true);
+        setCloudSyncPhase('failed');
+        setCloudSyncError(tr.storageOwnerMismatch);
+        setCatsCloudBusy(false);
+        setPetsBootReady(true);
+        return;
+      }
+      setStorageOwnerBlocked(false);
+      let localCats = normalizeAllCats(loadRawCatsFromStorage(uid), uid);
       let migratedIdMap: Record<string, string> = {};
       const offline = localCats.filter((c) => !isCloudCatId(c.id));
       if (offline.length > 0) {
         const mig = await migrateOfflineCatsToCloud(sb, uid, localCats as unknown as AppCat[]);
+        if (mig.errors.some((e) => e.includes('storage_owner_mismatch'))) {
+          setStorageOwnerBlocked(true);
+          setCloudSyncPhase('failed');
+          setCloudSyncError(tr.storageOwnerMismatch);
+          setCatsCloudBusy(false);
+          setPetsBootReady(true);
+          return;
+        }
         if (mig.errors.length > 0) console.warn('[offline cat migrate]', mig.errors.join('; '));
         migratedIdMap = mig.idMap;
         localCats = normalizeAllCats(
           mig.cats.map((c) => normalizeCat(c, uid)).filter(Boolean) as Cat[],
           uid
         );
-        safeSetItem(CATS_STORAGE_KEY, JSON.stringify(localCats));
+        safeSetItem(catsStorageKey(uid), JSON.stringify(localCats));
       }
       const { data: cloudList, error } = await fetchCatsForUser(sb);
       if (cancelled) return;
@@ -2714,8 +2771,8 @@ export default function App() {
   }, [isOnline, supabaseAuth.user?.id, supabaseAuth.supabase, flushOfflinePending]);
 
   useEffect(() => {
-    safeSetItem(SELECTED_CAT_KEY, selectedCatId);
-  }, [selectedCatId]);
+    safeSetItem(selectedCatStorageKey(supabaseAuth.user?.id), selectedCatId);
+  }, [selectedCatId, supabaseAuth.user?.id]);
 
   useEffect(() => {
     if (!selectedCat) return;
@@ -2981,10 +3038,23 @@ export default function App() {
   const handleAuthSignOut = useCallback(async () => {
     setAuthFormError(null);
     setAuthMessage(null);
+    const signingOutUid = supabaseAuth.user?.id;
     const { error } = await supabaseAuth.signOut();
     if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
-    else setAuthMessage(text[lang].authSignedOutOk);
-  }, [supabaseAuth, lang]);
+    else {
+      clearAllLocalDataOnSignOut(signingOutUid);
+      setStorageOwnerBlocked(false);
+      setCloudSyncPhase('idle');
+      setCloudSyncError(null);
+      setReminders([]);
+      setAiCareBundle(null);
+      setAiWeeklyReport(null);
+      setOpenAiErr(null);
+      setWeeklyErr(null);
+      applyCatsState(normalizeAndPersistCats(''));
+      setAuthMessage(text[lang].authSignedOutOk);
+    }
+  }, [supabaseAuth, lang, applyCatsState, text]);
 
   const handleAuthSubmit = useCallback(async () => {
     setAuthFormError(null);
@@ -4431,42 +4501,20 @@ export default function App() {
       { key: 'nextWeekFocus' as const, title: tr.weeklyNextWeekTitle },
     ];
 
-    const weeklyDataAssessment = assessWeeklyReportData(assistantContext);
-    const weeklyDataInsufficient = !weeklyDataAssessment.sufficient;
+    const careDataAssessment = assessWeeklyReportData(assistantContext);
+    const careDataInsufficient = !careDataAssessment.sufficient;
 
-    const renderWeeklyInsufficientPanel = (className = 'mt-4') => (
-      <div
-        className={`${className} animate-fade-in space-y-3 rounded-2xl border border-violet-100 bg-violet-50/40 px-4 py-5 text-center`}
-      >
-        <p className="text-[14px] leading-relaxed text-stone-700">{tr.weeklyInsufficientTitle}</p>
-        <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[13px] leading-snug text-stone-600">
-          <li className="flex items-start gap-2">
-            <span className="mt-0.5 shrink-0 text-violet-500" aria-hidden>
-              •
-            </span>
-            <span>{tr.weeklyInsufficientReqDays}</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="mt-0.5 shrink-0 text-violet-500" aria-hidden>
-              •
-            </span>
-            <span>{tr.weeklyInsufficientReqEntries}</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="mt-0.5 shrink-0 text-violet-500" aria-hidden>
-              •
-            </span>
-            <span>{tr.weeklyInsufficientReqAbnormal}</span>
-          </li>
-        </ul>
-        <button
-          type="button"
-          onClick={() => setPage('today')}
-          className="w-full rounded-2xl bg-white py-2.5 text-[13px] font-bold text-violet-800 shadow-sm ring-1 ring-violet-200 transition active:scale-[0.99]"
-        >
-          {tr.emptyWeeklyCta}
-        </button>
-      </div>
+    const renderAiInsufficientPanel = (className = 'mt-4', title = tr.aiInsufficientTitle) => (
+      <AiInsufficientDataPanel
+        className={className}
+        title={title}
+        reqDays={tr.weeklyInsufficientReqDays}
+        reqEntries={tr.weeklyInsufficientReqEntries}
+        reqAbnormal={tr.weeklyInsufficientReqAbnormal}
+        ctaLabel={tr.emptyWeeklyCta}
+        onCta={() => setPage('today')}
+        assessment={careDataAssessment}
+      />
     );
 
     return (
@@ -4581,8 +4629,9 @@ export default function App() {
 
           <button
             type="button"
-            disabled={!apiReady || aiBundleLoading || (bundleNetBlocked && appPlan === 'pro')}
+            disabled={!apiReady || aiBundleLoading || careDataInsufficient || (bundleNetBlocked && appPlan === 'pro')}
             onClick={() => {
+              if (careDataInsufficient) return;
               if (bundleNetBlocked && appPlan === 'free') {
                 openPremium('ai');
                 return;
@@ -4593,6 +4642,10 @@ export default function App() {
           >
             {aiBundleLoading ? tr.aiOpenAiBusy : tr.aiGenerateWeek}
           </button>
+
+          {careDataInsufficient && apiReady && !aiBundleLoading ? (
+            renderAiInsufficientPanel('mt-3')
+          ) : null}
 
           {aiBundleLoading && apiReady ? (
             <div className="mt-4 animate-fade-in space-y-2">
@@ -4614,7 +4667,7 @@ export default function App() {
             </p>
           ) : null}
 
-          {apiReady && !aiCareBundle && !aiBundleLoading && !dataStale ? (
+          {apiReady && !aiCareBundle && !aiBundleLoading && !dataStale && !careDataInsufficient ? (
             <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiEmptyHint}</p>
           ) : null}
 
@@ -4694,7 +4747,7 @@ export default function App() {
               ) : null}
               <button
                 type="button"
-                disabled={!apiReady || aiWeeklyLoading || qaBlocked}
+                disabled={!apiReady || aiWeeklyLoading || qaBlocked || careDataInsufficient}
                 onClick={runOpenAiWeeklyReport}
                 className="w-full rounded-full bg-gradient-to-r from-violet-500 to-violet-600 py-3 text-[14px] font-semibold text-white shadow-md shadow-violet-200/50 transition hover:from-violet-600 hover:to-violet-700 disabled:opacity-45 disabled:shadow-none sm:w-auto sm:min-w-[200px] sm:px-8"
               >
@@ -4714,8 +4767,8 @@ export default function App() {
                 </p>
               ) : null}
               {!aiWeeklyReport && !aiWeeklyLoading && !weeklyErr && apiReady ? (
-                weeklyDataInsufficient ? (
-                  renderWeeklyInsufficientPanel()
+                careDataInsufficient ? (
+                  renderAiInsufficientPanel('mt-4', tr.weeklyInsufficientTitle)
                 ) : (
                   <div className="mt-4 animate-fade-in space-y-3 rounded-2xl border border-violet-100 bg-violet-50/40 px-4 py-5 text-center">
                     <p className="text-[14px] leading-relaxed text-stone-700">{tr.weeklyReadyHint}</p>
@@ -5286,6 +5339,21 @@ export default function App() {
           <h1 className="mt-2 text-xl font-bold text-stone-900">{tr.remindersTitle}</h1>
           <p className="mt-1 text-sm text-stone-500">{tr.remindersLead}</p>
         </section>
+
+        {reminders.length === 0 ? (
+          <section className="mb-4 rounded-2xl border border-dashed border-orange-200 bg-orange-50/40 px-4 py-6 text-center shadow-sm">
+            <p className="text-[15px] leading-relaxed text-stone-700">{tr.emptyRemindersTitle}</p>
+            <button
+              type="button"
+              onClick={() => {
+                document.getElementById('reminders-quick-add')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              className="mt-4 w-full rounded-2xl bg-white py-2.5 text-[13px] font-bold text-orange-800 shadow-sm ring-1 ring-orange-200 transition active:scale-[0.99]"
+            >
+              {tr.emptyRemindersCta}
+            </button>
+          </section>
+        ) : null}
 
         <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
           <h2 className="text-sm font-bold text-stone-900">{tr.remindersNotifySectionTitle}</h2>
@@ -6240,6 +6308,22 @@ export default function App() {
             retryLabel={offlineSyncBusy ? tr.authProcessing : tr.offlineSyncRetry}
             onRetry={() => void flushOfflinePending()}
           />
+        ) : storageOwnerBlocked ? (
+          <OfflineBanner message={tr.storageOwnerMismatch} />
+        ) : cloudSyncError ? (
+          <OfflineBanner
+            message={tr.cloudSyncFailed}
+            syncError={cloudSyncError}
+            retryLabel={cloudSyncPhase === 'syncing' ? tr.authProcessing : tr.cloudSyncRetry}
+            onRetry={() => void retryCloudSync()}
+          />
+        ) : cloudSyncPhase === 'empty' && supabaseAuth.user?.id ? (
+          <div
+            className="mb-3 rounded-xl border border-sky-100 bg-sky-50/90 px-3 py-2.5 text-[12px] leading-snug text-sky-950"
+            role="status"
+          >
+            {tr.cloudSyncEmptyHint}
+          </div>
         ) : null}
         <nav
           className="mb-4 select-none rounded-3xl border border-orange-100/90 bg-white p-2.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"

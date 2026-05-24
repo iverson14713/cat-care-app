@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ChevronLeft } from 'lucide-react';
+import { APP_BRAND_FULL } from '../brand';
 import { goHome } from '../legalNavigate';
 
 type LegalPageLayoutProps = {
@@ -24,7 +25,7 @@ export function LegalPageLayout({ title, subtitle, backLabel, footerNote, childr
         </button>
 
         <header className="mb-5 rounded-3xl border border-orange-100/80 bg-white px-5 py-6 shadow-[0_8px_32px_-12px_rgba(234,88,12,0.12)]">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-orange-500/90">Pet Care</p>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-orange-500/90">{APP_BRAND_FULL}</p>
           <h1 className="mt-1 text-[1.35rem] font-bold leading-snug text-stone-900">{title}</h1>
           <p className="mt-2 text-[13px] text-stone-500">{subtitle}</p>
         </header>

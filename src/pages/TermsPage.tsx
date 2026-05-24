@@ -1,17 +1,18 @@
 import { useEffect } from 'react';
+import { APP_BRAND_FULL } from '../brand';
 import { LegalBulletList, LegalPageLayout, LegalSection } from './LegalPageLayout';
 
 const CONTACT_EMAIL = 'iverson14713@gmail.com';
 
 const copy = {
   zh: {
-    title: 'Pet Care 服務條款',
+    title: '寵物日記 Pet Care 服務條款',
     subtitle: '最後更新日期：2026-05',
     back: '返回 App',
     footer: '繼續使用本 App 即代表你同意本服務條款',
     s1: '服務說明',
     s1Body:
-      'Pet Care 協助你記錄寵物照護、體重、獸醫相關資訊，並提供 AI 整理與雲端同步。本 App 不提供醫療診斷或治療建議。',
+      '寵物日記 Pet Care 協助你記錄寵物照護、體重、獸醫相關資訊，並提供 AI 整理與雲端同步。本 App 不提供醫療診斷或治療建議。',
     s2: '使用規範',
     s2Intro: '使用本 App 時，請你：',
     s2Items: [
@@ -29,13 +30,13 @@ const copy = {
     s5Intro: '如有服務條款相關問題，歡迎來信：',
   },
   en: {
-    title: 'Pet Care Terms of Service',
+    title: '寵物日記 Pet Care Terms of Service',
     subtitle: 'Last updated: May 2026',
     back: 'Back to app',
     footer: 'By continuing to use this app, you agree to these terms of service.',
     s1: 'About the service',
     s1Body:
-      'Pet Care helps you log pet care, weight, and vet-related information, with AI summaries and cloud sync. This app does not provide medical diagnosis or treatment.',
+      '寵物日記 Pet Care helps you log pet care, weight, and vet-related information, with AI summaries and cloud sync. This app does not provide medical diagnosis or treatment.',
     s2: 'Acceptable use',
     s2Intro: 'When using the app, please:',
     s2Items: [
@@ -65,7 +66,7 @@ export function TermsPage() {
   useEffect(() => {
     document.title = t.title;
     return () => {
-      document.title = 'Pet Care';
+      document.title = APP_BRAND_FULL;
     };
   }, [t.title]);
 

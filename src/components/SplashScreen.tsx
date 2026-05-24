@@ -1,3 +1,4 @@
+import { APP_BRAND_FULL, APP_TAGLINE_ZH } from '../brand';
 import { APP_STORE_FONT_FAMILY } from './appStore/constants';
 
 const SPLASH_ICON_SRC = '/icon-512.png';
@@ -25,7 +26,7 @@ export function SplashScreen({ active = true, statusText }: SplashScreenProps) {
       role="status"
       aria-live="polite"
       aria-busy="true"
-      aria-label="Pet Care 載入中"
+      aria-label={`${APP_BRAND_FULL} 載入中`}
     >
       <div
         className={`splash-screen__content flex flex-col items-center px-8 text-center ${active ? 'splash-screen__content--enter' : ''}`}
@@ -42,9 +43,9 @@ export function SplashScreen({ active = true, statusText }: SplashScreenProps) {
           />
         </div>
         <h1 className="text-[32px] font-bold tracking-tight text-stone-900" style={{ letterSpacing: '-0.02em' }}>
-          Pet Care
+          {APP_BRAND_FULL}
         </h1>
-        <p className="mt-2 text-[17px] font-medium text-stone-500">陪伴毛孩的每一天</p>
+        <p className="mt-2 text-[17px] font-medium text-stone-500">{APP_TAGLINE_ZH}</p>
         {statusText ? (
           <p className="splash-screen__status mt-6 text-[13px] font-medium text-stone-400">{statusText}</p>
         ) : null}

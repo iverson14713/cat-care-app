@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
+import { APP_BRAND_FULL } from '../brand';
 import { LegalBulletList, LegalPageLayout, LegalSection } from './LegalPageLayout';
 
 const CONTACT_EMAIL = 'iverson14713@gmail.com';
 
 const copy = {
   zh: {
-    title: 'Pet Care 隱私政策',
+    title: '寵物日記 Pet Care 隱私政策',
     subtitle: '最後更新日期：2026-05',
     back: '返回 App',
     footer: '繼續使用本 App 即代表你同意本隱私政策',
@@ -28,7 +29,7 @@ const copy = {
     s7Intro: '如有隱私相關問題，歡迎來信：',
   },
   en: {
-    title: 'Pet Care Privacy Policy',
+    title: '寵物日記 Pet Care Privacy Policy',
     subtitle: 'Last updated: May 2026',
     back: 'Back to app',
     footer: 'By continuing to use this app, you agree to this privacy policy.',
@@ -71,7 +72,7 @@ export function PrivacyPolicyPage() {
   useEffect(() => {
     document.title = t.title;
     return () => {
-      document.title = 'Pet Care';
+      document.title = APP_BRAND_FULL;
     };
   }, [t.title]);
 

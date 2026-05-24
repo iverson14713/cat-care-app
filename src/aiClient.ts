@@ -1,7 +1,7 @@
 ﻿import { getSubscriptionStatus, setSubscriptionStatus } from './subscription';
+import { aiUsageStorageKey as scopedAiUsageKey, careBundleCachePrefix } from './userStorageScope';
 
 const CLIENT_KEY = 'cat-ai-client-id';
-const CARE_PREFIX = 'cat-ai-care:v2:';
 
 /** Daily AI pool size (care-bundle + Q&A share one counter). */
 export const AI_USAGE_LIMIT_FREE = 3;
@@ -11,9 +11,10 @@ export function getDailyAiLimit(plan: 'free' | 'pro'): number {
   return plan === 'pro' ? AI_USAGE_LIMIT_PRO : AI_USAGE_LIMIT_FREE;
 }
 
-/** localStorage key: ai-usage-YYYY-MM-DD (per device client id). */
+/** localStorage key: ai-usage-{userId}-YYYY-MM-DD (per device + user). */
 export function aiUsageStorageKey(clientId: string, usageDate: string): string {
-  return `ai-usage-${usageDate}`;
+  void clientId;
+  return scopedAiUsageKey(clientId, usageDate);
 }
 
 function readAiUsageStore(clientId: string, usageDate: string): number {
@@ -156,7 +157,7 @@ export function djb2Hash(str: string): string {
 }
 
 export function careBundleCacheKey(catId: string, usageDate: string, contextHash: string): string {
-  return `${CARE_PREFIX}${catId}:${usageDate}:${contextHash}`;
+  return `${careBundleCachePrefix()}${catId}:${usageDate}:${contextHash}`;
 }
 
 export function readCareBundleCacheJson(key: string): string | null {

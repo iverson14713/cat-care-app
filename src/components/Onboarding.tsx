@@ -12,7 +12,7 @@ type Slide = {
 
 const SLIDES: Slide[] = [
   {
-    title: { zh: '\u6B61\u8FCE\u4F7F\u7528 Pet Care', en: 'Welcome to Pet Care' },
+    title: { zh: '歡迎使用寵物日記 Pet Care', en: 'Welcome to 寵物日記 Pet Care' },
     body: {
       zh: '\u7D00\u9304\u6BDB\u5B69\u6BCF\u5929\u7684\u5065\u5EB7\u8207\u7167\u8B77\u3002',
       en: "Track your pet's daily health and care in one place.",

@@ -1,6 +1,7 @@
 import type { AssistantWeeklyReportJson } from './aiCareAssistant';
 import { normalizeWeeklyReport, weeklySectionText, type Lang } from './weeklyReportModel';
 import { safeLoadJson, safeSetItem, storageError } from './safeStorage';
+import { getActiveStorageUserId, weeklyReportStorageKey } from './userStorageScope';
 
 export type SavedWeeklyReport = {
   catId: string;
@@ -9,13 +10,12 @@ export type SavedWeeklyReport = {
   report: AssistantWeeklyReportJson;
 };
 
-export function weeklyReportStorageKey(catId: string, weekEnd: string): string {
-  return `weekly-ai-report-${catId}-${weekEnd}`;
-}
+export { weeklyReportStorageKey } from './userStorageScope';
 
 /** All locally saved weekly reports for a cat (newest week_end first). */
 export function listLocalWeeklyReportsForCat(catId: string): SavedWeeklyReport[] {
-  const prefix = `weekly-ai-report-${catId}-`;
+  const uid = getActiveStorageUserId();
+  const prefix = `weekly-ai-report-${uid}-${catId}-`;
   const out: SavedWeeklyReport[] = [];
   try {
     for (let i = 0; i < localStorage.length; i++) {

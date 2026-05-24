@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dailyStorageKey, weightStorageKey } from '../cloudDataSync';
+import { listLocalDailyDatesForCat } from '../userStorageScope';
 import {
   stripPhotoFieldsFromDaily,
   upsertDailyRecordCloud,
@@ -47,20 +48,6 @@ function parseLocalDailyRaw(catId: string, date: string): DailyRecordWithSync {
   } catch {
     return {};
   }
-}
-
-function listLocalDailyDatesForCat(catId: string): string[] {
-  const prefix = `cat-calendar-daily-${catId}-`;
-  const dates: string[] = [];
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(prefix)) dates.push(key.slice(prefix.length));
-    }
-  } catch {
-    // ignore
-  }
-  return dates;
 }
 
 function hasDailyContent(data: DailyJson): boolean {

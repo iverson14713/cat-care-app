@@ -1,4 +1,5 @@
 import type { AppStoreSlide } from './slides';
+import { APP_BRAND_FULL } from '../../brand';
 import {
   APP_STORE_FONT_FAMILY,
   ASPECT_H,
@@ -37,17 +38,17 @@ export function AppStoreScreenshotSlide({ slide, exportId }: AppStoreScreenshotS
       />
 
       <header
-        className="absolute left-0 right-0 z-10 px-[72px] pt-[118px] text-center text-white"
+        className="absolute left-0 right-0 z-10 px-[56px] pt-[96px] text-center text-white"
         style={{ textShadow: '0 2px 24px rgba(0,0,0,0.12)' }}
       >
-        <p className="text-[26px] font-semibold tracking-wide text-white/90">Pet Care</p>
+        <p className="text-[30px] font-semibold tracking-wide text-white/92">{APP_BRAND_FULL}</p>
         <h2
-          className="mt-3 text-[68px] font-bold leading-[1.08] tracking-tight"
-          style={{ letterSpacing: '-0.02em' }}
+          className="mt-2 text-[76px] font-bold leading-[1.06] tracking-tight"
+          style={{ letterSpacing: '-0.025em' }}
         >
           {slide.headline}
         </h2>
-        <p className="mx-auto mt-5 max-w-[1000px] text-[34px] font-medium leading-snug text-white/92">
+        <p className="mx-auto mt-4 max-w-[980px] text-[36px] font-medium leading-snug text-white/94">
           {slide.subtitle}
         </p>
       </header>

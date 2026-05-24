@@ -18,7 +18,7 @@ export function MockTodayScreen() {
             毛
           </span>
           <span className="min-w-0 flex-1">
-            <p className="text-[13px] font-bold text-stone-900">毛毛 Pet Care</p>
+            <p className="text-[13px] font-bold text-stone-900">毛毛 · 寵物日記</p>
             <p className="text-[10px] text-stone-500">2026-05-19</p>
           </span>
           <span className="text-right">
