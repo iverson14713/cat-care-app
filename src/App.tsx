@@ -193,6 +193,7 @@ import {
   type SavedWeeklyReport,
 } from './weeklyReportStorage';
 import { normalizeWeeklyReport } from './weeklyReportModel';
+import { assessWeeklyReportData } from './weeklyReportEligibility';
 import {
   safeGetItem,
   safeLoadJson,
@@ -717,6 +718,12 @@ const text = {
     weeklyShareFail: '無法分享',
     weeklyExportProOnly: '匯出需 Pro',
     weeklyFailed: 'AI 週報暫時無法產生，請稍後再試。',
+    weeklyInsufficientTitle:
+      '目前照護紀錄還不夠，請先記錄幾天的餵食、喝水、便便、尿尿或異常狀況後，再產生 AI 週報。',
+    weeklyInsufficientReqDays: '至少 3 天紀錄',
+    weeklyInsufficientReqEntries: '至少 5 筆照護紀錄',
+    weeklyInsufficientReqAbnormal: '若有異常紀錄，週報會更完整',
+    weeklyReadyHint: '資料已足夠，點上方按鈕即可生成本週 AI 週報。',
     weeklySectionEmpty: '此區塊尚無資料',
     weeklyBoundaryFail: '週報顯示發生錯誤，請重新生成或稍後再試。',
     weeklyFreePreview:
@@ -1199,6 +1206,12 @@ const text = {
     weeklyShareFail: 'Could not share',
     weeklyExportProOnly: 'Export requires Pro',
     weeklyFailed: 'The AI weekly report is temporarily unavailable. Please try again later.',
+    weeklyInsufficientTitle:
+      'Not enough care logs yet. Log feeding, water, poop, pee, or abnormal notes for a few days, then generate the AI weekly report.',
+    weeklyInsufficientReqDays: 'At least 3 days with records',
+    weeklyInsufficientReqEntries: 'At least 5 care log entries',
+    weeklyInsufficientReqAbnormal: 'Abnormal notes make the report more complete',
+    weeklyReadyHint: 'You have enough data — tap the button above to generate this week’s report.',
     weeklySectionEmpty: 'No data for this section yet',
     weeklyBoundaryFail: 'Could not display the report. Please regenerate or try again later.',
     weeklyFreePreview:
@@ -2303,6 +2316,14 @@ export default function App() {
   const runOpenAiWeeklyReport = useCallback(async () => {
     const ctx = assistantContext;
     if (!ctx || appPlan !== 'pro') return;
+    const dataAssessment = assessWeeklyReportData(ctx);
+    if (!dataAssessment.sufficient) {
+      console.log('weekly_report_blocked_insufficient_data', {
+        daysWithRecords: dataAssessment.daysWithRecords,
+        careEntryCount: dataAssessment.careEntryCount,
+      });
+      return;
+    }
     if (assistantApiReady !== true) {
       setWeeklyErr(
         assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
@@ -2349,6 +2370,7 @@ export default function App() {
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       setAiWeeklyReport(null);
+      console.log('weekly_report_api_error', e instanceof AssistantApiError ? e.code : e);
       if (e instanceof AssistantApiError) {
         if (e.code === 'QUOTA') {
           notifyAiQuotaExhausted();
@@ -4409,6 +4431,44 @@ export default function App() {
       { key: 'nextWeekFocus' as const, title: tr.weeklyNextWeekTitle },
     ];
 
+    const weeklyDataAssessment = assessWeeklyReportData(assistantContext);
+    const weeklyDataInsufficient = !weeklyDataAssessment.sufficient;
+
+    const renderWeeklyInsufficientPanel = (className = 'mt-4') => (
+      <div
+        className={`${className} animate-fade-in space-y-3 rounded-2xl border border-violet-100 bg-violet-50/40 px-4 py-5 text-center`}
+      >
+        <p className="text-[14px] leading-relaxed text-stone-700">{tr.weeklyInsufficientTitle}</p>
+        <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[13px] leading-snug text-stone-600">
+          <li className="flex items-start gap-2">
+            <span className="mt-0.5 shrink-0 text-violet-500" aria-hidden>
+              •
+            </span>
+            <span>{tr.weeklyInsufficientReqDays}</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-0.5 shrink-0 text-violet-500" aria-hidden>
+              •
+            </span>
+            <span>{tr.weeklyInsufficientReqEntries}</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-0.5 shrink-0 text-violet-500" aria-hidden>
+              •
+            </span>
+            <span>{tr.weeklyInsufficientReqAbnormal}</span>
+          </li>
+        </ul>
+        <button
+          type="button"
+          onClick={() => setPage('today')}
+          className="w-full rounded-2xl bg-white py-2.5 text-[13px] font-bold text-violet-800 shadow-sm ring-1 ring-violet-200 transition active:scale-[0.99]"
+        >
+          {tr.emptyWeeklyCta}
+        </button>
+      </div>
+    );
+
     return (
       <>
         {renderCatSwitcher()}
@@ -4654,16 +4714,13 @@ export default function App() {
                 </p>
               ) : null}
               {!aiWeeklyReport && !aiWeeklyLoading && !weeklyErr && apiReady ? (
-                <div className="mt-4 animate-fade-in space-y-3 rounded-2xl border border-violet-100 bg-violet-50/40 px-4 py-5 text-center">
-                  <p className="text-[14px] leading-relaxed text-stone-700">{tr.emptyWeeklyTitle}</p>
-                  <button
-                    type="button"
-                    onClick={() => setPage('today')}
-                    className="w-full rounded-2xl bg-white py-2.5 text-[13px] font-bold text-violet-800 shadow-sm ring-1 ring-violet-200 transition active:scale-[0.99]"
-                  >
-                    {tr.emptyWeeklyCta}
-                  </button>
-                </div>
+                weeklyDataInsufficient ? (
+                  renderWeeklyInsufficientPanel()
+                ) : (
+                  <div className="mt-4 animate-fade-in space-y-3 rounded-2xl border border-violet-100 bg-violet-50/40 px-4 py-5 text-center">
+                    <p className="text-[14px] leading-relaxed text-stone-700">{tr.weeklyReadyHint}</p>
+                  </div>
+                )
               ) : null}
               {aiWeeklyReport ? (
                 <WeeklyReportErrorBoundary
@@ -4760,8 +4817,6 @@ export default function App() {
                   ) : null}
                 </div>
                 </WeeklyReportErrorBoundary>
-              ) : !aiWeeklyLoading && !weeklyErr ? (
-                <p className="mt-3 text-[13px] leading-snug text-stone-500">{tr.aiEmptyHint}</p>
               ) : null}
             </>
           )}
