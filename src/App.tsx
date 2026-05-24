@@ -199,9 +199,13 @@ import {
   assertStorageOwnerMatches,
   catsStorageKey,
   clearAllLocalDataOnSignOut,
+  dailyStorageKey,
+  listLocalDailyDatesForCat,
+  monthlyStorageKey,
   prepareStorageForUser,
   selectedCatStorageKey,
   setActiveStorageUser,
+  weightStorageKey,
 } from './userStorageScope';
 import {
   safeGetItem,
@@ -1300,16 +1304,19 @@ function monthKey() {
   return formatMonthLocal(new Date());
 }
 
-function dailyStorageKey(catId: string, date: string) {
-  return `cat-calendar-daily-${catId}-${date}`;
-}
+/** Legacy keys (pre user-scope) — read once and migrate when found. */
+const legacyDailyStorageKey = (catId: string, date: string) => `cat-calendar-daily-${catId}-${date}`;
+const legacyMonthlyStorageKey = (catId: string, month: string) => `cat-calendar-monthly-${catId}-${month}`;
+const legacyWeightStorageKey = (catId: string) => `cat-calendar-weights-${catId}`;
 
-function monthlyStorageKey(catId: string, month: string) {
-  return `cat-calendar-monthly-${catId}-${month}`;
-}
-
-function weightStorageKey(catId: string) {
-  return `cat-calendar-weights-${catId}`;
+function migrateLegacyStorageValue(scopedKey: string, legacyKey: string): string | null {
+  const scoped = safeGetItem(scopedKey);
+  if (scoped != null && scoped !== '') return scoped;
+  const legacy = safeGetItem(legacyKey);
+  if (legacy == null || legacy === '') return null;
+  safeSetItem(scopedKey, legacy);
+  safeRemoveItem(legacyKey);
+  return legacy;
 }
 
 /** One weight per calendar day; if duplicates exist in storage, keep the last entry in file order (newest wins). */
@@ -1344,7 +1351,10 @@ function loadLang(): Lang {
 
 function loadDailyRecord(catId: string, date: string): DailyRecord {
   const key = dailyStorageKey(catId, date);
-  const parsed = safeLoadJson<DailyRecord & { pending_sync?: boolean }>(key, {}, `daily ${date}`);
+  const raw = migrateLegacyStorageValue(key, legacyDailyStorageKey(catId, date));
+  const parsed = raw
+    ? safeParseJson<DailyRecord & { pending_sync?: boolean }>(raw, {}, `daily ${date}`)
+    : {};
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
   const { pending_sync: _pending, ...rest } = parsed;
   return rest;
@@ -1352,13 +1362,17 @@ function loadDailyRecord(catId: string, date: string): DailyRecord {
 
 function loadMonthlyRecord(catId: string, month: string): MonthlyRecord {
   const key = monthlyStorageKey(catId, month);
-  const parsed = safeLoadJson<MonthlyRecord>(key, {}, `monthly ${month}`);
+  const raw = migrateLegacyStorageValue(key, legacyMonthlyStorageKey(catId, month));
+  const parsed = raw
+    ? safeParseJson<MonthlyRecord>(raw, {}, `monthly ${month}`)
+    : {};
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 function loadWeightRecords(catId: string): WeightRecord[] {
   const key = weightStorageKey(catId);
-  const parsed = safeLoadJson<unknown>(key, [], 'weights');
+  const raw = migrateLegacyStorageValue(key, legacyWeightStorageKey(catId));
+  const parsed = raw ? safeParseJson<unknown>(raw, [], 'weights') : [];
   if (!Array.isArray(parsed)) return [];
 
   return dedupeWeightRecordsByDate(
@@ -1386,21 +1400,23 @@ function getPhotoList(value: unknown): string[] {
 
 function getAllDailyHistory(catId: string) {
   const records: { date: string; data: DailyRecord }[] = [];
-  const prefix = `cat-calendar-daily-${catId}-`;
 
   try {
+    for (const date of listLocalDailyDatesForCat(catId)) {
+      const data = loadDailyRecord(catId, date);
+      if (data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length > 0) {
+        records.push({ date, data });
+      }
+    }
+    // Legacy daily keys not yet migrated
+    const legacyPrefix = `cat-calendar-daily-${catId}-`;
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (!key?.startsWith(prefix)) continue;
-      const date = key.replace(prefix, '');
-      const raw = safeGetItem(key);
-      if (!raw) continue;
-      const data = safeParseJson<DailyRecord>(raw, {}, `daily history ${date}`);
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        records.push({ date, data });
-      } else {
-        safeRemoveItem(key);
-      }
+      if (!key?.startsWith(legacyPrefix)) continue;
+      const date = key.slice(legacyPrefix.length);
+      if (records.some((r) => r.date === date)) continue;
+      const data = loadDailyRecord(catId, date);
+      if (data && Object.keys(data).length > 0) records.push({ date, data });
     }
   } catch (err) {
     storageError('getAllDailyHistory', err);

@@ -1,6 +1,7 @@
 /** Build vet handoff report from localStorage only (no Supabase daily_records). */
 
 import { safeLoadJson } from './safeStorage';
+import { dailyStorageKey, weightStorageKey } from './userStorageScope';
 
 export type VetReportCatProfile = {
   id: string;
@@ -65,14 +66,22 @@ function getPhotoList(value: unknown): string[] {
 }
 
 function loadDailyRecord(catId: string, date: string): Record<string, unknown> {
-  const key = `cat-calendar-daily-${catId}-${date}`;
-  const parsed = safeLoadJson<Record<string, unknown>>(key, {}, `vet daily ${date}`);
+  const key = dailyStorageKey(catId, date);
+  const legacyKey = `cat-calendar-daily-${catId}-${date}`;
+  let parsed = safeLoadJson<Record<string, unknown>>(key, {}, `vet daily ${date}`);
+  if (Object.keys(parsed).length === 0) {
+    parsed = safeLoadJson<Record<string, unknown>>(legacyKey, {}, `vet daily legacy ${date}`);
+  }
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 function loadWeightRecords(catId: string): VetReportWeightPoint[] {
-  const key = `cat-calendar-weights-${catId}`;
-  const parsed = safeLoadJson<unknown[]>(key, [], 'vet weights');
+  const key = weightStorageKey(catId);
+  const legacyKey = `cat-calendar-weights-${catId}`;
+  let parsed = safeLoadJson<unknown[]>(key, [], 'vet weights');
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    parsed = safeLoadJson<unknown[]>(legacyKey, [], 'vet weights legacy');
+  }
   if (!Array.isArray(parsed)) return [];
   return parsed
     .map((item: { date?: string; weight?: number; note?: string }) => ({
