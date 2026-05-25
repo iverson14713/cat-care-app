@@ -1,12 +1,21 @@
-/** App Store 6.7" display — iPhone 14 Pro Max / 15 Pro Max */
-export const ASPECT_W = 1290;
-export const ASPECT_H = 2796;
+/** Apple App Store — iPhone 6.5-inch display class (required upload size). */
+export const ASPECT_W = 1284;
+export const ASPECT_H = 2778;
+
+/** Prior artboard; layout values scale proportionally to keep safe margins. */
+const REF_W = 1290;
+const REF_H = 2796;
+const SCALE_W = ASPECT_W / REF_W;
+const SCALE_H = ASPECT_H / REF_H;
+
+const layout = (n: number) => Math.round(n * SCALE_H);
+const layoutW = (n: number) => Math.round(n * SCALE_W);
 
 /** Logical app width inside device screen (matches mobile layout). */
 export const DEVICE_LOGICAL_W = 390;
 
-/** Mockup scale: 1.30 base + ~12% bump for promo legibility. */
-export const PHONE_MOCKUP_SCALE = 1.45;
+/** Mockup scale tuned for 1284×2778 artboard. */
+export const PHONE_MOCKUP_SCALE = Math.round(1.45 * SCALE_H * 100) / 100;
 
 const BASE_PHONE_SCREEN_W = 612;
 const BASE_PHONE_SCREEN_H = 1328;
@@ -24,10 +33,10 @@ export const PHONE_OUTER_W = PHONE_SCREEN_W + PHONE_BEZEL * 2;
 export const PHONE_OUTER_H = PHONE_SCREEN_H + PHONE_BEZEL * 2;
 
 /** Compact headline block — less empty space above the phone. */
-export const SLIDE_HEADER_TOP = 48;
-export const SLIDE_HEADER_BLOCK_H = 372;
-export const SLIDE_HEADER_PHONE_GAP = 16;
-export const PHONE_BOTTOM_SAFE = 64;
+export const SLIDE_HEADER_TOP = layout(48);
+export const SLIDE_HEADER_BLOCK_H = layout(372);
+export const SLIDE_HEADER_PHONE_GAP = layout(16);
+export const PHONE_BOTTOM_SAFE = layout(64);
 
 const topFromHeader = SLIDE_HEADER_TOP + SLIDE_HEADER_BLOCK_H + SLIDE_HEADER_PHONE_GAP;
 const topFromBottom = ASPECT_H - PHONE_OUTER_H - PHONE_BOTTOM_SAFE;
@@ -52,9 +61,12 @@ export const NOTO_SANS_TC_URL =
   'https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap';
 
 /** Typography at export resolution */
-export const SLIDE_BRAND_SIZE = 30;
-export const SLIDE_HEADLINE_SIZE = 86;
-export const SLIDE_SUBTITLE_SIZE = 38;
+export const SLIDE_BRAND_SIZE = layout(30);
+export const SLIDE_HEADLINE_SIZE = layout(86);
+export const SLIDE_SUBTITLE_SIZE = layout(38);
+
+/** Horizontal padding scales with canvas width */
+export const SLIDE_HEADER_PX = layoutW(48);
 
 export const SLIDE_HEADLINE_SHADOW =
   '0 4px 32px rgba(120,40,0,0.28), 0 0 48px rgba(255,255,255,0.22), 0 2px 0 rgba(255,255,255,0.12)';

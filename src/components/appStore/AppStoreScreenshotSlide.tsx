@@ -9,6 +9,7 @@ import {
   PHONE_MOCKUP_TOP,
   PHONE_OUTER_W,
   SLIDE_BRAND_SIZE,
+  SLIDE_HEADER_PX,
   SLIDE_HEADER_TOP,
   SLIDE_HEADLINE_SHADOW,
   SLIDE_HEADLINE_SIZE,
@@ -41,8 +42,12 @@ export function AppStoreScreenshotSlide({ slide, exportId }: AppStoreScreenshotS
       <AppStoreSlideDecorations theme={slide.theme} />
 
       <header
-        className="absolute left-0 right-0 z-20 px-[48px] text-center text-white"
-        style={{ top: SLIDE_HEADER_TOP }}
+        className="absolute left-0 right-0 z-20 text-center text-white"
+        style={{
+          top: SLIDE_HEADER_TOP,
+          paddingLeft: SLIDE_HEADER_PX,
+          paddingRight: SLIDE_HEADER_PX,
+        }}
       >
         <p
           className="mx-auto inline-flex items-center rounded-full border border-white/30 px-6 py-2 font-semibold tracking-wide text-white/95 shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
