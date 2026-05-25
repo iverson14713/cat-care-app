@@ -5,8 +5,16 @@ import { AppStoreSharedCareScreen } from './screens/AppStoreSharedCareScreen';
 import { AppStoreTodayScreen } from './screens/AppStoreTodayScreen';
 import { AppStoreWeightScreen } from './screens/AppStoreWeightScreen';
 
+export type AppStoreSlideTheme =
+  | 'today'
+  | 'weight'
+  | 'shared-care'
+  | 'reminders'
+  | 'assistant';
+
 export type AppStoreSlide = {
   id: string;
+  theme: AppStoreSlideTheme;
   headline: string;
   subtitle: string;
   filename: string;
@@ -16,6 +24,7 @@ export type AppStoreSlide = {
 export const APP_STORE_SLIDES: AppStoreSlide[] = [
   {
     id: 'today',
+    theme: 'today',
     headline: '異常紀錄不漏接',
     subtitle: '餵食、清潔、異常狀況，每日照護一目了然',
     filename: 'pet-care-01-today.png',
@@ -23,6 +32,7 @@ export const APP_STORE_SLIDES: AppStoreSlide[] = [
   },
   {
     id: 'weight',
+    theme: 'weight',
     headline: '體重追蹤看得見',
     subtitle: '圖表與紀錄並行，健康變化隨手掌握',
     filename: 'pet-care-02-weight.png',
@@ -30,6 +40,7 @@ export const APP_STORE_SLIDES: AppStoreSlide[] = [
   },
   {
     id: 'shared-care',
+    theme: 'shared-care',
     headline: '共同照護更安心',
     subtitle: '家人、室友共享同一隻寵物的雲端紀錄',
     filename: 'pet-care-03-shared-care.png',
@@ -37,6 +48,7 @@ export const APP_STORE_SLIDES: AppStoreSlide[] = [
   },
   {
     id: 'reminders',
+    theme: 'reminders',
     headline: '提醒不錯過',
     subtitle: '餵食、回診、驅蟲，準時推播通知',
     filename: 'pet-care-04-reminders.png',
@@ -44,6 +56,7 @@ export const APP_STORE_SLIDES: AppStoreSlide[] = [
   },
   {
     id: 'assistant',
+    theme: 'assistant',
     headline: 'AI 週報智慧整理',
     subtitle: '依照護紀錄產生週報，快速掌握本週狀況',
     filename: 'pet-care-05-ai-weekly.png',

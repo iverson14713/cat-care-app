@@ -118,6 +118,12 @@ select {
     'Segoe UI', sans-serif !important;
 }
 
+/* Promo slide polish (static — safe for html2canvas) */
+.app-store-slide {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
 /* Launch splash */
 @keyframes splash-content-enter {
   from {
