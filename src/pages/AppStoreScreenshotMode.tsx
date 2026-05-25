@@ -90,7 +90,7 @@ export function AppStoreScreenshotMode() {
 
       <p className="mx-auto max-w-4xl px-4 py-4 text-center text-[13px] leading-relaxed text-stone-600">
         預覽比例已縮小。匯出為 App Store 6.7&quot; 尺寸 <strong className="font-semibold text-stone-800">1290 × 2796</strong>
-        ，含 iPhone mockup、橘色漸層與標題文案。
+        ，含 iPhone mockup、橘色漸層、標題文案，以及與正式 App 一致的畫面。
       </p>
 
       <section className="mx-auto flex max-w-4xl flex-col items-center gap-10 px-4">

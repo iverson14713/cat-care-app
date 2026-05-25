@@ -38,17 +38,17 @@ export function AppStoreScreenshotSlide({ slide, exportId }: AppStoreScreenshotS
       />
 
       <header
-        className="absolute left-0 right-0 z-10 px-[56px] pt-[96px] text-center text-white"
+        className="absolute left-0 right-0 z-10 px-[56px] pt-[88px] text-center text-white"
         style={{ textShadow: '0 2px 24px rgba(0,0,0,0.12)' }}
       >
-        <p className="text-[30px] font-semibold tracking-wide text-white/92">{APP_BRAND_FULL}</p>
+        <p className="text-[28px] font-semibold tracking-wide text-white/92">{APP_BRAND_FULL}</p>
         <h2
-          className="mt-2 text-[76px] font-bold leading-[1.06] tracking-tight"
+          className="mt-2 text-[64px] font-bold leading-[1.06] tracking-tight"
           style={{ letterSpacing: '-0.025em' }}
         >
           {slide.headline}
         </h2>
-        <p className="mx-auto mt-4 max-w-[980px] text-[36px] font-medium leading-snug text-white/94">
+        <p className="mx-auto mt-4 max-w-[980px] text-[32px] font-medium leading-snug text-white/94">
           {slide.subtitle}
         </p>
       </header>
