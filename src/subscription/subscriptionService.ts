@@ -1,3 +1,4 @@
+import { isPetCareDevMode } from '../lib/petCareDevMode';
 import { purchaseViaStoreKit, restoreViaStoreKit } from './iapBridge';
 import { getSubscriptionStatus, isProSubscriber, setSubscriptionStatus } from './subscriptionStore';
 import type { BillingPeriod, PurchaseResult, SubscriptionStatus } from './types';
@@ -6,20 +7,27 @@ export { getSubscriptionStatus, isProSubscriber, setSubscriptionStatus };
 export type { BillingPeriod, PurchaseResult, SubscriptionStatus };
 
 /**
- * Test / preview unlock — no payment. Used until StoreKit is wired.
+ * Dev-only unlock — no payment. Never used in production builds.
  */
 export async function purchaseProTestUnlock(period: BillingPeriod = 'monthly'): Promise<PurchaseResult> {
+  if (!isPetCareDevMode()) {
+    return {
+      ok: false,
+      errorCode: 'IAP_NOT_CONFIGURED',
+      message: 'Test unlock is only available in development.',
+    };
+  }
   setSubscriptionStatus('pro', { source: 'test', billingPeriod: period });
   return { ok: true, status: 'pro', source: 'test', period };
 }
 
 /**
- * Production purchase entry — delegates to StoreKit when available, otherwise test unlock in dev.
+ * Production purchase — StoreKit on iOS; dev test unlock on web only.
  */
 export async function purchasePro(period: BillingPeriod = 'monthly'): Promise<PurchaseResult> {
   const iap = await purchaseViaStoreKit(period);
   if (iap.ok) return iap;
-  if (iap.errorCode === 'IAP_NOT_CONFIGURED') {
+  if (iap.errorCode === 'IAP_NOT_CONFIGURED' && isPetCareDevMode()) {
     return purchaseProTestUnlock(period);
   }
   return iap;

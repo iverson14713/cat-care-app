@@ -18,6 +18,6 @@ export const SUBSCRIPTION_PRICING = {
  * @see src/subscription/iapBridge.ts
  */
 export const IAP_PRODUCT_IDS: Record<BillingPeriod, string> = {
-  monthly: 'com.petcare.pro.monthly',
-  yearly: 'com.petcare.pro.yearly',
+  monthly: 'com.wayne.petcare.pro.monthly',
+  yearly: 'com.wayne.petcare.pro.yearly',
 };

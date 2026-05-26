@@ -25,7 +25,11 @@ import { GoogleSignInButton } from './components/GoogleSignInButton';
 import { OfflineBanner } from './components/OfflineBanner';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { trackEvent } from './services/analytics';
-import { handleAppleSignIn } from './services/auth/appleSignIn';
+import {
+  getAppleSignInUserErrorMessage,
+  handleAppleSignIn,
+  shouldShowAppleSignInButton,
+} from './services/auth/appleSignIn';
 import {
   applyDailyPendingSync,
   clearWeightsPendingSync,
@@ -169,14 +173,22 @@ import {
   type ReminderKind,
   type ReminderRepeatType,
 } from './reminders';
+import { isPetCareDevMode } from './lib/petCareDevMode';
 import {
   getNotificationPermission,
+  getNotificationPermissionAsync,
   getNotificationServiceStatus,
   getNotificationSupport,
   permissionStatusLabel,
   requestNotificationPermission,
   sendTestNotification,
 } from './services/notifications';
+import {
+  isPetCareNativeLocalNotificationsAvailable,
+  schedulePetCareDebugTestNotification,
+  syncPetCareLocalNotifications,
+} from './services/petCareLocalNotifications';
+import { syncPetCareIapOnLaunch } from './subscription/petCareIapPlanService';
 import { VetReportPage } from './VetReportPage';
 import {
   exportReportElementAsPdf,
@@ -2542,6 +2554,7 @@ export default function App() {
     (list: Reminder[]) => {
       saveReminders(list);
       setReminders(list);
+      void syncPetCareLocalNotifications(list, catNameById, lang);
       const sb = supabaseAuth.supabase;
       const uid = supabaseAuth.user?.id;
       if (sb && uid) {
@@ -2550,7 +2563,7 @@ export default function App() {
         });
       }
     },
-    [supabaseAuth.supabase, supabaseAuth.user?.id]
+    [supabaseAuth.supabase, supabaseAuth.user?.id, catNameById, lang]
   );
 
   const tryAddReminder = useCallback(
@@ -2594,6 +2607,7 @@ export default function App() {
   }, [selectedCatId, activeCats]);
 
   useEffect(() => {
+    if (isPetCareNativeLocalNotificationsAvailable()) return;
     const tick = () => {
       setReminders((prev) => processDueReminders(prev, catNameById, lang));
     };
@@ -2603,13 +2617,27 @@ export default function App() {
   }, [lang, catNameById]);
 
   useEffect(() => {
-    const syncPerm = () => setNotificationPerm(getNotificationPermission());
+    void syncPetCareLocalNotifications(reminders, catNameById, lang);
+  }, [reminders, catNameById, lang]);
+
+  useEffect(() => {
+    const syncPerm = () => {
+      void getNotificationPermissionAsync().then(setNotificationPerm);
+    };
+    syncPerm();
     const onVis = () => {
       if (document.visibilityState === 'visible') syncPerm();
     };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
+
+  useEffect(() => {
+    if (!supabaseAuth.authReady) return;
+    void syncPetCareIapOnLaunch().then((status) => {
+      if (status) setAppPlan(status);
+    });
+  }, [supabaseAuth.authReady]);
 
   useEffect(() => {
     safeSetItem(LANG_KEY, lang);
@@ -3112,11 +3140,20 @@ export default function App() {
   const handleAppleSignInClick = useCallback(async () => {
     setAppleSignInNotice(null);
     setAuthFormError(null);
-    const result = await handleAppleSignIn(supabaseAuth.supabase);
+    const result = await handleAppleSignIn(supabaseAuth.supabase, lang);
     if (result.message === 'coming_soon') {
       setAppleSignInNotice(tr.authAppleComingSoon);
+      return;
     }
-  }, [supabaseAuth.supabase, tr.authAppleComingSoon]);
+    if (!result.ok && result.code === 'failed') {
+      setAuthFormError(getAppleSignInUserErrorMessage(lang));
+      return;
+    }
+    if (result.signedIn) {
+      setAuthMessage(lang === 'zh' ? '登入成功' : 'Signed in');
+      showToast(lang === 'zh' ? '登入成功' : 'Signed in', 'success');
+    }
+  }, [supabaseAuth.supabase, lang, tr.authAppleComingSoon, showToast]);
 
   const handleGoogleSignInClick = useCallback(async () => {
     setAppleSignInNotice(null);
@@ -3290,6 +3327,7 @@ export default function App() {
       const nextReminders = remindersWithoutCat(reminders, catId);
       saveReminders(nextReminders);
       setReminders(nextReminders);
+      void syncPetCareLocalNotifications(nextReminders, catNameById, lang);
       const sb = supabaseAuth.supabase;
       const uid = supabaseAuth.user?.id;
       if (sb && uid) {
@@ -3321,6 +3359,8 @@ export default function App() {
       selectedCatId,
       today,
       month,
+      catNameById,
+      lang,
       supabaseAuth.supabase,
       supabaseAuth.user?.id,
     ]
@@ -5304,7 +5344,7 @@ export default function App() {
           })}
         </section>
 
-        {import.meta.env.DEV ? (
+        {isPetCareDevMode() ? (
           <section className="mb-4 rounded-2xl border border-violet-200 bg-violet-50/80 p-4 shadow-sm">
             <h2 className="mb-1 text-sm font-bold text-violet-900">{tr.moreDev}</h2>
             <p className="mb-3 text-[11px] text-violet-800/90">{tr.moreDevDesc}</p>
@@ -5422,15 +5462,29 @@ export default function App() {
           <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
             {tr.remindersNotifyChannelRemoteHint}
           </p>
-          {getNotificationSupport() ? (
+          {isPetCareDevMode() && getNotificationSupport() ? (
             <button
               type="button"
-              disabled={!canNotify}
               onClick={() => {
+                if (isPetCareNativeLocalNotificationsAvailable()) {
+                  void schedulePetCareDebugTestNotification(lang).then((res) => {
+                    setNotificationPerm(
+                      res.permission === 'granted'
+                        ? 'granted'
+                        : res.permission === 'denied'
+                          ? 'denied'
+                          : res.permission === 'prompt'
+                            ? 'default'
+                            : 'unsupported'
+                    );
+                    showToast(res.message, res.ok ? 'success' : 'error');
+                  });
+                  return;
+                }
                 const ok = sendTestNotification(lang);
                 showToast(ok ? tr.remindersNotifyTestOk : tr.remindersNotifyTestFail, ok ? 'success' : 'error');
               }}
-              className="mt-3 w-full rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-sm font-bold text-orange-800 disabled:cursor-not-allowed disabled:opacity-45"
+              className="mt-3 w-full rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-sm font-bold text-orange-800"
             >
               {tr.remindersNotifyTest}
             </button>
