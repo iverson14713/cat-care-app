@@ -6,6 +6,7 @@ export default defineConfig(({ mode }) => {
   const assistantTarget = env.ASSISTANT_SERVER_URL || 'http://127.0.0.1:8788';
 
   return {
+    base: mode === 'capacitor' ? './' : '/',
     plugins: [react()],
     optimizeDeps: {
       exclude: ['lucide-react'],

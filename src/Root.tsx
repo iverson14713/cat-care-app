@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { scrubAuthCallbackUrl } from './services/auth/authRedirect';
+import { subscribeAuthRouteChange, shouldRenderAuthCallback } from './services/auth/authRoute';
 import { AppLaunchGate } from './AppLaunchGate.tsx';
 import { AuthCallbackPage } from './AuthCallbackPage.tsx';
 import { AppStoreScreenshotMode } from './pages/AppStoreScreenshotMode.tsx';
@@ -20,10 +22,14 @@ export function Root() {
   useEffect(() => {
     const sync = () => setPath(normalizePath(window.location.pathname));
     window.addEventListener('popstate', sync);
-    return () => window.removeEventListener('popstate', sync);
+    const unsub = subscribeAuthRouteChange(sync);
+    return () => {
+      window.removeEventListener('popstate', sync);
+      unsub();
+    };
   }, []);
 
-  if (path === '/auth/callback') {
+  if (path === '/auth/callback' || shouldRenderAuthCallback()) {
     return <AuthCallbackPage />;
   }
 

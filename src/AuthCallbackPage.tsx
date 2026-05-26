@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { trackEvent } from './services/analytics';
 import { getSupabaseClient } from './supabaseClient';
+import { scrubAuthCallbackUrl } from './services/auth/authRedirect';
 import { Spinner } from './components/SkeletonCard';
 
 /** Handles Supabase PKCE return (`?code=`) for Google OAuth and hash/session for email flows. */
@@ -81,6 +82,7 @@ export function AuthCallbackPage() {
         }
         if (cancelled) return;
         setStatus('ok');
+        scrubAuthCallbackUrl();
         window.setTimeout(() => {
           window.location.replace('/');
         }, 2000);
