@@ -42,6 +42,12 @@ function isIosNative(): boolean {
   return isAuthNativeClient() && Capacitor.getPlatform() === 'ios';
 }
 
+/** Native ASAuthorization token aud is the app Bundle ID; Supabase Services ID OAuth uses com.wayne.petcare.auth. */
+function isAppleAudienceMismatchError(error: { message?: string } | null): boolean {
+  const msg = error?.message?.toLowerCase() ?? '';
+  return msg.includes('unacceptable audience') || msg.includes('audience in id_token');
+}
+
 export async function signInWithAppleNative(
   supabase: SupabaseClient,
   lang: 'zh' | 'en' = 'zh'
@@ -62,10 +68,28 @@ export async function signInWithAppleNative(
       token: identityToken,
     });
 
-    if (error || !data?.session) {
+    if (error) {
+      console.error('[auth] signInWithIdToken failed', {
+        message: error.message,
+        status: error.status,
+        code: error.code,
+        name: error.name,
+        hint:
+          'Native Apple tokens use aud=com.wayne.petcare (Bundle ID). Supabase Services ID OAuth needs com.wayne.petcare.auth — falling back to OAuth when applicable.',
+      });
+      if (isAppleAudienceMismatchError(error)) {
+        return { error: new Error('apple_audience_mismatch') };
+      }
+      return { error: new Error(userError) };
+    }
+    if (!data?.session) {
+      console.error('[auth] signInWithIdToken returned no session', {
+        hasUser: Boolean(data?.user),
+      });
       return { error: new Error(userError) };
     }
 
+    console.log('[auth] Apple native login success', data.session.user?.id);
     await redirectAfterAuthSuccess(supabase);
     return { error: null, signedIn: true };
   } catch (e) {
@@ -73,6 +97,10 @@ export async function signInWithAppleNative(
     if (pluginErr?.code === 'CANCELED') {
       return { error: new Error('oauth_cancelled') };
     }
+    console.error('[auth] Apple native sign-in error', {
+      message: pluginErr?.message ?? String(e),
+      code: pluginErr?.code,
+    });
     return { error: new Error(userError) };
   }
 }
@@ -85,6 +113,7 @@ export async function signInWithAppleOAuth(
   if (!isAuthNativeClient()) return { error: new Error('web_not_supported') };
   if (!isAppleOAuthEnabled()) return { error: new Error('apple_not_enabled') };
 
+  saveAuthReturnPath('/');
   const redirectTo = getOAuthRedirectUrl();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'apple',
@@ -115,7 +144,17 @@ export async function signInWithApple(
   lang: 'zh' | 'en' = 'zh'
 ): Promise<{ error: Error | null; signedIn?: boolean }> {
   if (isIosNative()) {
-    return signInWithAppleNative(supabase, lang);
+    const native = await signInWithAppleNative(supabase, lang);
+    if (!native.error) return native;
+    if (native.error.message === 'oauth_cancelled') return native;
+    if (native.error.message === 'apple_audience_mismatch') {
+      authLog('apple.native.fallback_oauth', {
+        reason: 'Supabase expects com.wayne.petcare.auth; native token aud is com.wayne.petcare',
+      });
+      const oauth = await signInWithAppleOAuth(supabase, lang);
+      return { error: oauth.error };
+    }
+    return native;
   }
   const { error } = await signInWithAppleOAuth(supabase, lang);
   return { error };
@@ -142,6 +181,9 @@ export async function handleAppleSignIn(
     }
     if (error.message === 'oauth_cancelled') {
       return { ok: true, signedIn: false, message: 'cancelled' };
+    }
+    if (error.message === 'apple_audience_mismatch') {
+      return { ok: true, signedIn: false, message: 'redirecting' };
     }
     return { ok: false, signedIn: false, message: userError, code: 'failed' };
   }

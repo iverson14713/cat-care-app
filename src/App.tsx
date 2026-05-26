@@ -175,6 +175,20 @@ import {
 } from './reminders';
 import { isPetCareDevMode } from './lib/petCareDevMode';
 import {
+  appleSignInUnavailableMessage,
+  authServiceUnavailableMessage,
+  formatAuthErrorForUser,
+} from './lib/userFacingErrors';
+import {
+  purchaseErrorMessage,
+  purchaseSuccessMessage,
+  restoreSuccessMessage,
+} from './subscription/purchaseMessages';
+import {
+  NATIVE_AUTH_ERROR_EVENT,
+  type NativeAuthErrorDetail,
+} from './services/auth/authNativeEvents';
+import {
   getNotificationPermission,
   getNotificationPermissionAsync,
   getNotificationServiceStatus,
@@ -184,8 +198,12 @@ import {
   sendTestNotification,
 } from './services/notifications';
 import {
+  debouncedSyncPetCareLocalNotifications,
+  cancelPetCareReminderNotification,
+  getPetCareNotificationPermission,
   isPetCareNativeLocalNotificationsAvailable,
-  schedulePetCareDebugTestNotification,
+  requestPetCareNotificationPermission,
+  schedulePetCareTestNotificationInOneMinute,
   syncPetCareLocalNotifications,
 } from './services/petCareLocalNotifications';
 import { syncPetCareIapOnLaunch } from './subscription/petCareIapPlanService';
@@ -525,9 +543,7 @@ const text = {
     aiAnalysisCardSubtitle: '只看今天與最近幾天，短文字 + 1～3 個照護提醒（非完整週報）。',
     aiBundleCurrentHint: '已有今日快速摘要，可直接查看',
     aiDataStaleHint: '資料已更新，可重新生成分析',
-    aiNeedServerEnvDev: '小幫手暫時醒不過來，請確認本機環境已依說明啟動後重新整理。',
-    aiNeedServerEnvProd: '小幫手暫時無法使用，請稍後再試；若剛完成設定，請稍待部署完成。',
-    aiAssistantUnreachableDev: '目前連不上服務，請確認開發環境已啟動後重新整理。',
+    aiNeedServerEnvProd: '小幫手暫時無法使用，請稍後再試。',
     aiAssistantUnreachableProd: '目前連不上服務，請稍後再試或重新整理頁面。',
     aiEmptyHint: '尚未取得快速提醒，點下方按鈕即可開始。',
     aiAskEmpty: '先寫下想問的內容好嗎？',
@@ -546,7 +562,7 @@ const text = {
     settingsOnboardingDesc: '再次查看首次開啟 App 時的功能介紹。',
     settingsReplayOnboarding: '重新觀看導覽',
     authAccountSection: '帳號與登入',
-    authNotConfigured: '雲端登入尚未開放。請確認伺服器已完成雲端連線設定後，重新整理此頁面。',
+    authNotConfigured: '帳號服務暫時無法使用，請稍後再試。',
     authLoggedInStrip: '已登入',
     authOpenSettingsToSignIn: '到「方案與設定」可註冊或登入。',
     authCurrentAccount: '目前帳號',
@@ -561,7 +577,7 @@ const text = {
     authProcessing: '處理中…',
     authBootTitle: '正在確認登入狀態…',
     authErrGenericShort: '登入時發生問題，請稍後再試。',
-    authErrNotConfigured: '尚未連線雲端服務。',
+    authErrNotConfigured: '帳號服務暫時無法使用，請稍後再試。',
     authErrInvalid: '帳號或密碼不正確。',
     authErrEmailNotConfirmed: '請先到信箱完成驗證，再登入。',
     authErrAlreadyReg: '此信箱已註冊，請改為登入。',
@@ -573,10 +589,8 @@ const text = {
     authSignedOutOk: '已登出。',
     authLocalDataHint: '登入後會與雲端同步寵物、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
     authAppleSignIn: '使用 Apple 登入',
-    authAppleComingSoon: 'Apple 登入將於 iOS 正式版開放',
+    authAppleComingSoon: '目前無法完成 Apple 登入，請改用 Email 登入或稍後再試。',
     authGoogleSignIn: '使用 Google 登入',
-    authGoogleSetupHint:
-      '若 Google 登入無反應：請至 Supabase Dashboard → Authentication → Providers → Google 啟用，並設定 Google OAuth Client ID 與 Secret；同時將本站網址與 /auth/callback 加入 Google Cloud 與 Supabase 的 Redirect 白名單。',
     offlineBanner: '目前離線，資料會先保存在本機',
     offlineSyncFailed: '部分資料同步失敗，請稍後重試',
     offlineSyncRetry: '重試同步',
@@ -626,23 +640,24 @@ const text = {
     settingsPlanCurrent: '目前方案',
     settingsPlanFree: '免費版',
     settingsPlanPro: 'Pro',
-    settingsPlanHint: '正式上架後將透過 App Store 訂閱；目前升級為測試開通，不會實際扣款。',
+    settingsPlanHint: 'Pro 訂閱透過 App Store 扣款，可隨時在 iPhone 設定中管理或取消。',
     settingsSwitchPro: '升級 Pro',
     settingsSwitchFree: '切回免費版',
     settingsPlanServerHint: '若畫面上顯示的方案狀態異常，可嘗試重新整理或重新登入帳號。',
     settingsPaymentNote: '正式上架後將透過 App Store 訂閱結帳。',
-    restorePurchaseOk: '已恢復 Pro 訂閱（本機）',
+    restorePurchaseOk: '已恢復 Pro 訂閱',
     restorePurchaseNone: '找不到可恢復的購買紀錄',
     restorePurchaseFail: '恢復購買失敗，請稍後再試',
-    purchaseProOk: '已開通 Pro（測試）',
-    settingsClientIdCaption: '裝置識別（排除問題時可能會請你提供）',
+    purchaseProOk: '已開通 Pro 會員',
+    settingsClientIdCaption: '裝置識別（聯絡客服時可能會請你提供）',
     planMultiCatUpgrade: '免費版最多可新增 3 隻寵物。升級 Pro 可管理更多寵物，並享有更多 AI 次數與進階功能。',
     planFreeMultiCatBanner:
       '免費版最多支援 3 隻寵物。你目前的寵物數超過上限，請封存部分寵物或升級 Pro。',
     openSettings: '方案與設定',
     remindersTitle: '提醒',
     remindersBack: '返回更多',
-    remindersLead: '本機瀏覽器通知（PWA / 開啟分頁時有效）。',
+    remindersLead: '系統會在指定時間推送本機提醒；即使 App 關閉、在背景或被滑掉，時間到了仍會通知。',
+    remindersLeadWeb: '本機瀏覽器通知（PWA / 開啟分頁時有效）。',
     remindersNotifyDenied: '尚未開啟通知權限',
     remindersNotifyEnable: '啟用提醒',
     remindersNotifyGranted: '通知已開啟',
@@ -654,9 +669,9 @@ const text = {
     remindersNotifyAllowedNo: '否',
     remindersNotifyChannelLabel: '目前管道',
     remindersNotifyChannelLocal: '本機通知（Local）',
-    remindersNotifyChannelRemoteHint: '遠端推播（APNs / FCM）將於正式版 App 啟用',
-    remindersNotifyTest: '發送測試通知',
-    remindersNotifyTestOk: '已發送測試通知',
+    remindersNotifyChannelRemoteHint: '本機排程通知，不需連線伺服器；關閉 App 後仍會準時提醒。',
+    remindersNotifyTest: '驗證通知（約 1 分鐘後）',
+    remindersNotifyTestOk: '已排程，約 1 分鐘後會收到（可先關閉 App）',
     remindersNotifyTestFail: '無法發送，請先允許通知權限',
     remindersCount: '提醒數量',
     remindersAdd: '新增提醒',
@@ -1035,8 +1050,7 @@ const text = {
     settingsOnboardingDesc: 'Watch the first-launch introduction again.',
     settingsReplayOnboarding: 'Replay onboarding',
     authAccountSection: 'Account',
-    authNotConfigured:
-      'Cloud sign-in is not available yet. Make sure cloud connection is set up on the server, then refresh this page.',
+    authNotConfigured: 'Account service is temporarily unavailable. Please try again later.',
     authLoggedInStrip: 'Signed in',
     authOpenSettingsToSignIn: 'Open Plan & settings to sign in or register.',
     authCurrentAccount: 'Account',
@@ -1051,7 +1065,7 @@ const text = {
     authProcessing: 'Working…',
     authBootTitle: 'Checking sign-in…',
     authErrGenericShort: 'Something went wrong while signing in. Please try again.',
-    authErrNotConfigured: 'Cloud service is not connected.',
+    authErrNotConfigured: 'Account service is temporarily unavailable. Please try again later.',
     authErrInvalid: 'Invalid email or password.',
     authErrEmailNotConfirmed: 'Please confirm your email from the inbox, then sign in.',
     authErrAlreadyReg: 'This email is already registered — try signing in.',
@@ -1064,10 +1078,9 @@ const text = {
     authLocalDataHint:
       'When signed in, pets, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
     authAppleSignIn: 'Sign in with Apple',
-    authAppleComingSoon: 'Sign in with Apple will be available in the iOS app',
+    authAppleComingSoon:
+      'Apple sign-in is unavailable. Use email sign-in or try again later.',
     authGoogleSignIn: 'Sign in with Google',
-    authGoogleSetupHint:
-      'If Google sign-in fails: enable Google under Supabase Dashboard → Authentication → Providers, add your OAuth Client ID and Secret, and allow this site URL and /auth/callback in both Google Cloud and Supabase redirect settings.',
     offlineBanner: 'You are offline — data is saved on this device first',
     offlineSyncFailed: 'Some offline changes could not sync. Try again.',
     offlineSyncRetry: 'Retry sync',
@@ -1118,15 +1131,16 @@ const text = {
     settingsPlanCurrent: 'Current plan',
     settingsPlanFree: 'Free',
     settingsPlanPro: 'Pro',
-    settingsPlanHint: 'After App Store launch, billing will go through Apple. For now you can enable Pro here to try all features.',
+    settingsPlanHint:
+      'Pro is billed through the App Store. Manage or cancel anytime in iPhone Settings.',
     settingsSwitchPro: 'Upgrade to Pro',
     settingsSwitchFree: 'Switch back to Free',
     settingsPlanServerHint: 'If your plan status looks wrong, try refreshing the page or signing in again.',
     settingsPaymentNote: 'Billing via the App Store after launch.',
-    restorePurchaseOk: 'Pro subscription restored (on this device)',
+    restorePurchaseOk: 'Pro subscription restored',
     restorePurchaseNone: 'No purchases found to restore',
     restorePurchaseFail: 'Could not restore purchases. Try again later.',
-    purchaseProOk: 'Pro enabled (test)',
+    purchaseProOk: 'Pro membership is active',
     settingsClientIdCaption: 'Device ID (support may ask for this if something looks wrong)',
     planMultiCatUpgrade:
       'Free plan supports up to 3 pets. Upgrade to Pro to manage more pets and unlock higher AI limits and advanced tools.',
@@ -1135,7 +1149,9 @@ const text = {
     openSettings: 'Plan & settings',
     remindersTitle: 'Reminders',
     remindersBack: 'Back to More',
-    remindersLead: 'Local browser notifications (works in PWA while the app is open).',
+    remindersLead:
+      'Scheduled local alerts fire on time—even if the app is closed, in the background, or swiped away.',
+    remindersLeadWeb: 'Local browser notifications (works in PWA while the app is open).',
     remindersNotifyDenied: 'Notification permission is off',
     remindersNotifyEnable: 'Enable reminders',
     remindersNotifyGranted: 'Notifications enabled',
@@ -1147,9 +1163,10 @@ const text = {
     remindersNotifyAllowedNo: 'No',
     remindersNotifyChannelLabel: 'Delivery channel',
     remindersNotifyChannelLocal: 'Local notifications',
-    remindersNotifyChannelRemoteHint: 'Remote push (APNs / FCM) will ship with the native app',
-    remindersNotifyTest: 'Send test notification',
-    remindersNotifyTestOk: 'Test notification sent',
+    remindersNotifyChannelRemoteHint:
+      'Scheduled on-device alerts—no server needed. They still fire after you close the app.',
+    remindersNotifyTest: 'Verify notification (~1 min)',
+    remindersNotifyTestOk: 'Scheduled — check your phone in ~1 minute (app can be closed)',
     remindersNotifyTestFail: 'Could not send — allow notifications first',
     remindersCount: 'Reminders',
     remindersAdd: 'Add reminder',
@@ -1262,9 +1279,8 @@ const text = {
 
 function aiStatusHint(lang: Lang, kind: 'off' | 'key'): string {
   const tr = text[lang];
-  const dev = import.meta.env.DEV;
-  if (kind === 'off') return dev ? tr.aiAssistantUnreachableDev : tr.aiAssistantUnreachableProd;
-  return dev ? tr.aiNeedServerEnvDev : tr.aiNeedServerEnvProd;
+  if (kind === 'off') return tr.aiAssistantUnreachableProd;
+  return tr.aiNeedServerEnvProd;
 }
 
 function aiQuotaExhaustedMessage(lang: Lang, appPlan: AppPlan): string {
@@ -1578,18 +1594,7 @@ function sevenDaySummaryNeedsExpand(lines: string[]): boolean {
 }
 
 function formatAuthErrorMessage(lang: Lang, err: unknown): string {
-  const t = text[lang];
-  if (err instanceof Error && err.message === 'not_configured') return t.authErrNotConfigured;
-  const msg =
-    err && typeof err === 'object' && 'message' in err
-      ? String((err as { message?: string }).message ?? '')
-      : String(err ?? '');
-  const low = msg.toLowerCase();
-  if (low.includes('invalid login credentials')) return t.authErrInvalid;
-  if (low.includes('email not confirmed')) return t.authErrEmailNotConfirmed;
-  if (low.includes('already registered') || low.includes('user already registered')) return t.authErrAlreadyReg;
-  if (low.includes('password')) return t.authErrWeak;
-  return t.authErrGenericShort;
+  return formatAuthErrorForUser(lang, err);
 }
 
 export default function App() {
@@ -1706,12 +1711,15 @@ export default function App() {
       const result = await purchasePro(period);
       setSubscriptionBusy(false);
       if (result.ok) {
-        persistAppPlan('pro');
+        persistAppPlan('pro', { source: result.source, billingPeriod: result.period ?? period });
         setPremiumSheetOpen(false);
-        showToast(tr.purchaseProOk, 'success');
+        showToast(purchaseSuccessMessage(lang), 'success');
+        return;
       }
+      if (result.errorCode === 'USER_CANCELLED') return;
+      showToast(purchaseErrorMessage(lang, result.errorCode), 'error');
     },
-    [showToast, tr.purchaseProOk]
+    [lang, showToast]
   );
 
   const handleRestorePurchases = useCallback(async () => {
@@ -1719,17 +1727,14 @@ export default function App() {
     const result = await restorePurchases();
     setSubscriptionBusy(false);
     if (result.ok) {
-      persistAppPlan('pro');
+      persistAppPlan('pro', { source: 'restore', billingPeriod: result.period ?? null });
       setPremiumSheetOpen(false);
-      showToast(tr.restorePurchaseOk, 'success');
+      showToast(restoreSuccessMessage(lang), 'success');
       return;
     }
-    if (result.errorCode === 'NO_PURCHASES' || result.errorCode === 'IAP_NOT_CONFIGURED') {
-      showToast(tr.restorePurchaseNone, 'error');
-    } else {
-      showToast(tr.restorePurchaseFail, 'error');
-    }
-  }, [showToast, tr.restorePurchaseOk, tr.restorePurchaseNone, tr.restorePurchaseFail]);
+    if (result.errorCode === 'USER_CANCELLED') return;
+    showToast(purchaseErrorMessage(lang, result.errorCode), 'error');
+  }, [lang, showToast]);
   const applyLocalAssistantQuota = useCallback(
     (plan: AppPlan, clientId: string, usageDate: string, prev: AssistantHealthPayload | null) => {
       const q = buildLocalAiQuota(plan, clientId, usageDate);
@@ -2073,9 +2078,16 @@ export default function App() {
   const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(
     () => bootstrap.assistantQuota
   );
-  const persistAppPlan = (p: AppPlan) => {
+  const persistAppPlan = (
+    p: AppPlan,
+    meta?: { source?: 'test' | 'restore' | 'app_store' | null; billingPeriod?: BillingPeriod | null }
+  ) => {
     if (p === 'free') downgradeToFree();
-    else setSubscriptionStatus('pro', { source: 'test' });
+    else
+      setSubscriptionStatus('pro', {
+        source: meta?.source ?? 'app_store',
+        billingPeriod: meta?.billingPeriod ?? null,
+      });
     setAppPlan(getSubscriptionStatus());
     if (p === 'free') {
       setHistoryKeyword('');
@@ -2554,7 +2566,7 @@ export default function App() {
     (list: Reminder[]) => {
       saveReminders(list);
       setReminders(list);
-      void syncPetCareLocalNotifications(list, catNameById, lang);
+      debouncedSyncPetCareLocalNotifications(list, catNameById, lang);
       const sb = supabaseAuth.supabase;
       const uid = supabaseAuth.user?.id;
       if (sb && uid) {
@@ -2594,6 +2606,7 @@ export default function App() {
 
   const deleteReminder = useCallback(
     (id: string) => {
+      void cancelPetCareReminderNotification(id);
       persistReminders(reminders.filter((r) => r.id !== id));
       showToast(tr.toastDeleted, 'success');
     },
@@ -2616,12 +2629,46 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [lang, catNameById]);
 
+  const nativeNotificationsBootSyncedRef = useRef(false);
+
   useEffect(() => {
+    if (!petsBootReady || nativeNotificationsBootSyncedRef.current) return;
+    if (!isPetCareNativeLocalNotificationsAvailable()) return;
+    nativeNotificationsBootSyncedRef.current = true;
     void syncPetCareLocalNotifications(reminders, catNameById, lang);
-  }, [reminders, catNameById, lang]);
+  }, [petsBootReady, reminders, catNameById, lang]);
+
+  useEffect(() => {
+    if (page !== 'reminders' || !isPetCareNativeLocalNotificationsAvailable()) return;
+    void getPetCareNotificationPermission(true).then((native) => {
+      setNotificationPerm(
+        native === 'granted'
+          ? 'granted'
+          : native === 'denied'
+            ? 'denied'
+            : native === 'prompt'
+              ? 'default'
+              : 'unsupported'
+      );
+    });
+  }, [page]);
 
   useEffect(() => {
     const syncPerm = () => {
+      if (isPetCareNativeLocalNotificationsAvailable()) {
+        void getPetCareNotificationPermission().then((native) => {
+          setNotificationPerm(
+            native === 'granted'
+              ? 'granted'
+              : native === 'denied'
+                ? 'denied'
+                : native === 'prompt'
+                  ? 'default'
+                  : 'unsupported'
+          );
+        });
+        return;
+      }
       void getNotificationPermissionAsync().then(setNotificationPerm);
     };
     syncPerm();
@@ -2630,6 +2677,15 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  useEffect(() => {
+    const onNativeAuthError = (event: Event) => {
+      const detail = (event as CustomEvent<NativeAuthErrorDetail>).detail;
+      if (detail?.message) setAuthFormError(detail.message);
+    };
+    window.addEventListener(NATIVE_AUTH_ERROR_EVENT, onNativeAuthError);
+    return () => window.removeEventListener(NATIVE_AUTH_ERROR_EVENT, onNativeAuthError);
   }, []);
 
   useEffect(() => {
@@ -3142,7 +3198,7 @@ export default function App() {
     setAuthFormError(null);
     const result = await handleAppleSignIn(supabaseAuth.supabase, lang);
     if (result.message === 'coming_soon') {
-      setAppleSignInNotice(tr.authAppleComingSoon);
+      setAppleSignInNotice(appleSignInUnavailableMessage(lang));
       return;
     }
     if (!result.ok && result.code === 'failed') {
@@ -3160,13 +3216,16 @@ export default function App() {
     setAuthFormError(null);
     setAuthMessage(null);
     if (!supabaseAuth.supabase) {
-      setAuthFormError(text[lang].authErrNotConfigured);
+      setAuthFormError(authServiceUnavailableMessage(lang));
       return;
     }
     setGoogleOauthBusy(true);
     try {
       const { error } = await supabaseAuth.signInWithGoogle();
-      if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
+      if (error) {
+        if (error.message === 'oauth_cancelled') return;
+        setAuthFormError(formatAuthErrorMessage(lang, error));
+      }
     } finally {
       setGoogleOauthBusy(false);
     }
@@ -5393,7 +5452,9 @@ export default function App() {
         <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
           <div className="text-3xl" aria-hidden>🔔</div>
           <h1 className="mt-2 text-xl font-bold text-stone-900">{tr.remindersTitle}</h1>
-          <p className="mt-1 text-sm text-stone-500">{tr.remindersLead}</p>
+          <p className="mt-1 text-sm text-stone-500">
+            {isPetCareNativeLocalNotificationsAvailable() ? tr.remindersLead : tr.remindersLeadWeb}
+          </p>
         </section>
 
         {reminders.length === 0 ? (
@@ -5449,9 +5510,27 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
-                  void requestNotificationPermission().then((next) => {
+                  const apply = (next: NotificationPermissionState) => {
                     setNotificationPerm(next);
-                  });
+                    if (next === 'granted' && isPetCareNativeLocalNotificationsAvailable()) {
+                      void syncPetCareLocalNotifications(reminders, catNameById, lang);
+                    }
+                  };
+                  if (isPetCareNativeLocalNotificationsAvailable()) {
+                    void requestPetCareNotificationPermission().then((native) => {
+                      apply(
+                        native === 'granted'
+                          ? 'granted'
+                          : native === 'denied'
+                            ? 'denied'
+                            : native === 'prompt'
+                              ? 'default'
+                              : 'unsupported'
+                      );
+                    });
+                    return;
+                  }
+                  void requestNotificationPermission().then(apply);
                 }}
                 className="mt-3 w-full rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white"
               >
@@ -5462,12 +5541,12 @@ export default function App() {
           <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
             {tr.remindersNotifyChannelRemoteHint}
           </p>
-          {isPetCareDevMode() && getNotificationSupport() ? (
+          {getNotificationSupport() ? (
             <button
               type="button"
               onClick={() => {
                 if (isPetCareNativeLocalNotificationsAvailable()) {
-                  void schedulePetCareDebugTestNotification(lang).then((res) => {
+                  void schedulePetCareTestNotificationInOneMinute(lang).then((res) => {
                     setNotificationPerm(
                       res.permission === 'granted'
                         ? 'granted'
@@ -5860,9 +5939,6 @@ export default function App() {
         {appleSignInNotice ? (
           <p className="mb-3 text-center text-[12px] leading-relaxed text-stone-600">{appleSignInNotice}</p>
         ) : null}
-        <p className="mb-3 rounded-xl bg-stone-50/90 px-3 py-2.5 text-[10px] leading-relaxed text-stone-500 ring-1 ring-stone-100/80">
-          {tr.authGoogleSetupHint}
-        </p>
 
         <p className="my-3 text-center text-[11px] font-medium text-stone-400">— {lang === 'zh' ? '或' : 'or'} —</p>
 
@@ -5973,8 +6049,14 @@ export default function App() {
         onRestore={() => void handleRestorePurchases()}
       />
       <p className="mb-4 px-0.5 text-[11px] leading-relaxed text-stone-500">{tr.settingsPlanServerHint}</p>
-      <p className="mb-4 px-0.5 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
-      <p className="mb-4 break-all rounded-lg bg-stone-50/90 px-2 py-1.5 font-mono text-[11px] text-stone-600">{aiClientId}</p>
+      {isPetCareDevMode() ? (
+        <>
+          <p className="mb-1 px-0.5 text-[11px] font-medium text-stone-500">{tr.settingsClientIdCaption}</p>
+          <p className="mb-4 break-all rounded-lg bg-stone-50/90 px-2 py-1.5 font-mono text-[11px] text-stone-600">
+            {aiClientId}
+          </p>
+        </>
+      ) : null}
 
       <section className="mb-4 rounded-2xl bg-white p-3.5 shadow-sm">
         <h2 className="mb-2 text-base font-bold text-stone-900">{tr.backupTitle}</h2>

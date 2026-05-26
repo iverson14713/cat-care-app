@@ -37,19 +37,15 @@ function mapPluginError(e: unknown): PurchaseResult {
   const err = e as Error & { code?: string };
   const code = err?.code ?? '';
   if (code === 'CANCELED') {
-    return { ok: false, errorCode: 'USER_CANCELLED', message: err.message };
+    return { ok: false, errorCode: 'USER_CANCELLED' };
   }
   if (code === 'NO_PURCHASES') {
-    return { ok: false, errorCode: 'NO_PURCHASES', message: err.message };
+    return { ok: false, errorCode: 'NO_PURCHASES' };
   }
   if (code === 'IAP_NOT_AVAILABLE' || code === 'PRODUCTS_FAILED') {
-    return { ok: false, errorCode: 'IAP_NOT_CONFIGURED', message: err.message };
+    return { ok: false, errorCode: 'IAP_NOT_CONFIGURED' };
   }
-  return {
-    ok: false,
-    errorCode: 'UNKNOWN',
-    message: err?.message ?? String(e),
-  };
+  return { ok: false, errorCode: 'UNKNOWN' };
 }
 
 export async function getActiveIapEntitlement(): Promise<PetCareIapEntitlement | null> {
@@ -65,17 +61,17 @@ export async function getActiveIapEntitlement(): Promise<PetCareIapEntitlement |
 
 export async function purchaseViaStoreKit(period: BillingPeriod): Promise<PurchaseResult> {
   if (!isNativeIapAvailable()) {
-    return {
-      ok: false,
-      errorCode: 'IAP_NOT_CONFIGURED',
-      message: 'App Store billing is only available on the iOS app.',
-    };
+    return { ok: false, errorCode: 'IAP_NOT_CONFIGURED' };
   }
 
   try {
     const productId = iapProductIdForPeriod(period);
     const entitlement = await PetCareIAP.purchase({ productId });
-    return entitlementToResult(entitlement, 'app_store');
+    const result = entitlementToResult(entitlement, 'app_store');
+    if (result.ok) {
+      return { ...result, period: result.period ?? period };
+    }
+    return result;
   } catch (e) {
     return mapPluginError(e);
   }
@@ -83,11 +79,7 @@ export async function purchaseViaStoreKit(period: BillingPeriod): Promise<Purcha
 
 export async function restoreViaStoreKit(): Promise<PurchaseResult> {
   if (!isNativeIapAvailable()) {
-    return {
-      ok: false,
-      errorCode: 'IAP_NOT_CONFIGURED',
-      message: 'Restore requires the iOS app.',
-    };
+    return { ok: false, errorCode: 'IAP_NOT_CONFIGURED' };
   }
 
   try {

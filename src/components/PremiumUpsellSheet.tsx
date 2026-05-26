@@ -1,7 +1,11 @@
 import { Crown } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { isPetCareDevMode } from '../lib/petCareDevMode';
 import { SUBSCRIPTION_PRICING } from '../subscription/constants';
+import { fetchStoreProductPrices, isNativeIapAvailable } from '../subscription/iapBridge';
 import type { BillingPeriod } from '../subscription/types';
+
+type Lang = 'zh' | 'en';
 
 export type PremiumUpsellReason =
   | 'ai'
@@ -13,25 +17,21 @@ export type PremiumUpsellReason =
   | 'photos'
   | 'general';
 
-type Lang = 'zh' | 'en';
+type LangCopy = {
+  title: string;
+  bullets: string[];
+  priceMonthly: string;
+  priceYearly: string;
+  yearlySave: string;
+  later: string;
+  upgrade: string;
+  restore: string;
+  restoring: string;
+  appStoreNote: string;
+  subtitle: Record<PremiumUpsellReason, string>;
+};
 
-export const premiumUpsellCopy: Record<
-  Lang,
-  {
-    title: string;
-    bullets: string[];
-    priceMonthly: string;
-    priceYearly: string;
-    yearlySave: string;
-    later: string;
-    upgrade: string;
-    restore: string;
-    restoring: string;
-    appStoreNote: string;
-    testNote: string;
-    subtitle: Record<PremiumUpsellReason, string>;
-  }
-> = {
+export const premiumUpsellCopy: Record<Lang, LangCopy> = {
   zh: {
     title: '🐾 升級 Pro 解鎖完整照護',
     bullets: [
@@ -47,11 +47,10 @@ export const premiumUpsellCopy: Record<
     priceYearly: SUBSCRIPTION_PRICING.yearly.labelZh,
     yearlySave: SUBSCRIPTION_PRICING.yearlySaveZh,
     later: '稍後再說',
-    upgrade: '升級 Pro（測試開通）',
+    upgrade: '訂閱 Pro',
     restore: '恢復購買',
     restoring: '恢復中…',
-    appStoreNote: '正式上架後將透過 App Store 訂閱結帳。',
-    testNote: '目前不會實際扣款，僅在本機開通 Pro 體驗。',
+    appStoreNote: '訂閱費用將透過 App Store 收取，可隨時在 iPhone 設定中管理或取消。',
     subtitle: {
       ai: '今日 AI 次數已用完，升級後可獲得更多照護建議。',
       reminders: '提醒數量已達免費版上限。',
@@ -78,17 +77,17 @@ export const premiumUpsellCopy: Record<
     priceYearly: SUBSCRIPTION_PRICING.yearly.labelEn,
     yearlySave: SUBSCRIPTION_PRICING.yearlySaveEn,
     later: 'Not now',
-    upgrade: 'Upgrade to Pro (test)',
+    upgrade: 'Subscribe to Pro',
     restore: 'Restore purchases',
     restoring: 'Restoring…',
-    appStoreNote: 'After launch, billing will go through the App Store.',
-    testNote: 'No charge in this build — test unlock on this device only.',
+    appStoreNote: 'Billing is handled by the App Store. Manage or cancel anytime in iPhone Settings.',
     subtitle: {
       ai: "You've used today's AI quota on the free plan.",
       reminders: "You've reached the free reminder limit.",
       pets: 'Free plan supports up to 3 pets.',
       weekly: 'The full AI weekly report is a Pro feature.',
-      history: 'Full keyword search and advanced filters are Pro; free plan uses quick date ranges (7 / 30 days / this month).',
+      history:
+        'Full keyword search and advanced filters are Pro; free plan uses quick date ranges (7 / 30 days / this month).',
       pdf: 'PDF export is a Pro feature.',
       photos: "You've reached the free daily photo limit.",
       general: 'This feature requires Pro.',
@@ -116,9 +115,19 @@ export function PremiumUpsellSheet({
   onRestore,
 }: PremiumUpsellSheetProps) {
   const [period, setPeriod] = useState<BillingPeriod>('yearly');
+  const nativeBilling = isNativeIapAvailable();
+  const [storePrices, setStorePrices] = useState<Partial<Record<BillingPeriod, string>>>({});
+
+  useEffect(() => {
+    if (!open || !nativeBilling) return;
+    void fetchStoreProductPrices().then(setStorePrices);
+  }, [open, nativeBilling]);
+
   if (!open) return null;
   const t = premiumUpsellCopy[lang];
   const sub = t.subtitle[reason] ?? t.subtitle.general;
+  const monthlyDisplay = storePrices.monthly ?? t.priceMonthly;
+  const yearlyDisplay = storePrices.yearly ?? t.priceYearly;
 
   return (
     <div
@@ -137,7 +146,10 @@ export function PremiumUpsellSheet({
       >
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-stone-300/80" aria-hidden />
         <div className="max-h-[min(85vh,640px)] overflow-y-auto px-5 pb-5 pt-3">
-          <h2 id="premium-upsell-title" className="flex items-center justify-center gap-2 text-center text-lg font-bold tracking-tight text-stone-900">
+          <h2
+            id="premium-upsell-title"
+            className="flex items-center justify-center gap-2 text-center text-lg font-bold tracking-tight text-stone-900"
+          >
             <Crown className="h-5 w-5 shrink-0 text-amber-500" strokeWidth={2.2} aria-hidden />
             {t.title}
           </h2>
@@ -167,7 +179,9 @@ export function PremiumUpsellSheet({
                     : 'border-stone-200 bg-white'
                 }`}
               >
-                <p className="text-sm font-bold text-stone-900">{p === 'monthly' ? t.priceMonthly : t.priceYearly}</p>
+                <p className="text-sm font-bold text-stone-900">
+                  {p === 'monthly' ? monthlyDisplay : yearlyDisplay}
+                </p>
                 {p === 'yearly' ? (
                   <p className="mt-1 text-[10px] font-semibold text-orange-800">{t.yearlySave}</p>
                 ) : null}
@@ -176,7 +190,13 @@ export function PremiumUpsellSheet({
           </div>
 
           <p className="mt-3 text-center text-[11px] leading-snug text-stone-600">{t.appStoreNote}</p>
-          <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">{t.testNote}</p>
+          {!nativeBilling && isPetCareDevMode() ? (
+            <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">
+              {lang === 'zh'
+                ? '網頁版僅供預覽；正式訂閱請使用 iOS App。'
+                : 'Web preview only — subscribe in the iOS app.'}
+            </p>
+          ) : null}
 
           <div className="mt-5 flex flex-col gap-2">
             <button

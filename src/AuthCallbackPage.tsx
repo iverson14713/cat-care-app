@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { trackEvent } from './services/analytics';
-import { getSupabaseClient } from './supabaseClient';
-import { scrubAuthCallbackUrl } from './services/auth/authRedirect';
 import { Spinner } from './components/SkeletonCard';
-
-/** Handles Supabase PKCE return (`?code=`) for Google OAuth and hash/session for email flows. */
+import { trackEvent } from './services/analytics';
+import { completeAuthCallback, type AuthCallbackFlow } from './services/auth/completeAuthCallback';
+import { redirectAfterAuthSuccess, scrubAuthCallbackUrl } from './services/auth/authRedirect';
+import { AUTH_ROUTE_EVENT } from './services/auth/authRoute';
+import { waitForOAuthCallbackParams } from './services/auth/waitForOAuthCallbackParams';
+import { getSupabaseClient } from './supabaseClient';
 
 type Status = 'pending' | 'ok' | 'fail';
 
@@ -32,61 +33,95 @@ function detectLang(): keyof typeof copy {
   return nav.toLowerCase().startsWith('zh') ? 'zh' : 'en';
 }
 
+function callbackUrlKey(): string {
+  return `${window.location.href}`;
+}
+
+function logCallbackContext(phase: string): void {
+  const params = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const code = params.get('code') || hash.get('code');
+  console.log(`[auth] AuthCallbackPage.${phase}`, {
+    href: window.location.href,
+    pathname: window.location.pathname,
+    search: window.location.search,
+    hash: window.location.hash,
+    hasCode: Boolean(code),
+    codeLength: code?.length ?? 0,
+    error: params.get('error') || hash.get('error'),
+    error_description: params.get('error_description') || hash.get('error_description'),
+  });
+}
+
+/** Web-only Supabase OAuth / email verification callback. */
 export function AuthCallbackPage() {
   const [status, setStatus] = useState<Status>('pending');
-  const [oauthReturn, setOauthReturn] = useState(false);
+  const [flow, setFlow] = useState<AuthCallbackFlow>('unknown');
+  const [urlKey, setUrlKey] = useState(() => callbackUrlKey());
   const lang = detectLang();
   const t = copy[lang];
 
   useEffect(() => {
+    const sync = () => setUrlKey(callbackUrlKey());
+    window.addEventListener(AUTH_ROUTE_EVENT, sync);
+    window.addEventListener('popstate', sync);
+    return () => {
+      window.removeEventListener(AUTH_ROUTE_EVENT, sync);
+      window.removeEventListener('popstate', sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    logCallbackContext('mount');
+
     const sb = getSupabaseClient();
     if (!sb) {
-      setStatus('fail');
-      return;
-    }
-
-    const hash = window.location.hash.replace(/^#/, '');
-    const hashParams = new URLSearchParams(hash);
-    const searchParams = new URLSearchParams(window.location.search);
-
-    const err =
-      hashParams.get('error') ||
-      hashParams.get('error_code') ||
-      searchParams.get('error');
-    const errDesc = hashParams.get('error_description') || searchParams.get('error_description');
-    if (err || (errDesc && /expired|invalid/i.test(errDesc))) {
+      console.error('[auth] AuthCallbackPage no Supabase client');
       setStatus('fail');
       return;
     }
 
     let cancelled = false;
+    setStatus('pending');
 
     const run = async () => {
       try {
-        const code = searchParams.get('code');
-        if (code) {
-          const { error } = await sb.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-          setOauthReturn(true);
-          trackEvent('login', { mode: 'google' });
-        } else {
-          const first = await sb.auth.getSession();
-          if (first.error) throw first.error;
-          if (!first.data.session) {
-            await new Promise((r) => setTimeout(r, 450));
-            if (cancelled) return;
-            const second = await sb.auth.getSession();
-            if (second.error) throw second.error;
-            if (!second.data.session) throw new Error('no_session');
-          }
-        }
+        const ready = await waitForOAuthCallbackParams();
         if (cancelled) return;
-        setStatus('ok');
+        if (!ready) {
+          logCallbackContext('fail_no_params');
+          setStatus('fail');
+          return;
+        }
+
+        const outcome = await completeAuthCallback(sb);
+        if (cancelled) return;
+
         scrubAuthCallbackUrl();
+
+        if (!outcome.ok) {
+          console.error('[auth] AuthCallbackPage completeAuthCallback failed', {
+            href: window.location.href,
+            message: outcome.message,
+          });
+          setStatus('fail');
+          return;
+        }
+
+        setFlow(outcome.flow);
+        if (outcome.flow === 'oauth') {
+          trackEvent('login', { mode: 'google' });
+        }
+
+        setStatus('ok');
         window.setTimeout(() => {
-          window.location.replace('/');
-        }, 2000);
-      } catch {
+          void redirectAfterAuthSuccess(sb, 0);
+        }, 1200);
+      } catch (e) {
+        console.error('[auth] AuthCallbackPage unexpected error', {
+          href: window.location.href,
+          message: e instanceof Error ? e.message : String(e),
+        });
         if (!cancelled) setStatus('fail');
       }
     };
@@ -95,7 +130,7 @@ export function AuthCallbackPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [urlKey]);
 
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-orange-50 px-6 py-12 text-stone-800">
@@ -106,21 +141,19 @@ export function AuthCallbackPage() {
               <Spinner className="h-10 w-10 border-[3px]" />
             </div>
             <p className="text-[15px] font-semibold text-stone-800">{t.pending}</p>
-            <div className="mt-6 space-y-2">
-              <div className="animate-skeleton h-3 w-full rounded-lg bg-gradient-to-r from-stone-200/80 via-orange-100/70 to-stone-200/80 bg-[length:200%_100%]" />
-              <div className="animate-skeleton h-3 w-4/5 rounded-lg bg-gradient-to-r from-stone-200/80 via-orange-100/70 to-stone-200/80 bg-[length:200%_100%]" />
-            </div>
           </>
         ) : status === 'ok' ? (
           <>
             <h1 className="text-xl font-bold text-stone-900">
-              {oauthReturn ? t.okTitleOauth : t.okTitleEmail}
+              {flow === 'oauth' ? t.okTitleOauth : t.okTitleEmail}
             </h1>
             <p className="mt-3 text-[15px] text-stone-600">{t.okSub}</p>
           </>
         ) : (
           <>
-            <p className="text-[15px] leading-relaxed text-stone-800">{getSupabaseClient() ? t.fail : t.noClient}</p>
+            <p className="text-[15px] leading-relaxed text-stone-800">
+              {getSupabaseClient() ? t.fail : t.noClient}
+            </p>
             <button
               type="button"
               onClick={() => {

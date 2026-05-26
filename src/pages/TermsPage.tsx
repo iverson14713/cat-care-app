@@ -25,7 +25,7 @@ const copy = {
       'AI 與報告內容僅供參考，不能取代獸醫專業判斷。若寵物出現異常，請儘快就醫。我們不對因使用本 App 所造成的間接損害負責。',
     s4: '方案與付款',
     s4Body:
-      'Pro 方案之購買、續訂與退款，依各應用商店（如 App Store）之規範辦理。測試環境下的解鎖不代表正式收費已完成。',
+      'Pro 方案之購買、續訂與退款，依 App Store 等應用商店之規範辦理。',
     s5: '聯絡方式',
     s5Intro: '如有服務條款相關問題，歡迎來信：',
   },
@@ -49,7 +49,7 @@ const copy = {
       'AI and reports are for reference only and do not replace a veterinarian. Seek professional care if your pet is unwell. We are not liable for indirect damages from use of the app.',
     s4: 'Plans & billing',
     s4Body:
-      'Pro purchases, renewals, and refunds follow the rules of your app store (e.g. App Store). Test unlocks do not represent completed billing.',
+      'Pro purchases, renewals, and refunds follow your app store policies (e.g. App Store).',
     s5: 'Contact',
     s5Intro: 'Questions about these terms? Email us at:',
   },

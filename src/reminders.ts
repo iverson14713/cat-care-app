@@ -55,13 +55,13 @@ export type ReminderTemplate = {
 };
 
 export const REMINDER_TEMPLATES: ReminderTemplate[] = [
-  { kind: 'daily', titleZh: '早上餵食', titleEn: 'Morning feeding', time: '08:00', repeatType: 'daily', repeatInterval: 1 },
-  { kind: 'daily', titleZh: '晚上餵食', titleEn: 'Evening feeding', time: '19:00', repeatType: 'daily', repeatInterval: 1 },
-  { kind: 'daily', titleZh: '清理排泄區', titleEn: 'Clean potty area', time: '21:00', repeatType: 'daily', repeatInterval: 1 },
-  { kind: 'daily', titleZh: '喝水確認', titleEn: 'Water check', time: '12:00', repeatType: 'daily', repeatInterval: 1 },
-  { kind: 'weight', titleZh: '量體重', titleEn: 'Weigh in', time: '10:00', repeatType: 'weekly', repeatInterval: 1 },
-  { kind: 'deworming', titleZh: '驅蟲', titleEn: 'Deworming', time: '10:00', repeatType: 'monthly', repeatInterval: 1 },
-  { kind: 'vet', titleZh: '看獸醫 / 回診', titleEn: 'Vet visit', time: '09:00', repeatType: 'monthly', repeatInterval: 1 },
+  { kind: 'daily', titleZh: '餵食提醒', titleEn: 'Feeding reminder', time: '08:00', repeatType: 'daily', repeatInterval: 1 },
+  { kind: 'daily', titleZh: '換水提醒', titleEn: 'Fresh water', time: '12:00', repeatType: 'daily', repeatInterval: 1 },
+  { kind: 'daily', titleZh: '鏟砂提醒', titleEn: 'Litter scoop', time: '18:00', repeatType: 'daily', repeatInterval: 1 },
+  { kind: 'daily', titleZh: '換砂提醒', titleEn: 'Change litter', time: '10:00', repeatType: 'weekly', repeatInterval: 1 },
+  { kind: 'deworming', titleZh: '除蟲提醒', titleEn: 'Deworming', time: '10:00', repeatType: 'monthly', repeatInterval: 1 },
+  { kind: 'vet', titleZh: '看獸醫提醒', titleEn: 'Vet visit', time: '09:00', repeatType: 'monthly', repeatInterval: 1 },
+  { kind: 'weight', titleZh: '每日紀錄提醒', titleEn: 'Daily care log', time: '20:00', repeatType: 'daily', repeatInterval: 1 },
 ];
 
 export function remindersWithoutCat(reminders: Reminder[], catId: string): Reminder[] {

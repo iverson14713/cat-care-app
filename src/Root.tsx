@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { scrubAuthCallbackUrl } from './services/auth/authRedirect';
+import { isAuthNativeClient } from './services/auth/authDebug';
 import { subscribeAuthRouteChange, shouldRenderAuthCallback } from './services/auth/authRoute';
 import { AppLaunchGate } from './AppLaunchGate.tsx';
 import { AuthCallbackPage } from './AuthCallbackPage.tsx';
@@ -29,7 +29,7 @@ export function Root() {
     };
   }, []);
 
-  if (path === '/auth/callback' || shouldRenderAuthCallback()) {
+  if (!isAuthNativeClient() && (path === '/auth/callback' || shouldRenderAuthCallback())) {
     return <AuthCallbackPage />;
   }
 

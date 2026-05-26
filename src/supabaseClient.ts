@@ -1,5 +1,4 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { isAuthNativeClient } from './services/auth/authDebug';
 
 let cached: SupabaseClient | null | undefined;
 
@@ -16,10 +15,11 @@ export function getSupabaseClient(): SupabaseClient | null {
   }
   cached = createClient(url, anonKey, {
     auth: {
+      flowType: 'pkce',
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: !isAuthNativeClient(),
-      flowType: 'pkce',
+      /** Native: exchange in appUrlOpen; Web: AuthCallbackPage handles PKCE. */
+      detectSessionInUrl: false,
     },
   });
   return cached;

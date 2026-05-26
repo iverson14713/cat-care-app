@@ -11,6 +11,7 @@ import { safeGetItem, safeSetItem } from '../safeStorage';
 import { APP_BRAND_ZH } from '../brand';
 import type { Reminder, ReminderKind } from '../reminders';
 import {
+  buildPetCareNotificationCopy,
   getPetCareNotificationPermission,
   isPetCareNativeLocalNotificationsAvailable,
   requestPetCareNotificationPermission,
@@ -270,7 +271,7 @@ class NotificationService {
     if (lang === 'zh') {
       return this.sendLocal({
         title: APP_BRAND_ZH,
-        body: '測試通知成功 🐾 提醒功能運作正常。',
+        body: '通知驗證成功 🐾 提醒功能運作正常。',
         tag: 'pet-care-test-notification',
         data: { channel: 'local', test: true },
       });
@@ -390,43 +391,5 @@ export function buildReminderNotificationCopy(
   reminder: Reminder,
   lang: 'zh' | 'en'
 ): { title: string; body: string } {
-  const name = catName.trim() || (lang === 'zh' ? '寵物' : 'your pet');
-  if (lang === 'zh') {
-    switch (reminder.type as ReminderKind) {
-      case 'daily':
-        if (reminder.title.includes('餵') || reminder.title.includes('食'))
-          return { title: '照護提醒', body: `${name} 該吃飯囉 🍚` };
-        if (reminder.title.includes('砂') || reminder.title.includes('排泄') || reminder.title.includes('清潔'))
-          return { title: '照護提醒', body: `${name} 的環境該清理了 🧹` };
-        if (reminder.title.includes('水'))
-          return { title: '照護提醒', body: `${name} 記得確認喝水 💧` };
-        return { title: '照護提醒', body: `${name}：${reminder.title}` };
-      case 'weight':
-        return { title: '體重提醒', body: `今天記得幫 ${name} 量體重 ⚖️` };
-      case 'deworming':
-        return { title: '驅蟲提醒', body: `${name} 該驅蟲了 💊` };
-      case 'vet':
-        return { title: '看診提醒', body: `${name} 的回診 / 看診提醒 🏥` };
-      default:
-        return { title: reminder.title, body: `${name}：${reminder.title}` };
-    }
-  }
-  switch (reminder.type as ReminderKind) {
-    case 'daily':
-      if (/feed|meal|breakfast|dinner/i.test(reminder.title))
-        return { title: 'Care reminder', body: `Time to feed ${name} 🍚` };
-      if (/litter|potty|clean/i.test(reminder.title))
-        return { title: 'Care reminder', body: `Time to clean ${name}'s area 🧹` };
-      if (/water/i.test(reminder.title))
-        return { title: 'Care reminder', body: `Check ${name}'s water 💧` };
-      return { title: 'Care reminder', body: `${name}: ${reminder.title}` };
-    case 'weight':
-      return { title: 'Weight reminder', body: `Remember to weigh ${name} today ⚖️` };
-    case 'deworming':
-      return { title: 'Deworming', body: `Deworming reminder for ${name} 💊` };
-    case 'vet':
-      return { title: 'Vet visit', body: `Vet / follow-up reminder for ${name} 🏥` };
-    default:
-      return { title: reminder.title, body: `${name}: ${reminder.title}` };
-  }
+  return buildPetCareNotificationCopy(catName, reminder, lang);
 }

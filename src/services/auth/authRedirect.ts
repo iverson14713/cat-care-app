@@ -6,6 +6,9 @@ const RETURN_KEY = 'petcare_auth_return';
 /** Must match capacitor.config.ts `server.hostname` */
 export const CAPACITOR_AUTH_ORIGIN = 'https://petcare.app';
 
+/** Web / email verification redirect (Supabase Redirect URLs whitelist). */
+export const WEB_AUTH_CALLBACK_URL = 'https://cat-care-app2.vercel.app/auth/callback';
+
 /** iOS OAuth custom URL scheme (Info.plist CFBundleURLSchemes) */
 export const NATIVE_OAUTH_URL_SCHEME = 'petcare';
 
@@ -16,14 +19,12 @@ export function getAuthCallbackUrl(): string {
   if (isAuthNativeClient()) {
     return `${CAPACITOR_AUTH_ORIGIN}/auth/callback`;
   }
-  return `${window.location.origin}/auth/callback`;
+  return WEB_AUTH_CALLBACK_URL;
 }
 
 export function getOAuthRedirectUrl(): string {
-  if (typeof window === 'undefined') return '/auth/callback';
-  const url = isAuthNativeClient()
-    ? CAPACITOR_AUTH_SCHEME_CALLBACK
-    : `${window.location.origin}/auth/callback`;
+  if (typeof window === 'undefined') return WEB_AUTH_CALLBACK_URL;
+  const url = isAuthNativeClient() ? CAPACITOR_AUTH_SCHEME_CALLBACK : WEB_AUTH_CALLBACK_URL;
   authLog('getOAuthRedirectUrl', { url, isNative: isAuthNativeClient() });
   return url;
 }
@@ -86,6 +87,7 @@ export async function redirectAfterAuthSuccess(client: SupabaseClient, delayMs =
 
 export function scrubAuthCallbackUrl(): void {
   if (typeof window === 'undefined') return;
-  const path = window.location.pathname || '/auth/callback';
+  const path = isAuthNativeClient() ? '/' : window.location.pathname || '/auth/callback';
   window.history.replaceState({}, document.title, path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
 }

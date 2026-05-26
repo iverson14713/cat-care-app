@@ -1,9 +1,8 @@
 import type { Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
+import { WEB_AUTH_CALLBACK_URL } from './services/auth/authRedirect';
+import { signInWithGoogleOAuth } from './services/auth/googleSignIn';
 import { getSupabaseClient } from './supabaseClient';
-
-/** Email 驗證信導向（須與 Supabase Dashboard → Redirect URLs 白名單一致） */
-const EMAIL_AUTH_REDIRECT = 'https://cat-care-app2.vercel.app/auth/callback';
 
 export type UserProfile = {
   id: string;
@@ -103,7 +102,7 @@ export function useSupabaseAuth() {
         email,
         password,
         options: {
-          emailRedirectTo: EMAIL_AUTH_REDIRECT,
+          emailRedirectTo: WEB_AUTH_CALLBACK_URL,
           data: {
             display_name: displayName?.trim() || undefined,
           },
@@ -118,16 +117,10 @@ export function useSupabaseAuth() {
     return supabase.auth.signOut();
   }, [supabase]);
 
-  /** Google OAuth — enable provider in Supabase (Auth → Providers → Google) and set OAuth Client ID / Secret. */
-  const signInWithGoogle = useCallback(() => {
-    if (!supabase) return Promise.resolve({ data: null, error: new Error('not_configured') });
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    return supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${origin}/auth/callback`,
-      },
-    });
+  const signInWithGoogle = useCallback(async () => {
+    if (!supabase) return { data: null, error: new Error('not_configured') };
+    const { error } = await signInWithGoogleOAuth(supabase);
+    return { data: null, error };
   }, [supabase]);
 
   const updateDisplayName = useCallback(

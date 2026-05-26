@@ -15,6 +15,7 @@
     "cap:sync": "npm run build:capacitor && npx cap sync",
     "cap:sync:ios": "npm run build:capacitor && npx cap sync ios",
     "cap:open:ios": "npx cap open ios",
+    "generate:ios-icons": "bash scripts/generate-ios-app-icons.sh",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"

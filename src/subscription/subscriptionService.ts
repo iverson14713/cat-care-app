@@ -26,7 +26,13 @@ export async function purchaseProTestUnlock(period: BillingPeriod = 'monthly'): 
  */
 export async function purchasePro(period: BillingPeriod = 'monthly'): Promise<PurchaseResult> {
   const iap = await purchaseViaStoreKit(period);
-  if (iap.ok) return iap;
+  if (iap.ok) {
+    setSubscriptionStatus('pro', {
+      source: iap.source ?? 'app_store',
+      billingPeriod: iap.period ?? period,
+    });
+    return iap;
+  }
   if (iap.errorCode === 'IAP_NOT_CONFIGURED' && isPetCareDevMode()) {
     return purchaseProTestUnlock(period);
   }

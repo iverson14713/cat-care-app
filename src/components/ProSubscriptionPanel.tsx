@@ -1,6 +1,8 @@
 import { Crown, Lock } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { isPetCareDevMode } from '../lib/petCareDevMode';
 import { SUBSCRIPTION_PRICING } from '../subscription/constants';
+import { fetchStoreProductPrices, isNativeIapAvailable } from '../subscription/iapBridge';
 import type { BillingPeriod, SubscriptionStatus } from '../subscription/types';
 
 type Lang = 'zh' | 'en';
@@ -8,39 +10,42 @@ type Lang = 'zh' | 'en';
 const copy = {
   zh: {
     section: '訂閱方案',
-    paymentNote: '正式上架後將透過 App Store 訂閱結帳',
-    testNote: '目前為測試版：升級不會實際扣款，僅在本機開通 Pro 體驗。',
+    paymentNote: '訂閱費用將透過 App Store 收取，可隨時在 iPhone「設定 → Apple ID → 訂閱項目」管理或取消。',
+    paymentNoteWeb: '在 iPhone App 內訂閱 Pro，費用由 App Store 收取並可隨時管理。',
     current: '目前方案',
     free: '免費版',
     pro: 'Pro',
     monthly: SUBSCRIPTION_PRICING.monthly.labelZh,
     yearly: SUBSCRIPTION_PRICING.yearly.labelZh,
     yearlySave: SUBSCRIPTION_PRICING.yearlySaveZh,
-    upgrade: '升級 Pro（測試開通）',
-    downgrade: '切回免費版',
+    upgrade: '訂閱 Pro',
+    downgrade: '切回免費版（僅開發）',
     restore: '恢復購買',
     restoring: '恢復中…',
     selectPlan: '選擇方案',
     monthlyLabel: '月訂閱',
     yearlyLabel: '年訂閱',
+    loadingPrices: '正在載入價格…',
   },
   en: {
     section: 'Subscription',
-    paymentNote: 'After launch, billing goes through the App Store',
-    testNote: 'Test build: upgrade does not charge — unlocks Pro on this device only.',
+    paymentNote:
+      'Billing is handled by the App Store. Manage or cancel anytime in Settings → Apple ID → Subscriptions.',
+    paymentNoteWeb: 'Subscribe to Pro in the iOS app. Billing is handled by the App Store.',
     current: 'Current plan',
     free: 'Free',
     pro: 'Pro',
     monthly: SUBSCRIPTION_PRICING.monthly.labelEn,
     yearly: SUBSCRIPTION_PRICING.yearly.labelEn,
     yearlySave: SUBSCRIPTION_PRICING.yearlySaveEn,
-    upgrade: 'Upgrade to Pro (test)',
-    downgrade: 'Switch to Free',
+    upgrade: 'Subscribe to Pro',
+    downgrade: 'Switch to Free (dev only)',
     restore: 'Restore purchases',
     restoring: 'Restoring…',
     selectPlan: 'Choose a plan',
     monthlyLabel: 'Monthly',
     yearlyLabel: 'Yearly',
+    loadingPrices: 'Loading prices…',
   },
 } as const;
 
@@ -65,6 +70,27 @@ export function ProSubscriptionPanel({
 }: ProSubscriptionPanelProps) {
   const t = copy[lang];
   const [period, setPeriod] = useState<BillingPeriod>('yearly');
+  const nativeBilling = isNativeIapAvailable();
+  const [storePrices, setStorePrices] = useState<Partial<Record<BillingPeriod, string>>>({});
+  const [pricesLoading, setPricesLoading] = useState(nativeBilling);
+
+  useEffect(() => {
+    if (!nativeBilling) return;
+    let cancelled = false;
+    void fetchStoreProductPrices().then((prices) => {
+      if (!cancelled) {
+        setStorePrices(prices);
+        setPricesLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [nativeBilling]);
+
+  const monthlyDisplay = storePrices.monthly ?? t.monthly;
+  const yearlyDisplay = storePrices.yearly ?? t.yearly;
+  const showDevDowngrade = isPetCareDevMode() && !nativeBilling;
 
   return (
     <section
@@ -78,7 +104,9 @@ export function ProSubscriptionPanel({
         </span>
         <div>
           <h2 className="text-base font-bold text-stone-900">{t.section}</h2>
-          <p className="text-[11px] text-stone-500">{t.paymentNote}</p>
+          <p className="text-[11px] text-stone-500">
+            {nativeBilling ? t.paymentNote : t.paymentNoteWeb}
+          </p>
         </div>
       </div>
 
@@ -101,11 +129,12 @@ export function ProSubscriptionPanel({
         </p>
       </div>
 
-      <p className="mt-3 text-xs leading-relaxed text-stone-600">{t.testNote}</p>
-
       {status === 'free' ? (
         <>
           <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-stone-500">{t.selectPlan}</p>
+          {pricesLoading ? (
+            <p className="mt-2 text-center text-[11px] text-stone-500">{t.loadingPrices}</p>
+          ) : null}
           <div className="mt-2 grid grid-cols-2 gap-2">
             {(['monthly', 'yearly'] as const).map((p) => (
               <button
@@ -123,7 +152,7 @@ export function ProSubscriptionPanel({
                   {p === 'monthly' ? t.monthlyLabel : t.yearlyLabel}
                 </span>
                 <span className="mt-1 block text-sm font-bold text-stone-900">
-                  {p === 'monthly' ? t.monthly : t.yearly}
+                  {p === 'monthly' ? monthlyDisplay : yearlyDisplay}
                 </span>
                 {p === 'yearly' ? (
                   <span className="mt-1 inline-block rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold text-orange-800">
@@ -143,7 +172,7 @@ export function ProSubscriptionPanel({
             {t.upgrade}
           </button>
         </>
-      ) : (
+      ) : showDevDowngrade ? (
         <button
           type="button"
           disabled={busy}
@@ -152,7 +181,7 @@ export function ProSubscriptionPanel({
         >
           {t.downgrade}
         </button>
-      )}
+      ) : null}
 
       <button
         type="button"
