@@ -2,5 +2,7 @@ node_modules
 dist
 .env
 .env.local
+AuthKey_*.p8
+*.p8
 *.local
 server/logs/
