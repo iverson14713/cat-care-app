@@ -10,6 +10,11 @@
 import { safeGetItem, safeSetItem } from '../safeStorage';
 import { APP_BRAND_ZH } from '../brand';
 import type { Reminder, ReminderKind } from '../reminders';
+import {
+  getPetCareNotificationPermission,
+  isPetCareNativeLocalNotificationsAvailable,
+  requestPetCareNotificationPermission,
+} from './petCareLocalNotifications';
 
 const PERMISSION_ASKED_KEY = 'cat-calendar-notification-asked';
 const DEFAULT_ICON = '/favicon.png';
@@ -53,6 +58,10 @@ export type NotificationServiceStatus = {
 // ---------------------------------------------------------------------------
 // Browser local provider (Web Notification API)
 // ---------------------------------------------------------------------------
+
+function useNativeLocalChannel(): boolean {
+  return isPetCareNativeLocalNotificationsAvailable();
+}
 
 function getBrowserNotification(): typeof Notification | undefined {
   if (typeof window === 'undefined') return undefined;
@@ -191,6 +200,16 @@ class NotificationService {
   private readonly remote = new RemotePushNotificationProvider();
 
   getStatus(): NotificationServiceStatus {
+    if (useNativeLocalChannel()) {
+      return {
+        permission: 'default',
+        localSupported: true,
+        localGranted: false,
+        activeChannel: 'local',
+        remoteRegistered: false,
+        remoteBackendsPlanned: ['apns', 'fcm', 'capacitor'],
+      };
+    }
     const permission = this.local.getPermission();
     const localSupported = this.local.isSupported();
     const localGranted = permission === 'granted';
@@ -206,18 +225,27 @@ class NotificationService {
   }
 
   isLocalSupported(): boolean {
-    return this.local.isSupported();
+    return useNativeLocalChannel() || this.local.isSupported();
   }
 
   getPermission(): NotificationPermissionState {
+    if (useNativeLocalChannel()) return 'default';
     return this.local.getPermission();
   }
 
   isGranted(): boolean {
+    if (useNativeLocalChannel()) return false;
     return this.getPermission() === 'granted';
   }
 
   async requestPermission(): Promise<NotificationPermissionState> {
+    if (useNativeLocalChannel()) {
+      const native = await requestPetCareNotificationPermission();
+      if (native === 'granted') return 'granted';
+      if (native === 'denied') return 'denied';
+      if (native === 'prompt') return 'default';
+      return 'unsupported';
+    }
     return this.local.requestPermission();
   }
 
@@ -284,11 +312,30 @@ export function getNotificationSupport(): boolean {
   return notificationService.isLocalSupported();
 }
 
+export async function getNotificationPermissionAsync(): Promise<NotificationPermissionState> {
+  if (useNativeLocalChannel()) {
+    const native = await getPetCareNotificationPermission();
+    if (native === 'granted') return 'granted';
+    if (native === 'denied') return 'denied';
+    if (native === 'prompt') return 'default';
+    return 'unsupported';
+  }
+  return notificationService.getPermission();
+}
+
 export function getNotificationPermission(): NotificationPermissionState {
   return notificationService.getPermission();
 }
 
 export function isNotificationGranted(): boolean {
+  if (useNativeLocalChannel()) return false;
+  return notificationService.isGranted();
+}
+
+export async function isNotificationGrantedAsync(): Promise<boolean> {
+  if (useNativeLocalChannel()) {
+    return (await getPetCareNotificationPermission()) === 'granted';
+  }
   return notificationService.isGranted();
 }
 
@@ -338,7 +385,7 @@ export function permissionStatusLabel(
 // Reminder notification copy (used only by service)
 // ---------------------------------------------------------------------------
 
-function buildReminderNotificationCopy(
+export function buildReminderNotificationCopy(
   catName: string,
   reminder: Reminder,
   lang: 'zh' | 'en'

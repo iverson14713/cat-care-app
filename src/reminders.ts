@@ -6,6 +6,7 @@ export const REMINDER_LIMIT_FREE = 3;
 /** Effectively unlimited for Pro (test flow; no real billing yet). */
 export const REMINDER_LIMIT_PRO = 100_000;
 
+import { isPetCareNativeLocalNotificationsAvailable } from './services/petCareLocalNotifications';
 import {
   isNotificationGranted,
   sendReminderNotification,
@@ -290,6 +291,7 @@ export function processDueReminders(
   lang: 'zh' | 'en',
   now: Date = new Date()
 ): Reminder[] {
+  if (isPetCareNativeLocalNotificationsAvailable()) return reminders;
   if (!isNotificationGranted()) return reminders;
   let changed = false;
   const next = reminders.map((r) => {
