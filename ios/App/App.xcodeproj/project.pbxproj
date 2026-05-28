@@ -19,6 +19,7 @@
 		A1PC0042FED79650016851F /* PetCareAppleSignInPlugin.m in Sources */ = {isa = PBXBuildFile; fileRef = A1PC0032FED79650016851F /* PetCareAppleSignInPlugin.m */; };
 		A1PC0062FED79650016851F /* PetCareIAPPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1PC0092FED79650016851F /* PetCareIAPPlugin.swift */; };
 		A1PC0082FED79650016851F /* PetCareIAPPlugin.m in Sources */ = {isa = PBXBuildFile; fileRef = A1PC00B2FED79650016851F /* PetCareIAPPlugin.m */; };
+		EBBEE45F2FC5937000480124 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EBBEE45E2FC5937000480124 /* StoreKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		A1PC0052FED79650016851F /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		A1PC0092FED79650016851F /* PetCareIAPPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetCareIAPPlugin.swift; sourceTree = "<group>"; };
 		A1PC00B2FED79650016851F /* PetCareIAPPlugin.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PetCareIAPPlugin.m; sourceTree = "<group>"; };
+		EBBEE45E2FC5937000480124 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,6 +47,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				EBBEE45F2FC5937000480124 /* StoreKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -56,6 +59,7 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				EBBEE45D2FC5937000480124 /* Frameworks */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -86,6 +90,14 @@
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		EBBEE45D2FC5937000480124 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				EBBEE45E2FC5937000480124 /* StoreKit.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

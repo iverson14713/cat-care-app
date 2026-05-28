@@ -73,12 +73,15 @@ import {
   generateAssistantCareBundleOpenAi,
   generateAssistantQaOpenAi,
   generateAssistantWeeklyReportOpenAi,
+  getAssistantHealthFailureUserHint,
+  mapAssistantApiErrorToUserMessage,
   normalizeCareBundlePayload,
   getCareBundleContextHash,
   isAssistantCareBundleNetworkBlocked,
   isAssistantDailyQuotaExhausted,
   mergeAssistantQuotaFromSnapshot,
   peekCareBundleCache,
+  type AssistantHealthFetchFailure,
 } from './openaiAssistant';
 import type { SharedCareMember } from './sharedCareTypes';
 import {
@@ -132,7 +135,7 @@ import {
   type DailyJson,
 } from './supabaseDaily';
 import {
-  migrateOfflineCatsToCloud,
+  reconcileCloudPetsForUser,
   pullCloudDataIntoLocal,
   purgeCatLocalStorage,
   pushAiUsageSnapshot,
@@ -143,6 +146,7 @@ import { permanentlyDeleteCatForOwner } from './supabaseCatPermanentDelete';
 import { upsertDailyPhotosCloud } from './supabasePhotos';
 import { upsertUserAiPlan } from './supabaseUserPrefs';
 import type { CloudSyncPhase } from './cloudSyncTypes';
+import { formatIssuesForUi, logSyncIssueBatch } from './cloudSyncErrors';
 import { upsertMonthlyRecordCloud } from './supabaseMonthly';
 import { upsertWeightRecordsForCat } from './supabaseWeight';
 import { upsertUserReminders } from './supabaseReminders';
@@ -188,25 +192,32 @@ import {
   NATIVE_AUTH_ERROR_EVENT,
   type NativeAuthErrorDetail,
 } from './services/auth/authNativeEvents';
+import { App as CapacitorApp } from '@capacitor/app';
 import {
   getNotificationPermission,
-  getNotificationPermissionAsync,
   getNotificationServiceStatus,
+  isNotificationGrantedAsync,
   getNotificationSupport,
+  type NotificationPermissionState,
   permissionStatusLabel,
+  promptNotificationPermissionForReminder,
+  refreshNotificationPermission,
   requestNotificationPermission,
   sendTestNotification,
 } from './services/notifications';
 import {
   debouncedSyncPetCareLocalNotifications,
   cancelPetCareReminderNotification,
-  getPetCareNotificationPermission,
   isPetCareNativeLocalNotificationsAvailable,
+  openPetCareNotificationSettings,
   requestPetCareNotificationPermission,
   schedulePetCareTestNotificationInOneMinute,
   syncPetCareLocalNotifications,
 } from './services/petCareLocalNotifications';
-import { syncPetCareIapOnLaunch } from './subscription/petCareIapPlanService';
+import {
+  clearSubscriptionStateOnSignOut,
+  syncPetCareIapForUser,
+} from './subscription';
 import { VetReportPage } from './VetReportPage';
 import {
   exportReportElementAsPdf,
@@ -543,8 +554,7 @@ const text = {
     aiAnalysisCardSubtitle: '只看今天與最近幾天，短文字 + 1～3 個照護提醒（非完整週報）。',
     aiBundleCurrentHint: '已有今日快速摘要，可直接查看',
     aiDataStaleHint: '資料已更新，可重新生成分析',
-    aiNeedServerEnvProd: '小幫手暫時無法使用，請稍後再試。',
-    aiAssistantUnreachableProd: '目前連不上服務，請稍後再試或重新整理頁面。',
+    aiNeedServerEnvProd: '目前服務暫時無法使用，請稍後再試。',
     aiEmptyHint: '尚未取得快速提醒，點下方按鈕即可開始。',
     aiAskEmpty: '先寫下想問的內容好嗎？',
     aiOpenAiBusy: '正在整理…',
@@ -587,6 +597,15 @@ const text = {
     authSignUpSent: '若註冊成功，請檢查信箱（含垃圾信）並完成驗證後再登入。',
     authSignedInOk: '登入成功。',
     authSignedOutOk: '已登出。',
+    accountDangerTitle: '帳號管理',
+    deleteAccount: '刪除帳號',
+    deleteAccountDesc: '永久刪除你的帳號與雲端資料（不可復原）',
+    deleteAccountConfirmTitle: '確定要刪除帳號？',
+    deleteAccountConfirmBody:
+      '刪除後將永久移除你的帳號與相關雲端資料（包含寵物、照護紀錄、照片、提醒、AI 用量等）。\n此操作不可復原。',
+    deleteAccountBusy: '刪除中…',
+    deleteAccountOk: '帳號已刪除',
+    deleteAccountFail: '刪除失敗：',
     authLocalDataHint: '登入後會與雲端同步寵物、照護紀錄、照片、週報、提醒、AI 用量與協作狀態。',
     authAppleSignIn: '使用 Apple 登入',
     authAppleComingSoon: '目前無法完成 Apple 登入，請改用 Email 登入或稍後再試。',
@@ -661,6 +680,11 @@ const text = {
     remindersNotifyDenied: '尚未開啟通知權限',
     remindersNotifyEnable: '啟用提醒',
     remindersNotifyGranted: '通知已開啟',
+    remindersNotifyStatusOn: '通知已開啟',
+    remindersNotifyStatusOff: '尚未開啟通知',
+    remindersNotifyStatusDenied: '通知已關閉',
+    remindersNotifyOnHint: '到時間會推送提醒，關閉 App 也會通知。',
+    remindersNotifyOpenSettings: '前往系統設定開啟',
     remindersNotifyUnsupported: '此裝置暫不支援通知',
     remindersNotifySectionTitle: '推播與通知',
     remindersNotifyStatusLabel: '通知權限狀態',
@@ -1030,9 +1054,7 @@ const text = {
     aiBundleCurrentHint: 'You already have today’s quick snapshot — see below.',
     aiDataStaleHint: 'Your logs changed — you can generate a fresh analysis.',
     aiNeedServerEnvDev: 'The companion is waking up — please start your local setup, then refresh.',
-    aiNeedServerEnvProd: 'The companion is unavailable right now — try again shortly after setup finishes.',
-    aiAssistantUnreachableDev: 'We could not reach the service — start your local environment and refresh.',
-    aiAssistantUnreachableProd: 'We could not reach the service — please try again in a little while.',
+    aiNeedServerEnvProd: 'This service is temporarily unavailable. Please try again later.',
     aiEmptyHint: 'No quick snapshot yet — tap the button below.',
     aiAskEmpty: 'Write a little question first.',
     aiOpenAiBusy: 'Putting it together…',
@@ -1075,6 +1097,15 @@ const text = {
     authSignUpSent: 'If signup succeeded, check your inbox (and spam), confirm your email, then sign in.',
     authSignedInOk: 'Signed in successfully.',
     authSignedOutOk: 'Signed out.',
+    accountDangerTitle: 'Account management',
+    deleteAccount: 'Delete account',
+    deleteAccountDesc: 'Permanently delete your account and cloud data (irreversible).',
+    deleteAccountConfirmTitle: 'Delete your account?',
+    deleteAccountConfirmBody:
+      'This will permanently delete your account and related cloud data (pets, logs, photos, reminders, AI usage, etc.).\nThis cannot be undone.',
+    deleteAccountBusy: 'Deleting…',
+    deleteAccountOk: 'Account deleted',
+    deleteAccountFail: 'Delete failed: ',
     authLocalDataHint:
       'When signed in, pets, care logs, photos, weekly reports, reminders, AI usage, and shared care sync via the cloud.',
     authAppleSignIn: 'Sign in with Apple',
@@ -1155,6 +1186,11 @@ const text = {
     remindersNotifyDenied: 'Notification permission is off',
     remindersNotifyEnable: 'Enable reminders',
     remindersNotifyGranted: 'Notifications enabled',
+    remindersNotifyStatusOn: 'Notifications on',
+    remindersNotifyStatusOff: 'Notifications off',
+    remindersNotifyStatusDenied: 'Notifications blocked',
+    remindersNotifyOnHint: 'Alerts fire on schedule, even when the app is closed.',
+    remindersNotifyOpenSettings: 'Open in Settings',
     remindersNotifyUnsupported: 'Notifications are not supported on this device',
     remindersNotifySectionTitle: 'Push & notifications',
     remindersNotifyStatusLabel: 'Permission status',
@@ -1276,12 +1312,6 @@ const text = {
       'The above is for care observation and reminders only — not a veterinary diagnosis. If symptoms persist or worsen, please consult a veterinarian.',
   },
 };
-
-function aiStatusHint(lang: Lang, kind: 'off' | 'key'): string {
-  const tr = text[lang];
-  if (kind === 'off') return tr.aiAssistantUnreachableProd;
-  return tr.aiNeedServerEnvProd;
-}
 
 function aiQuotaExhaustedMessage(lang: Lang, appPlan: AppPlan): string {
   const t = text[lang];
@@ -1667,7 +1697,9 @@ export default function App() {
   const [historyDatePreset, setHistoryDatePreset] = useState<HistoryDatePreset>('none');
   const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>(() => bootstrap.reminders);
-  const [notificationPerm, setNotificationPerm] = useState(() => getNotificationPermission());
+  const [notificationPerm, setNotificationPerm] = useState<NotificationPermissionState>(() =>
+    isPetCareNativeLocalNotificationsAvailable() ? 'default' : getNotificationPermission()
+  );
   const isOnline = useOnlineStatus();
   const [offlineSyncError, setOfflineSyncError] = useState<string | null>(null);
   const [offlineSyncBusy, setOfflineSyncBusy] = useState(false);
@@ -1683,6 +1715,8 @@ export default function App() {
   const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
   const [aiClientId] = useState(() => bootstrap.aiClientId);
   const [appPlan, setAppPlan] = useState<AppPlan>(() => bootstrap.appPlan);
+  /** Never treat logged-out session as Pro (ignores stale in-memory plan). */
+  const effectiveAppPlan: AppPlan = supabaseAuth.user ? appPlan : 'free';
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const maxDailyPhotos = useMemo(() => getMaxDailyPhotos(appPlan), [appPlan]);
   const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
@@ -1706,6 +1740,13 @@ export default function App() {
 
   const handlePurchasePro = useCallback(
     async (period: BillingPeriod) => {
+      if (!supabaseAuth.user) {
+        showToast(
+          lang === 'zh' ? '請先登入後再訂閱 Pro' : 'Please sign in to subscribe to Pro.',
+          'error'
+        );
+        return;
+      }
       trackEvent('premium_upgrade_click', { source: period });
       setSubscriptionBusy(true);
       const result = await purchasePro(period);
@@ -1719,10 +1760,17 @@ export default function App() {
       if (result.errorCode === 'USER_CANCELLED') return;
       showToast(purchaseErrorMessage(lang, result.errorCode), 'error');
     },
-    [lang, showToast]
+    [lang, showToast, supabaseAuth.user]
   );
 
   const handleRestorePurchases = useCallback(async () => {
+    if (!supabaseAuth.user) {
+      showToast(
+        lang === 'zh' ? '請先登入後再恢復購買' : 'Please sign in to restore purchases.',
+        'error'
+      );
+      return;
+    }
     setSubscriptionBusy(true);
     const result = await restorePurchases();
     setSubscriptionBusy(false);
@@ -1734,7 +1782,7 @@ export default function App() {
     }
     if (result.errorCode === 'USER_CANCELLED') return;
     showToast(purchaseErrorMessage(lang, result.errorCode), 'error');
-  }, [lang, showToast]);
+  }, [lang, showToast, supabaseAuth.user]);
   const applyLocalAssistantQuota = useCallback(
     (plan: AppPlan, clientId: string, usageDate: string, prev: AssistantHealthPayload | null) => {
       const q = buildLocalAiQuota(plan, clientId, usageDate);
@@ -1861,6 +1909,8 @@ export default function App() {
   const [storageOwnerBlocked, setStorageOwnerBlocked] = useState(false);
   const [cloudSyncTick, setCloudSyncTick] = useState(0);
   const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const prevCloudPhaseRef = useRef<CloudSyncPhase>('idle');
   const [cloudCareEvents, setCloudCareEvents] = useState<CareEventRow[]>([]);
   const lastCloudDailyStripRef = useRef('');
@@ -1868,17 +1918,30 @@ export default function App() {
   const cloudDailyHydratingRef = useRef(false);
   const cloudDailyHydratedRef = useRef(false);
   const cloudSyncRunRef = useRef(0);
+  const cloudSyncSilentRef = useRef(false);
+  const syncFailureToastShownRef = useRef(false);
+  const cloudAutoRetryCountRef = useRef(0);
 
   useEffect(() => {
     const prev = prevCloudPhaseRef.current;
     const cur = cloudSyncPhase;
     const isActive = cur === 'loading' || cur === 'syncing';
     const wasActive = prev === 'loading' || prev === 'syncing';
-    if (isActive && !wasActive) {
+    if (isActive && !wasActive && !cloudSyncSilentRef.current) {
       showToast(tr.syncToastSyncing, 'info', { position: 'top', durationMs: 2000 });
     }
-    if (cur === 'failed' && prev !== 'failed') {
+    if (
+      cur === 'failed' &&
+      prev !== 'failed' &&
+      !cloudSyncSilentRef.current &&
+      !syncFailureToastShownRef.current
+    ) {
+      syncFailureToastShownRef.current = true;
       showToast(tr.syncToastFailed, 'warning', { position: 'top', durationMs: 4000 });
+    }
+    if (cur === 'ready' || cur === 'empty') {
+      syncFailureToastShownRef.current = false;
+      cloudAutoRetryCountRef.current = 0;
     }
     prevCloudPhaseRef.current = cur;
   }, [cloudSyncPhase, showToast, tr.syncToastSyncing, tr.syncToastFailed]);
@@ -2075,6 +2138,9 @@ export default function App() {
   const [assistantApiReady, setAssistantApiReady] = useState<boolean | null>(null);
   /** false = health fetch failed; true = got JSON (openaiReady may still be false). */
   const [assistantHealthReachable, setAssistantHealthReachable] = useState<boolean | null>(null);
+  const [assistantHealthFailure, setAssistantHealthFailure] = useState<AssistantHealthFetchFailure | null>(
+    null
+  );
   const [assistantQuota, setAssistantQuota] = useState<AssistantHealthPayload | null>(
     () => bootstrap.assistantQuota
   );
@@ -2082,20 +2148,28 @@ export default function App() {
     p: AppPlan,
     meta?: { source?: 'test' | 'restore' | 'app_store' | null; billingPeriod?: BillingPeriod | null }
   ) => {
-    if (p === 'free') downgradeToFree();
+    const uid = supabaseAuth.user?.id;
+    if (!uid) {
+      setAppPlan('free');
+      return;
+    }
+    if (p === 'free') downgradeToFree(uid);
     else
-      setSubscriptionStatus('pro', {
-        source: meta?.source ?? 'app_store',
-        billingPeriod: meta?.billingPeriod ?? null,
-      });
-    setAppPlan(getSubscriptionStatus());
+      setSubscriptionStatus(
+        'pro',
+        {
+          source: meta?.source ?? 'app_store',
+          billingPeriod: meta?.billingPeriod ?? null,
+        },
+        uid
+      );
+    setAppPlan(getSubscriptionStatus(uid));
     if (p === 'free') {
       setHistoryKeyword('');
       setHistoryFilter('all');
     }
     setAssistantQuota((prev) => applyLocalAssistantQuota(p, aiClientId, today, prev));
     const sb = supabaseAuth.supabase;
-    const uid = supabaseAuth.user?.id;
     if (sb && uid) {
       void upsertUserAiPlan(sb, uid, p).then(({ error }) => {
         if (error) console.warn('[user_preferences upsert]', error.message);
@@ -2155,17 +2229,19 @@ export default function App() {
     let cancelled = false;
     setAssistantApiReady((ready) => (ready === true ? true : null));
     setAssistantHealthReachable(null);
-    fetchAssistantHealth(aiClientId, today, undefined, appPlan).then((h) => {
+    fetchAssistantHealth(aiClientId, today, undefined, appPlan).then((result) => {
       if (cancelled) return;
-      if (!h) {
+      if (!result.ok) {
+        setAssistantHealthFailure(result.failure);
         setAssistantHealthReachable(false);
         setAssistantApiReady(false);
         setAssistantQuota((prev) => applyLocalAssistantQuota(appPlan, aiClientId, today, prev));
         return;
       }
+      setAssistantHealthFailure(null);
       setAssistantHealthReachable(true);
-      setAssistantQuota(h);
-      setAssistantApiReady(h.openaiReady);
+      setAssistantQuota(result.payload);
+      setAssistantApiReady(result.payload.openaiReady);
     });
     return () => {
       cancelled = true;
@@ -2233,7 +2309,9 @@ export default function App() {
     }
     if (assistantApiReady !== true) {
       setOpenAiErr(
-        assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
+        assistantHealthFailure
+          ? getAssistantHealthFailureUserHint(lang, assistantHealthFailure)
+          : tr.aiNeedServerEnvProd
       );
       return;
     }
@@ -2270,17 +2348,12 @@ export default function App() {
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
       console.log('care_bundle_api_error', e instanceof AssistantApiError ? e.code : e);
-      if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') {
-          notifyAiQuotaExhausted();
-          refreshAssistantQuotaFromLocal();
-          setOpenAiErr(null);
-        } else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiAssistantGenericFail);
-        else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
-        else setOpenAiErr(text[lang].aiAssistantGenericFail);
+      if (e instanceof AssistantApiError && e.code === 'QUOTA') {
+        notifyAiQuotaExhausted();
+        refreshAssistantQuotaFromLocal();
+        setOpenAiErr(null);
       } else {
-        setOpenAiErr(text[lang].aiAssistantGenericFail);
+        setOpenAiErr(mapAssistantApiErrorToUserMessage(lang, e));
       }
     } finally {
       setAiBundleLoading(false);
@@ -2289,7 +2362,7 @@ export default function App() {
     assistantContext,
     lang,
     assistantApiReady,
-    assistantHealthReachable,
+    assistantHealthFailure,
     aiClientId,
     assistantQuota,
     appPlan,
@@ -2310,7 +2383,9 @@ export default function App() {
     }
     if (assistantApiReady !== true) {
       setOpenAiErr(
-        assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
+        assistantHealthFailure
+          ? getAssistantHealthFailureUserHint(lang, assistantHealthFailure)
+          : tr.aiNeedServerEnvProd
       );
       setAiReply('');
       return;
@@ -2353,17 +2428,12 @@ export default function App() {
       pushAiUsageIfCloud();
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') return;
-      if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') {
-          notifyAiQuotaExhausted();
-          refreshAssistantQuotaFromLocal();
-          setOpenAiErr(null);
-        } else if (e.code === 'RATE') setOpenAiErr(text[lang].aiErrRate);
-        else if (e.code === 'OPENAI') setOpenAiErr(text[lang].aiAssistantGenericFail);
-        else if (e.code === 'NO_API_KEY') setOpenAiErr(aiStatusHint(lang, 'key'));
-        else setOpenAiErr(text[lang].aiAssistantGenericFail);
+      if (e instanceof AssistantApiError && e.code === 'QUOTA') {
+        notifyAiQuotaExhausted();
+        refreshAssistantQuotaFromLocal();
+        setOpenAiErr(null);
       } else {
-        setOpenAiErr(text[lang].aiAssistantGenericFail);
+        setOpenAiErr(mapAssistantApiErrorToUserMessage(lang, e));
       }
       setAiReply('');
     } finally {
@@ -2374,7 +2444,7 @@ export default function App() {
     aiQuestion,
     lang,
     assistantApiReady,
-    assistantHealthReachable,
+    assistantHealthFailure,
     aiClientId,
     appPlan,
     assistantQuota,
@@ -2395,7 +2465,9 @@ export default function App() {
     }
     if (assistantApiReady !== true) {
       setWeeklyErr(
-        assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')
+        assistantHealthFailure
+          ? getAssistantHealthFailureUserHint(lang, assistantHealthFailure)
+          : tr.aiNeedServerEnvProd
       );
       return;
     }
@@ -2440,16 +2512,12 @@ export default function App() {
       if ((e as { name?: string }).name === 'AbortError') return;
       setAiWeeklyReport(null);
       console.log('weekly_report_api_error', e instanceof AssistantApiError ? e.code : e);
-      if (e instanceof AssistantApiError) {
-        if (e.code === 'QUOTA') {
-          notifyAiQuotaExhausted();
-          refreshAssistantQuotaFromLocal();
-          setWeeklyErr(null);
-        } else if (e.code === 'RATE') setWeeklyErr(text[lang].aiErrRate);
-        else if (e.code === 'NO_API_KEY') setWeeklyErr(aiStatusHint(lang, 'key'));
-        else setWeeklyErr(tr.weeklyFailed);
+      if (e instanceof AssistantApiError && e.code === 'QUOTA') {
+        notifyAiQuotaExhausted();
+        refreshAssistantQuotaFromLocal();
+        setWeeklyErr(null);
       } else {
-        setWeeklyErr(tr.weeklyFailed);
+        setWeeklyErr(mapAssistantApiErrorToUserMessage(lang, e));
       }
     } finally {
       setAiWeeklyLoading(false);
@@ -2460,7 +2528,7 @@ export default function App() {
     lang,
     text,
     assistantApiReady,
-    assistantHealthReachable,
+    assistantHealthFailure,
     aiClientId,
     assistantQuota,
     notifyAiQuotaExhausted,
@@ -2498,8 +2566,10 @@ export default function App() {
       mergedCats: Cat[],
       accessibleCloudCatIds: string[],
       sb: NonNullable<typeof supabaseAuth.supabase>,
-      userId: string
+      userId: string,
+      options?: { silent?: boolean }
     ) => {
+      cloudSyncSilentRef.current = options?.silent === true;
       const ownerCheck = assertStorageOwnerMatches(userId);
       if (!ownerCheck.ok) {
         setStorageOwnerBlocked(true);
@@ -2524,23 +2594,31 @@ export default function App() {
       const usageDate = todayKey();
       const pull = await pullCloudDataIntoLocal(sb, userId, cloudIds, usageDate);
       if (runId !== cloudSyncRunRef.current) return;
-      const pushErrs = await pushLocalDataToCloud(sb, userId, cloudIds, loadReminders(), usageDate);
+      const pushIssues = await pushLocalDataToCloud(sb, userId, cloudIds, loadReminders(), usageDate);
       if (runId !== cloudSyncRunRef.current) return;
       setReminders(loadReminders());
       setAppPlan(getAiPlan());
       setAssistantQuota((prev) => applyLocalAssistantQuota(getAiPlan(), aiClientId, usageDate, prev));
-      const errs = [...pull.errors, ...pushErrs].filter(Boolean);
-      if (errs.length > 0) {
+      const allIssues = [...pull.issues, ...pushIssues];
+      logSyncIssueBatch(allIssues, options?.silent ? 'full sync (retry)' : 'full sync');
+      const critical = allIssues.filter((i) => i.severity === 'critical');
+      const total =
+        pull.dailyDates +
+        pull.weights +
+        pull.months +
+        pull.photoDates +
+        pull.weeklyReports +
+        pull.reminders;
+      if (critical.length > 0) {
         setCloudSyncPhase('failed');
-        setCloudSyncError(errs.slice(0, 2).join(' · '));
+        setCloudSyncError(formatIssuesForUi(critical));
       } else {
-        const total =
-          pull.dailyDates +
-          pull.weights +
-          pull.months +
-          pull.photoDates +
-          pull.weeklyReports +
-          pull.reminders;
+        if (allIssues.length > 0) {
+          console.warn('[cloud-sync] completed with non-critical issues only', {
+            count: allIssues.length,
+            tables: [...new Set(allIssues.map((i) => i.table))],
+          });
+        }
         setCloudSyncPhase(total > 0 ? 'ready' : 'empty');
         setCloudSyncError(null);
       }
@@ -2579,7 +2657,7 @@ export default function App() {
   );
 
   const tryAddReminder = useCallback(
-    (r: Reminder) => {
+    async (r: Reminder) => {
       if (reminders.length >= reminderLimit) {
         if (appPlan === 'free') {
           openPremium('reminders');
@@ -2588,13 +2666,27 @@ export default function App() {
         }
         return false;
       }
+      if (getNotificationSupport() && !(await isNotificationGrantedAsync())) {
+        const next = await promptNotificationPermissionForReminder(lang);
+        setNotificationPerm(next);
+      }
       setReminderLimitHint(null);
       persistReminders([r, ...reminders]);
       trackEvent('reminder_created', { source: r.type });
       showToast(tr.toastReminderCreated, 'success');
       return true;
     },
-    [reminders, reminderLimit, appPlan, tr.remindersLimitReached, tr.toastReminderCreated, persistReminders, openPremium, showToast]
+    [
+      reminders,
+      reminderLimit,
+      appPlan,
+      tr.remindersLimitReached,
+      tr.toastReminderCreated,
+      persistReminders,
+      openPremium,
+      showToast,
+      lang,
+    ]
   );
 
   const updateReminder = useCallback(
@@ -2638,46 +2730,39 @@ export default function App() {
     void syncPetCareLocalNotifications(reminders, catNameById, lang);
   }, [petsBootReady, reminders, catNameById, lang]);
 
-  useEffect(() => {
-    if (page !== 'reminders' || !isPetCareNativeLocalNotificationsAvailable()) return;
-    void getPetCareNotificationPermission(true).then((native) => {
-      setNotificationPerm(
-        native === 'granted'
-          ? 'granted'
-          : native === 'denied'
-            ? 'denied'
-            : native === 'prompt'
-              ? 'default'
-              : 'unsupported'
-      );
-    });
-  }, [page]);
+  const refreshNotificationPerm = useCallback(() => {
+    return refreshNotificationPermission().then(setNotificationPerm);
+  }, []);
 
   useEffect(() => {
-    const syncPerm = () => {
-      if (isPetCareNativeLocalNotificationsAvailable()) {
-        void getPetCareNotificationPermission().then((native) => {
-          setNotificationPerm(
-            native === 'granted'
-              ? 'granted'
-              : native === 'denied'
-                ? 'denied'
-                : native === 'prompt'
-                  ? 'default'
-                  : 'unsupported'
-          );
-        });
-        return;
-      }
-      void getNotificationPermissionAsync().then(setNotificationPerm);
+    void refreshNotificationPerm();
+  }, [refreshNotificationPerm]);
+
+  useEffect(() => {
+    if (page !== 'reminders') return;
+    void refreshNotificationPerm();
+  }, [page, refreshNotificationPerm]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshNotificationPerm();
     };
-    syncPerm();
-    const onVis = () => {
-      if (document.visibilityState === 'visible') syncPerm();
+    document.addEventListener('visibilitychange', onVisible);
+
+    let appStateListener: { remove: () => Promise<void> } | null = null;
+    if (isPetCareNativeLocalNotificationsAvailable()) {
+      void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) void refreshNotificationPerm();
+      }).then((handle) => {
+        appStateListener = handle;
+      });
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      void appStateListener?.remove();
     };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
+  }, [refreshNotificationPerm]);
 
   useEffect(() => {
     const onNativeAuthError = (event: Event) => {
@@ -2690,10 +2775,23 @@ export default function App() {
 
   useEffect(() => {
     if (!supabaseAuth.authReady) return;
-    void syncPetCareIapOnLaunch().then((status) => {
-      if (status) setAppPlan(status);
+    const uid = supabaseAuth.user?.id;
+    if (!uid) {
+      console.log('[subscription] no user — UI plan free');
+      setAppPlan('free');
+      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
+      return;
+    }
+    const localPlan = getSubscriptionStatus(uid);
+    console.log('[subscription] user session', { userId: uid.slice(0, 8), localPlan });
+    setAppPlan(localPlan);
+    setAssistantQuota((prev) => applyLocalAssistantQuota(localPlan, aiClientId, today, prev));
+    void syncPetCareIapForUser(uid).then((plan) => {
+      console.log('[subscription] final UI plan', plan);
+      setAppPlan(plan);
+      setAssistantQuota((prev) => applyLocalAssistantQuota(plan, aiClientId, today, prev));
     });
-  }, [supabaseAuth.authReady]);
+  }, [supabaseAuth.authReady, supabaseAuth.user?.id, aiClientId, today, applyLocalAssistantQuota]);
 
   useEffect(() => {
     safeSetItem(LANG_KEY, lang);
@@ -2735,6 +2833,8 @@ export default function App() {
       setCatsCloudBusy(true);
       setCatsCloudErr(null);
       const uid = supabaseAuth.user!.id;
+      const preferredCatId =
+        safeGetItem(selectedCatStorageKey(uid)) || selectedCatId;
       setActiveStorageUser(uid);
       const prep = prepareStorageForUser(uid);
       if (!prep.ok) {
@@ -2746,35 +2846,22 @@ export default function App() {
         return;
       }
       setStorageOwnerBlocked(false);
-      let localCats = normalizeAllCats(loadRawCatsFromStorage(uid), uid);
-      let migratedIdMap: Record<string, string> = {};
-      const offline = localCats.filter((c) => !isCloudCatId(c.id));
-      if (offline.length > 0) {
-        const mig = await migrateOfflineCatsToCloud(sb, uid, localCats as unknown as AppCat[]);
-        if (mig.errors.some((e) => e.includes('storage_owner_mismatch'))) {
-          setStorageOwnerBlocked(true);
-          setCloudSyncPhase('failed');
-          setCloudSyncError(tr.storageOwnerMismatch);
-          setCatsCloudBusy(false);
-          setPetsBootReady(true);
-          return;
-        }
-        if (mig.errors.length > 0) console.warn('[offline cat migrate]', mig.errors.join('; '));
-        migratedIdMap = mig.idMap;
-        localCats = normalizeAllCats(
-          mig.cats.map((c) => normalizeCat(c, uid)).filter(Boolean) as Cat[],
-          uid
-        );
-        safeSetItem(catsStorageKey(uid), JSON.stringify(localCats));
-      }
-      const { data: cloudList, error } = await fetchCatsForUser(sb);
-      if (cancelled) return;
-      if (error) {
-        setCatsCloudErr(error.message);
+      let localCats = normalizeAllCats(loadRawCatsFromStorage(uid), uid, {
+        injectDefaultIfEmpty: false,
+      });
+      const reconcile = await reconcileCloudPetsForUser(sb, uid, localCats as unknown as AppCat[], preferredCatId);
+      if (reconcile.errors.some((e) => e.includes('storage_owner_mismatch'))) {
+        setStorageOwnerBlocked(true);
+        setCloudSyncPhase('failed');
+        setCloudSyncError(tr.storageOwnerMismatch);
         setCatsCloudBusy(false);
         setPetsBootReady(true);
         return;
       }
+      if (reconcile.errors.length > 0) console.warn('[pets reconcile]', reconcile.errors.join('; '));
+      const migratedIdMap = reconcile.idMap;
+      if (cancelled) return;
+      const cloudList = reconcile.cloudList;
       const cloudIdSet = new Set(cloudList.map((c) => c.id));
       const localFiltered = localCats.filter((c) => !isCloudCatId(c.id) || cloudIdSet.has(c.id));
       const merged = mergeAndNormalizeCats(cloudList, localFiltered, uid);
@@ -2782,7 +2869,7 @@ export default function App() {
       if (!cancelled) setCatRolesMap(roles);
       setCloudSyncPhase('loading');
       const activeMerged = merged.filter((c) => !c.isArchived);
-      const remapped = migratedIdMap[selectedCatId] ?? selectedCatId;
+      const remapped = migratedIdMap[preferredCatId] ?? preferredCatId;
       const nextCatId = activeMerged.some((c) => c.id === remapped)
         ? remapped
         : activeMerged[0]?.id ?? merged[0]?.id ?? remapped;
@@ -2807,20 +2894,31 @@ export default function App() {
     runFullCloudSync,
     reloadSelectedCatFromLocal,
     applyCatsState,
-    selectedCatId,
   ]);
 
-  const retryCloudSync = useCallback(() => {
-    const sb = supabaseAuth.supabase;
-    const uid = supabaseAuth.user?.id;
-    if (!sb || !uid) return;
-    const accessibleIds = cats.filter((c) => isCloudCatId(c.id)).map((c) => c.id);
-    void runFullCloudSync(cats, accessibleIds, sb, uid).then(() => reloadSelectedCatFromLocal(selectedCatId));
-  }, [cats, supabaseAuth.supabase, supabaseAuth.user?.id, runFullCloudSync, reloadSelectedCatFromLocal, selectedCatId]);
+  const retryCloudSync = useCallback(
+    (options?: { silent?: boolean }) => {
+      const sb = supabaseAuth.supabase;
+      const uid = supabaseAuth.user?.id;
+      if (!sb || !uid) return;
+      const accessibleIds = cats.filter((c) => isCloudCatId(c.id)).map((c) => c.id);
+      void runFullCloudSync(cats, accessibleIds, sb, uid, options).then(() =>
+        reloadSelectedCatFromLocal(selectedCatId)
+      );
+    },
+    [cats, supabaseAuth.supabase, supabaseAuth.user?.id, runFullCloudSync, reloadSelectedCatFromLocal, selectedCatId]
+  );
 
   useEffect(() => {
-    if (!isOnline || cloudSyncPhase !== 'failed' || !supabaseAuth.user?.id || !supabaseAuth.supabase) return;
-    const handle = window.setTimeout(() => retryCloudSync(), 8000);
+    if (!isOnline || cloudSyncPhase !== 'failed' || !supabaseAuth.user?.id || !supabaseAuth.supabase) {
+      return;
+    }
+    if (cloudAutoRetryCountRef.current >= 3) return;
+    const delayMs = 8000 * 2 ** cloudAutoRetryCountRef.current;
+    const handle = window.setTimeout(() => {
+      cloudAutoRetryCountRef.current += 1;
+      retryCloudSync({ silent: true });
+    }, delayMs);
     return () => window.clearTimeout(handle);
   }, [isOnline, cloudSyncPhase, supabaseAuth.user?.id, supabaseAuth.supabase, retryCloudSync]);
 
@@ -3142,19 +3240,103 @@ export default function App() {
     const { error } = await supabaseAuth.signOut();
     if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
     else {
+      clearSubscriptionStateOnSignOut(signingOutUid);
       clearAllLocalDataOnSignOut(signingOutUid);
       setStorageOwnerBlocked(false);
       setCloudSyncPhase('idle');
       setCloudSyncError(null);
+      syncFailureToastShownRef.current = false;
+      cloudAutoRetryCountRef.current = 0;
+      cloudSyncSilentRef.current = false;
       setReminders([]);
       setAiCareBundle(null);
       setAiWeeklyReport(null);
       setOpenAiErr(null);
       setWeeklyErr(null);
+      setAppPlan('free');
+      setPremiumSheetOpen(false);
+      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
+      console.log('[subscription] signOut complete — UI plan free');
       applyCatsState(normalizeAndPersistCats(''));
       setAuthMessage(text[lang].authSignedOutOk);
     }
-  }, [supabaseAuth, lang, applyCatsState, text]);
+  }, [supabaseAuth, lang, applyCatsState, text, aiClientId, today, applyLocalAssistantQuota]);
+
+  const confirmDeleteAccount = useCallback(async () => {
+    if (deleteAccountBusy) return;
+    if (!supabaseAuth.supabase || !supabaseAuth.user) return;
+
+    setDeleteAccountBusy(true);
+    setAuthFormError(null);
+    setAuthMessage(null);
+
+    const uid = supabaseAuth.user.id;
+    try {
+      const { data } = await supabaseAuth.supabase.auth.getSession();
+      const token = data.session?.access_token?.trim() || '';
+      if (!token) throw new Error(lang === 'zh' ? '登入狀態已失效，請重新登入後再試。' : 'Session expired. Please sign in again.');
+
+      const res = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const textBody = await res.text();
+      let json: Record<string, unknown> = {};
+      try {
+        json = JSON.parse(textBody) as Record<string, unknown>;
+      } catch {
+        // ignore
+      }
+      if (!res.ok) {
+        const msg = typeof json.error === 'string' ? json.error : textBody.trim() || res.statusText || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+
+      // Local cleanup even if signOut fails (user may already be deleted).
+      clearSubscriptionStateOnSignOut(uid);
+      clearAllLocalDataOnSignOut(uid);
+      setStorageOwnerBlocked(false);
+      setCloudSyncPhase('idle');
+      setCloudSyncError(null);
+      syncFailureToastShownRef.current = false;
+      cloudAutoRetryCountRef.current = 0;
+      cloudSyncSilentRef.current = false;
+      setReminders([]);
+      setAiCareBundle(null);
+      setAiWeeklyReport(null);
+      setOpenAiErr(null);
+      setWeeklyErr(null);
+      setAppPlan('free');
+      setPremiumSheetOpen(false);
+      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
+      applyCatsState(normalizeAndPersistCats(''));
+
+      await supabaseAuth.signOut();
+
+      showToast(text[lang].deleteAccountOk, 'success');
+      setAuthMessage(text[lang].deleteAccountOk);
+      setDeleteAccountOpen(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(`${text[lang].deleteAccountFail}${msg}`, 'error');
+      setAuthFormError(`${text[lang].deleteAccountFail}${msg}`);
+    } finally {
+      setDeleteAccountBusy(false);
+    }
+  }, [
+    deleteAccountBusy,
+    supabaseAuth.supabase,
+    supabaseAuth.user,
+    supabaseAuth,
+    lang,
+    showToast,
+    text,
+    aiClientId,
+    today,
+    applyLocalAssistantQuota,
+    applyCatsState,
+  ]);
 
   const handleAuthSubmit = useCallback(async () => {
     setAuthFormError(null);
@@ -3209,7 +3391,7 @@ export default function App() {
       setAuthMessage(lang === 'zh' ? '登入成功' : 'Signed in');
       showToast(lang === 'zh' ? '登入成功' : 'Signed in', 'success');
     }
-  }, [supabaseAuth.supabase, lang, tr.authAppleComingSoon, showToast]);
+  }, [supabaseAuth.supabase, lang, showToast]);
 
   const handleGoogleSignInClick = useCallback(async () => {
     setAppleSignInNotice(null);
@@ -3667,7 +3849,7 @@ export default function App() {
           <p className="mb-3 text-center text-[13px] leading-relaxed text-stone-600">{tr.emptyPhotosTitle}</p>
         ) : null}
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
           {photos.map((photo, index) => (
             <div key={`${keyName}-${index}`} className="overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm">
               <button type="button" onClick={() => setSelectedPhoto(photo)} className="block aspect-square w-full overflow-hidden">
@@ -4476,7 +4658,7 @@ export default function App() {
   const renderVetPage = () => (
     <VetReportPage
       lang={lang}
-      appPlan={appPlan}
+      appPlan={effectiveAppPlan}
       cats={activeCats}
       selectedCatId={selectedCatId}
       onSelectCatId={selectCat}
@@ -4737,7 +4919,11 @@ export default function App() {
                   {tr.aiChecking}
                 </span>
               ) : (
-                <span>{assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')}</span>
+                <span>
+                  {assistantHealthFailure
+                    ? getAssistantHealthFailureUserHint(lang, assistantHealthFailure)
+                    : tr.aiNeedServerEnvProd}
+                </span>
               )}
             </p>
           ) : null}
@@ -4855,7 +5041,9 @@ export default function App() {
                     </span>
                   ) : (
                     <span>
-                      {assistantHealthReachable === false ? aiStatusHint(lang, 'off') : aiStatusHint(lang, 'key')}
+                      {assistantHealthFailure
+                        ? getAssistantHealthFailureUserHint(lang, assistantHealthFailure)
+                        : tr.aiNeedServerEnvProd}
                     </span>
                   )}
                 </p>
@@ -5326,7 +5514,7 @@ export default function App() {
         title: tr.morePro,
         desc: tr.moreProDesc,
         accent: true,
-        onClick: () => (appPlan === 'free' ? openPremium('general') : setPage('settings')),
+        onClick: () => (effectiveAppPlan === 'free' ? openPremium('general') : setPage('settings')),
       },
       {
         icon: Sparkles,
@@ -5430,9 +5618,10 @@ export default function App() {
   };
 
   const renderRemindersPage = () => {
+    const showDevTools = import.meta.env.DEV;
     const perm = notificationPerm;
     const canNotify = perm === 'granted';
-    const notifyStatus = getNotificationServiceStatus();
+    const notifyStatus = showDevTools ? getNotificationServiceStatus() : null;
     const todayKey = getLocalDateKey();
     const enabledReminders = reminders.filter((r) => r.enabled);
     const todayReminders = enabledReminders
@@ -5472,102 +5661,121 @@ export default function App() {
           </section>
         ) : null}
 
-        <section className="mb-4 rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-bold text-stone-900">{tr.remindersNotifySectionTitle}</h2>
+        <section className="mb-3 rounded-xl border border-stone-200/70 bg-stone-50/90 px-3 py-2 shadow-sm">
           {!getNotificationSupport() ? (
-            <p className="mt-2 text-sm text-stone-600">{tr.remindersNotifyUnsupported}</p>
+            <p className="text-[13px] leading-snug text-stone-600">{tr.remindersNotifyUnsupported}</p>
           ) : (
-            <dl className="mt-3 space-y-2.5 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-stone-500">{tr.remindersNotifyStatusLabel}</dt>
-                <dd className="font-semibold text-stone-900">{permissionStatusLabel(perm, lang)}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-stone-500">{tr.remindersNotifyAllowedLabel}</dt>
-                <dd
-                  className={`font-semibold ${canNotify ? 'text-emerald-700' : 'text-amber-800'}`}
-                >
-                  {canNotify ? tr.remindersNotifyAllowedYes : tr.remindersNotifyAllowedNo}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-stone-500">{tr.remindersNotifyChannelLabel}</dt>
-                <dd className="text-right font-medium text-stone-800">
-                  {notifyStatus.activeChannel === 'remote'
-                    ? 'Remote'
-                    : tr.remindersNotifyChannelLocal}
-                </dd>
-              </div>
-            </dl>
-          )}
-          {canNotify ? (
-            <p className="mt-3 text-sm font-medium text-emerald-700">{tr.remindersNotifyGranted}</p>
-          ) : getNotificationSupport() ? (
             <>
-              {perm === 'denied' ? (
-                <p className="mt-3 text-sm font-medium text-amber-800">{tr.remindersNotifyDenied}</p>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => {
-                  const apply = (next: NotificationPermissionState) => {
-                    setNotificationPerm(next);
-                    if (next === 'granted' && isPetCareNativeLocalNotificationsAvailable()) {
-                      void syncPetCareLocalNotifications(reminders, catNameById, lang);
-                    }
-                  };
-                  if (isPetCareNativeLocalNotificationsAvailable()) {
-                    void requestPetCareNotificationPermission().then((native) => {
-                      apply(
-                        native === 'granted'
-                          ? 'granted'
-                          : native === 'denied'
-                            ? 'denied'
-                            : native === 'prompt'
-                              ? 'default'
-                              : 'unsupported'
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px] ${
+                    canNotify
+                      ? 'bg-emerald-500/15 ring-1 ring-emerald-500/25'
+                      : perm === 'denied'
+                        ? 'bg-amber-500/10 ring-1 ring-amber-500/20'
+                        : 'bg-white ring-1 ring-stone-200/90'
+                  }`}
+                  aria-hidden
+                >
+                  🔔
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-semibold leading-snug text-stone-900">
+                    {canNotify
+                      ? tr.remindersNotifyStatusOn
+                      : perm === 'denied'
+                        ? tr.remindersNotifyStatusDenied
+                        : tr.remindersNotifyStatusOff}
+                  </p>
+                  {canNotify ? (
+                    <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{tr.remindersNotifyOnHint}</p>
+                  ) : perm === 'denied' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isPetCareNativeLocalNotificationsAvailable()) {
+                          openPetCareNotificationSettings();
+                          return;
+                        }
+                        void requestNotificationPermission().then(setNotificationPerm);
+                      }}
+                      className="mt-0.5 text-left text-[12px] font-medium text-sky-600 active:opacity-70"
+                    >
+                      {tr.remindersNotifyOpenSettings}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const apply = (next: NotificationPermissionState) => {
+                          setNotificationPerm(next);
+                          if (next === 'granted' && isPetCareNativeLocalNotificationsAvailable()) {
+                            void syncPetCareLocalNotifications(reminders, catNameById, lang);
+                          }
+                        };
+                        if (isPetCareNativeLocalNotificationsAvailable()) {
+                          void requestPetCareNotificationPermission().then((native) => {
+                            apply(
+                              native === 'granted'
+                                ? 'granted'
+                                : native === 'denied'
+                                  ? 'denied'
+                                  : native === 'prompt'
+                                    ? 'default'
+                                    : 'unsupported'
+                            );
+                          });
+                          return;
+                        }
+                        void requestNotificationPermission().then(apply);
+                      }}
+                      className="mt-0.5 text-left text-[12px] font-medium text-sky-600 active:opacity-70"
+                    >
+                      {tr.remindersNotifyEnable}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {showDevTools ? (
+                <div className="mt-2 border-t border-stone-200/80 pt-2">
+                  <p className="text-[10px] text-stone-400">
+                    {notifyStatus?.activeChannel === 'remote'
+                      ? 'Remote'
+                      : tr.remindersNotifyChannelLocal}
+                    · {permissionStatusLabel(perm, lang)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isPetCareNativeLocalNotificationsAvailable()) {
+                        void schedulePetCareTestNotificationInOneMinute(lang).then((res) => {
+                          setNotificationPerm(
+                            res.permission === 'granted'
+                              ? 'granted'
+                              : res.permission === 'denied'
+                                ? 'denied'
+                                : res.permission === 'prompt'
+                                  ? 'default'
+                                  : 'unsupported'
+                          );
+                          showToast(res.message, res.ok ? 'success' : 'error');
+                        });
+                        return;
+                      }
+                      const ok = sendTestNotification(lang);
+                      showToast(
+                        ok ? tr.remindersNotifyTestOk : tr.remindersNotifyTestFail,
+                        ok ? 'success' : 'error'
                       );
-                    });
-                    return;
-                  }
-                  void requestNotificationPermission().then(apply);
-                }}
-                className="mt-3 w-full rounded-xl bg-orange-400 py-2.5 text-sm font-bold text-white"
-              >
-                {tr.remindersNotifyEnable}
-              </button>
+                    }}
+                    className="mt-1 text-[11px] font-medium text-orange-700"
+                  >
+                    {tr.remindersNotifyTest}
+                  </button>
+                </div>
+              ) : null}
             </>
-          ) : null}
-          <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-            {tr.remindersNotifyChannelRemoteHint}
-          </p>
-          {getNotificationSupport() ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (isPetCareNativeLocalNotificationsAvailable()) {
-                  void schedulePetCareTestNotificationInOneMinute(lang).then((res) => {
-                    setNotificationPerm(
-                      res.permission === 'granted'
-                        ? 'granted'
-                        : res.permission === 'denied'
-                          ? 'denied'
-                          : res.permission === 'prompt'
-                            ? 'default'
-                            : 'unsupported'
-                    );
-                    showToast(res.message, res.ok ? 'success' : 'error');
-                  });
-                  return;
-                }
-                const ok = sendTestNotification(lang);
-                showToast(ok ? tr.remindersNotifyTestOk : tr.remindersNotifyTestFail, ok ? 'success' : 'error');
-              }}
-              className="mt-3 w-full rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-sm font-bold text-orange-800"
-            >
-              {tr.remindersNotifyTest}
-            </button>
-          ) : null}
+          )}
         </section>
 
         <section className="mb-4 rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50/90 to-white p-4 shadow-sm">
@@ -5674,7 +5882,7 @@ export default function App() {
                   key={`${tpl.kind}-${tpl.titleZh}`}
                   type="button"
                   onClick={() => {
-                    tryAddReminder(createReminderFromTemplate(tpl, customReminderCatId, lang));
+                    void tryAddReminder(createReminderFromTemplate(tpl, customReminderCatId, lang));
                   }}
                   className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-[11px] font-semibold text-orange-800 hover:bg-orange-100"
                 >
@@ -5762,8 +5970,8 @@ export default function App() {
             onClick={() => {
               const title = customReminderTitle.trim();
               if (!title) return;
-              if (
-                tryAddReminder(
+              void (async () => {
+                const added = await tryAddReminder(
                   createCustomReminder(customReminderCatId, {
                     type: 'custom',
                     title,
@@ -5772,10 +5980,9 @@ export default function App() {
                     repeatInterval: customReminderInterval,
                     dueDate: customReminderRepeat === 'once' ? customReminderDueDate : null,
                   })
-                )
-              ) {
-                setCustomReminderTitle('');
-              }
+                );
+                if (added) setCustomReminderTitle('');
+              })();
             }}
             className="w-full rounded-xl bg-orange-400 py-3 text-sm font-bold text-white shadow-sm"
           >
@@ -6022,16 +6229,16 @@ export default function App() {
 
       <section className="mb-4">
         {(() => {
-          const q = buildLocalAiQuota(appPlan, aiClientId, today);
+          const q = buildLocalAiQuota(effectiveAppPlan, aiClientId, today);
           return (
             <AiDailyQuotaCard
               lang={lang}
-              plan={appPlan}
+              plan={effectiveAppPlan}
               used={q.dailyUsed}
               limit={q.dailyLimit}
               title={tr.settingsAiQuotaTitle}
               upgradeLabel={tr.settingsSwitchPro}
-              onUpgrade={q.dailyRemaining <= 0 && appPlan === 'free' ? () => openPremium('ai') : undefined}
+              onUpgrade={q.dailyRemaining <= 0 && effectiveAppPlan === 'free' ? () => openPremium('ai') : undefined}
             />
           );
         })()}
@@ -6040,9 +6247,25 @@ export default function App() {
 
       {renderAuthAccountSection()}
 
+      {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
+        <section className="mb-4 rounded-2xl border border-red-100 bg-white p-4 shadow-sm">
+          <h2 className="mb-1 text-base font-bold text-stone-900">{tr.accountDangerTitle}</h2>
+          <p className="mb-3 text-[12px] leading-snug text-stone-500">{tr.deleteAccountDesc}</p>
+          <button
+            type="button"
+            disabled={deleteAccountBusy}
+            onClick={() => setDeleteAccountOpen(true)}
+            className="w-full rounded-xl bg-red-600 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
+          >
+            {deleteAccountBusy ? tr.deleteAccountBusy : tr.deleteAccount}
+          </button>
+        </section>
+      ) : null}
+
       <ProSubscriptionPanel
         lang={lang}
-        status={appPlan}
+        status={effectiveAppPlan}
+        isLoggedIn={Boolean(supabaseAuth.user)}
         busy={subscriptionBusy}
         onUpgrade={(period) => void handlePurchasePro(period)}
         onDowngrade={() => persistAppPlan('free')}
@@ -6428,10 +6651,10 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800">
+    <div className="min-h-screen bg-orange-50 px-4 py-6 text-stone-800 md:px-6">
       {showOnboarding ? <Onboarding lang={lang} onComplete={completeOnboarding} /> : null}
       {!petsBootReady || (supabaseAuth.configured && !supabaseAuth.authReady) ? (
-        <div className="mx-auto max-w-md space-y-5 px-2 py-14 animate-fade-in">
+        <div className="mx-auto w-full max-w-[900px] space-y-5 px-2 py-14 animate-fade-in">
           <p className="text-center text-[14px] font-semibold text-stone-600">
             {!petsBootReady ? tr.bootstrapPreparing : tr.authBootTitle}
           </p>
@@ -6442,7 +6665,7 @@ export default function App() {
         </div>
       ) : (
         <>
-          <div className="mx-auto max-w-md pb-24">
+          <div className="mx-auto w-full max-w-[900px] pb-[max(6rem,env(safe-area-inset-bottom))]">
         {bootstrap.bootstrapStatus === 'error' ? (
           <div
             className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-950"
@@ -6467,7 +6690,7 @@ export default function App() {
             message={tr.cloudSyncFailed}
             syncError={cloudSyncError}
             retryLabel={cloudSyncPhase === 'syncing' ? tr.authProcessing : tr.cloudSyncRetry}
-            onRetry={() => void retryCloudSync()}
+            onRetry={() => retryCloudSync()}
           />
         ) : cloudSyncPhase === 'empty' && supabaseAuth.user?.id ? (
           <div
@@ -6581,7 +6804,7 @@ export default function App() {
           aria-modal="true"
           aria-labelledby="permanent-delete-title"
         >
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl sm:max-w-md">
             <h2 id="permanent-delete-title" className="text-base font-bold text-stone-900">
               {tr.permanentDeleteTitle}
             </h2>
@@ -6620,7 +6843,7 @@ export default function App() {
           onClick={() => setProfileFieldPicker(null)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl sm:max-w-md"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="profile-picker-title" className="text-base font-bold text-stone-900">
@@ -6688,7 +6911,7 @@ export default function App() {
 
       {selectedPhoto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="max-h-full max-w-full">
+          <div className="max-h-full w-full max-w-[900px]">
             <img src={selectedPhoto} alt="preview" className="max-h-[80vh] max-w-full rounded-3xl object-contain" />
             <button onClick={() => setSelectedPhoto(null)} className="mt-4 w-full rounded-2xl bg-white py-3 font-bold text-stone-800">
               {tr.close}
@@ -6696,6 +6919,46 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {deleteAccountOpen ? (
+        <div
+          className="fixed inset-0 z-[62] flex items-end justify-center bg-black/50 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-account-title"
+          onClick={() => (deleteAccountBusy ? null : setDeleteAccountOpen(false))}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl sm:max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="delete-account-title" className="text-base font-bold text-stone-900">
+              {tr.deleteAccountConfirmTitle}
+            </h2>
+            <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-stone-600">
+              {tr.deleteAccountConfirmBody}
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                disabled={deleteAccountBusy}
+                onClick={() => setDeleteAccountOpen(false)}
+                className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-sm font-bold text-stone-700 disabled:opacity-50"
+              >
+                {tr.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={deleteAccountBusy}
+                onClick={() => void confirmDeleteAccount()}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+              >
+                {deleteAccountBusy ? tr.deleteAccountBusy : tr.deleteAccount}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <PremiumUpsellSheet
         open={premiumSheetOpen}

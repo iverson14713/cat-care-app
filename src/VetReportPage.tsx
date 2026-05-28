@@ -10,6 +10,7 @@ import {
   type VetReportPayload,
   type VetReportSections,
 } from './vetReportData';
+import { WeightTrendChart, formatWeightChangeLabel } from './components/WeightTrendChart';
 import { generateVetReportAiSummary, VetReportApiError } from './vetReportAi';
 import { canExportVetPdf, maxVetReportDays } from './vetReportLimits';
 import { applySuccessfulAiUsage, buildLocalAiQuota, remainingAiUsage } from './aiClient';
@@ -24,6 +25,7 @@ type CatRow = {
   id: string;
   name: string;
   emoji: string;
+  petType?: 'cat' | 'dog';
   birthday?: string;
   gender?: string;
   breed?: string;
@@ -185,32 +187,6 @@ function calculateAgeText(
   return lang === 'zh' ? `約 ${years} ${yearsOld}` : `about ${years} ${yearsOld}`;
 }
 
-function WeightSparkline({ points }: { points: { date: string; weight: number }[] }) {
-  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
-  if (sorted.length < 2) return null;
-  const w = 300;
-  const h = 120;
-  const pad = 20;
-  const weights = sorted.map((p) => p.weight);
-  const min = Math.min(...weights);
-  const max = Math.max(...weights);
-  const range = max - min || 1;
-  const coords = sorted.map((p, i) => {
-    const x = pad + (i / (sorted.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((p.weight - min) / range) * (h - pad * 2);
-    return { x, y };
-  });
-  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x} ${c.y}`).join(' ');
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full rounded-2xl bg-stone-50/80">
-      <path d={path} fill="none" stroke="#fb923c" strokeWidth="3" strokeLinecap="round" />
-      {coords.map((c) => (
-        <circle key={c.x} cx={c.x} cy={c.y} r="4" fill="#fb923c" />
-      ))}
-    </svg>
-  );
-}
-
 function formatDisplayDate(date: string, lang: Lang): string {
   const [y, m, d] = date.split('-');
   if (lang === 'zh') return `${Number(m)}/${Number(d)}`;
@@ -316,13 +292,20 @@ export function VetReportPage({
     setAiLoading(true);
     setAiErr(null);
     try {
-      const ctx = buildVetReportContextText(report, sections, lang);
-      const { summary, quota } = await generateVetReportAiSummary(lang, ctx, {
-        clientId,
-        catId: selectedCat.id,
-        usageDate: today,
-        plan: appPlan,
+      const ctx = buildVetReportContextText(report, sections, lang, {
+        petType: selectedCat.petType ?? 'cat',
       });
+      const { summary, quota } = await generateVetReportAiSummary(
+        lang,
+        ctx,
+        {
+          clientId,
+          catId: selectedCat.id,
+          usageDate: today,
+          plan: appPlan,
+        },
+        { report, petType: selectedCat.petType ?? 'cat' }
+      );
       setAiSummary(summary);
       applySuccessfulAiUsage(appPlan, clientId, today, quota?.dailyUsed);
       onAiUsageChanged?.();
@@ -377,9 +360,7 @@ export function VetReportPage({
 
   const weightSpark = report?.weights.map((w) => ({ date: w.date, weight: w.weight })) ?? [];
   const latestW = report?.weights[0];
-  const oldestW = report?.weights[report.weights.length - 1];
-  const weightDelta =
-    latestW && oldestW && latestW.date !== oldestW.date ? latestW.weight - oldestW.weight : 0;
+  const weightChangeLabel = formatWeightChangeLabel(weightSpark, lang);
 
   const showFreeLock = false;
 
@@ -591,14 +572,10 @@ export function VetReportPage({
                       </div>
                       <div className="rounded-xl bg-stone-50 p-3">
                         <p className="text-[10px] font-bold text-stone-500">{t.weightChange}</p>
-                        <p className="text-lg font-bold text-stone-800">
-                          {report.weights.length >= 2
-                            ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(2)} kg`
-                            : '—'}
-                        </p>
+                        <p className="text-lg font-bold text-stone-800">{weightChangeLabel}</p>
                       </div>
                     </div>
-                    <WeightSparkline points={weightSpark} />
+                    <WeightTrendChart points={weightSpark} lang={lang} />
                   </>
                 ) : (
                   <p className="text-sm text-stone-500">{t.noWeight}</p>

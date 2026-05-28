@@ -25,6 +25,7 @@ export function careBundleUserPrompt(lang, context) {
       `欄位說明：\n` +
       `- quickSummary：今日＋最近幾天（約 3～7 天）的**極短**照護快覽（繁體中文，**最多 4 行**；每行一句）。\n` +
       `- careReminders：**僅 1～3 點**照護提醒（條列，用 \\n 分隔；每點一行；非診斷、不開藥）。\n` +
+      `若紀錄中有拉肚子、嘔吐、食慾或體重變化等「結構化照護事件」，必須寫入 quickSummary／careReminders，禁止回「無法產生」。\n` +
       `禁止：完整週報、長篇趨勢分析、獸醫就診摘要、診斷、醫療建議、臆測未記載症狀。`
     );
   }
@@ -136,22 +137,30 @@ export function vetReportUserPrompt(lang, context) {
   if (lang === 'zh') {
     return (
       `${context}\n\n` +
-      `請依上述照護紀錄，輸出**僅一個 JSON 物件**（不要 markdown），必含三個鍵（皆為非空字串）：\n` +
+      `請依上述照護紀錄，輸出**僅一個 JSON 物件**（不要 markdown），必含三個鍵（皆為**完整段落**，繁體中文）：\n` +
       `"watchItems", "observeDirections", "vetHandoff"\n\n` +
-      `欄位說明：\n` +
-      `- watchItems：最近需注意事項（條列式，繁體中文，3～8 點）\n` +
-      `- observeDirections：建議在家觀察方向（非醫療處置，3～6 點）\n` +
-      `- vetHandoff：建議帶給獸醫溝通的重點（紀錄摘要式，3～8 點）\n` +
-      `嚴禁診斷、病因斷言、開藥、檢查處方、急診建議。僅整理紀錄與觀察。`
+      `【寫作要求】\n` +
+      `1. 不要流水帳、不要像 log；要寫成「照護觀察」完整句子。\n` +
+      `2. 若紀錄有嘔吐、軟便／腹瀉、食慾下降、精神差或異常備註，**watchItems 不可空白**，且不可寫「無法整理」。\n` +
+      `3. 體重變化若小於 0.1 kg，描述為「整體變化不大」，勿寫成明顯增減。\n` +
+      `4. 禁止：「9kg 減少至 9kg」、只有日期事件列表、debug 語氣。\n\n` +
+      `【格式範例（語氣參考，勿照抄）】\n` +
+      `watchItems：近期有嘔吐與軟便紀錄，雖然目前未見持續惡化，但建議持續觀察排便型態、食慾與活動力。若症狀持續超過 1～2 天，建議諮詢獸醫。\n` +
+      `observeDirections：可持續記錄每日進食量與排便情況。若再次出現嘔吐、腹瀉或精神不佳，建議進一步就醫評估。\n` +
+      `vetHandoff：5/18 曾嘔吐一次，5/19 有軟便紀錄。近期體重約落在 8.7～9 kg 間，整體變化不大。\n\n` +
+      `嚴禁診斷、病因斷言、開藥、檢查處方。僅整理紀錄與觀察。`
     );
   }
   return (
     `${context}\n\n` +
-    `From the records above, return **only one JSON object** (no markdown) with three non-empty string keys:\n` +
+    `From the records above, return **only one JSON object** (no markdown) with three string keys (full paragraphs in English):\n` +
     `"watchItems", "observeDirections", "vetHandoff"\n\n` +
-    `- watchItems: what to watch lately (bullet-style, 3–8 items)\n` +
-    `- observeDirections: home observation ideas only — not medical orders (3–6 items)\n` +
-    `- vetHandoff: factual points to tell the vet from logs (3–8 items)\n` +
-    `No diagnosis, no prescriptions, no medical advice.`
+    `Write as care observations, not a debug log. If vomiting, diarrhea, appetite, or energy issues appear in records, watchItems must be non-empty and must not say "could not summarize".\n` +
+    `If weight change is under 0.1 kg, describe as stable — not a major gain/loss.\n\n` +
+    `Example tone (do not copy verbatim):\n` +
+    `watchItems: Recent logs mention vomiting and soft stool. Keep watching appetite, energy, and stool; contact your vet if symptoms last more than 1–2 days.\n` +
+    `observeDirections: Log daily food intake and stool. Seek care for repeat vomiting, diarrhea, or low energy.\n` +
+    `vetHandoff: Vomiting on 5/18, soft stool on 5/19. Weight stayed roughly 8.7–9 kg with little change.\n\n` +
+    `No diagnosis, prescriptions, or medical advice.`
   );
 }

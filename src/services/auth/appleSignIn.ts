@@ -42,11 +42,21 @@ function isIosNative(): boolean {
   return isAuthNativeClient() && Capacitor.getPlatform() === 'ios';
 }
 
-/** Native ASAuthorization token aud is the app Bundle ID; Supabase Services ID OAuth uses com.wayne.petcare.auth. */
 function isAppleAudienceMismatchError(error: { message?: string } | null): boolean {
   const msg = error?.message?.toLowerCase() ?? '';
   return msg.includes('unacceptable audience') || msg.includes('audience in id_token');
 }
+
+/** Capacitor shows this when the native class is not in `packageClassList` / not loaded. */
+function isNativeApplePluginUnavailableError(e: unknown): boolean {
+  const err = e as Error & { code?: string };
+  const code = String(err?.code ?? '').toUpperCase();
+  if (code === 'UNIMPLEMENTED') return true;
+  const msg = (err?.message ?? String(e ?? '')).toLowerCase();
+  return msg.includes('not implemented') && msg.includes('plugin');
+}
+
+let appleSignInHandleInFlight = false;
 
 export async function signInWithAppleNative(
   supabase: SupabaseClient,
@@ -69,27 +79,18 @@ export async function signInWithAppleNative(
     });
 
     if (error) {
-      console.error('[auth] signInWithIdToken failed', {
-        message: error.message,
-        status: error.status,
-        code: error.code,
-        name: error.name,
-        hint:
-          'Native Apple tokens use aud=com.wayne.petcare (Bundle ID). Supabase Services ID OAuth needs com.wayne.petcare.auth — falling back to OAuth when applicable.',
-      });
+      authLog('apple.native.idTokenError', { message: error.message, code: error.code });
       if (isAppleAudienceMismatchError(error)) {
         return { error: new Error('apple_audience_mismatch') };
       }
       return { error: new Error(userError) };
     }
     if (!data?.session) {
-      console.error('[auth] signInWithIdToken returned no session', {
-        hasUser: Boolean(data?.user),
-      });
+      authLog('apple.native.noSession', { hasUser: Boolean(data?.user) });
       return { error: new Error(userError) };
     }
 
-    console.log('[auth] Apple native login success', data.session.user?.id);
+    authLog('apple.native.sessionOk', { userId: data.session.user?.id });
     await redirectAfterAuthSuccess(supabase);
     return { error: null, signedIn: true };
   } catch (e) {
@@ -97,10 +98,11 @@ export async function signInWithAppleNative(
     if (pluginErr?.code === 'CANCELED') {
       return { error: new Error('oauth_cancelled') };
     }
-    console.error('[auth] Apple native sign-in error', {
-      message: pluginErr?.message ?? String(e),
-      code: pluginErr?.code,
-    });
+    if (isNativeApplePluginUnavailableError(e)) {
+      authLog('apple.native.pluginUnavailable', { message: pluginErr?.message });
+      return { error: new Error('native_plugin_unavailable') };
+    }
+    authLog('apple.native.signInError', { message: pluginErr?.message ?? String(e), code: pluginErr?.code });
     return { error: new Error(userError) };
   }
 }
@@ -139,6 +141,15 @@ export async function signInWithAppleOAuth(
   return { error: null };
 }
 
+async function runAppleOAuthFallbackOnce(
+  supabase: SupabaseClient,
+  lang: 'zh' | 'en',
+  reason: string
+): Promise<{ error: Error | null }> {
+  authLog('apple.fallback.oauth', { reason });
+  return signInWithAppleOAuth(supabase, lang);
+}
+
 export async function signInWithApple(
   supabase: SupabaseClient,
   lang: 'zh' | 'en' = 'zh'
@@ -147,11 +158,13 @@ export async function signInWithApple(
     const native = await signInWithAppleNative(supabase, lang);
     if (!native.error) return native;
     if (native.error.message === 'oauth_cancelled') return native;
+
     if (native.error.message === 'apple_audience_mismatch') {
-      authLog('apple.native.fallback_oauth', {
-        reason: 'Supabase expects com.wayne.petcare.auth; native token aud is com.wayne.petcare',
-      });
-      const oauth = await signInWithAppleOAuth(supabase, lang);
+      const oauth = await runAppleOAuthFallbackOnce(supabase, lang, 'audience_mismatch');
+      return { error: oauth.error };
+    }
+    if (native.error.message === 'native_plugin_unavailable') {
+      const oauth = await runAppleOAuthFallbackOnce(supabase, lang, 'native_plugin_unavailable');
       return { error: oauth.error };
     }
     return native;
@@ -166,31 +179,37 @@ export async function handleAppleSignIn(
 ): Promise<AppleSignInResult> {
   const userError = getAppleSignInUserErrorMessage(lang);
 
-  if (!supabase) {
-    return { ok: false, signedIn: false, message: userError, code: 'failed' };
+  if (appleSignInHandleInFlight) {
+    return { ok: true, signedIn: false, message: 'cancelled' };
   }
+  appleSignInHandleInFlight = true;
 
-  if (isAppleSignInWebComingSoon()) {
-    return { ok: true, signedIn: false, message: 'coming_soon' };
-  }
+  try {
+    if (!supabase) {
+      return { ok: false, signedIn: false, message: userError, code: 'failed' };
+    }
 
-  const { error, signedIn } = await signInWithApple(supabase, lang);
-  if (error) {
-    if (error.message === 'web_not_supported' || error.message === 'apple_not_enabled') {
+    if (isAppleSignInWebComingSoon()) {
       return { ok: true, signedIn: false, message: 'coming_soon' };
     }
-    if (error.message === 'oauth_cancelled') {
-      return { ok: true, signedIn: false, message: 'cancelled' };
-    }
-    if (error.message === 'apple_audience_mismatch') {
-      return { ok: true, signedIn: false, message: 'redirecting' };
-    }
-    return { ok: false, signedIn: false, message: userError, code: 'failed' };
-  }
 
-  if (signedIn) {
-    return { ok: true, signedIn: true, message: 'redirecting' };
-  }
+    const { error, signedIn } = await signInWithApple(supabase, lang);
+    if (error) {
+      if (error.message === 'web_not_supported' || error.message === 'apple_not_enabled') {
+        return { ok: true, signedIn: false, message: 'coming_soon' };
+      }
+      if (error.message === 'oauth_cancelled') {
+        return { ok: true, signedIn: false, message: 'cancelled' };
+      }
+      return { ok: false, signedIn: false, message: userError, code: 'failed' };
+    }
 
-  return { ok: true, signedIn: false, message: 'redirecting' };
+    if (signedIn) {
+      return { ok: true, signedIn: true, message: 'redirecting' };
+    }
+
+    return { ok: true, signedIn: false, message: 'redirecting' };
+  } finally {
+    appleSignInHandleInFlight = false;
+  }
 }

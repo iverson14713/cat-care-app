@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import type {
   AssistantContext,
   AssistantCareBundleJson,
@@ -5,6 +6,7 @@ import type {
   DailyData,
   Lang,
 } from './aiCareAssistant';
+import { assistantApiUrl, getAssistantApiBase } from './lib/assistantApiBase';
 import { getDailyItemsForPetType, getMonthlyItemsForPetType, type PetType } from './petTypes';
 import {
   applySuccessfulAiUsage,
@@ -16,6 +18,11 @@ import {
   writeCareBundleCacheJson,
 } from './aiClient';
 import { normalizeWeeklyReport } from './weeklyReportModel';
+import {
+  buildStructuredCareEventLines,
+  buildWeightNarrativeLines,
+  formatDayCareChecklistLine,
+} from './aiRecordNarrative';
 
 const DAILY_CHECKBOX_IDS = [
   'feedMorning',
@@ -206,6 +213,61 @@ export class AssistantApiError extends Error {
   }
 }
 
+/** User-facing copy for GET /health failures (network / non-JSON / HTTP error). */
+export type AssistantHealthFetchFailure = {
+  reason: 'network' | 'http' | 'parse';
+  status?: number;
+  detail?: string;
+};
+
+export type AssistantHealthFetchResult =
+  | { ok: true; payload: AssistantHealthPayload }
+  | { ok: false; failure: AssistantHealthFetchFailure };
+
+export function getAssistantHealthFailureUserHint(lang: Lang, failure: AssistantHealthFetchFailure): string {
+  const zh = lang === 'zh';
+  if (failure.reason === 'parse') {
+    return zh ? 'AI 服務資料格式異常，請稍後再試。' : 'Unexpected response from the AI service. Please try again later.';
+  }
+  if (failure.reason === 'http') {
+    const s = failure.status != null ? String(failure.status) : '?';
+    return zh
+      ? `無法取得 AI 服務狀態（${s}），請稍後再試。`
+      : `Could not load AI service status (${s}). Please try again later.`;
+  }
+  return zh ? '無法連線到 AI 服務，請確認網路後再試。' : 'Cannot connect to the AI service. Check your network and try again.';
+}
+
+/** Map server JSON `code` / HTTP status to short UI strings (no stack traces). */
+export function mapAssistantApiErrorToUserMessage(lang: Lang, err: unknown): string {
+  const zh = lang === 'zh';
+  if (err instanceof AssistantApiError) {
+    const c = err.code;
+    const st = err.httpStatus;
+    if (c === 'QUOTA' || (st === 429 && c === 'QUOTA')) {
+      return zh ? '今日 AI 次數已用完。' : 'Daily AI limit reached for today.';
+    }
+    if (c === 'RATE' || c === 'OPENAI_RATE') {
+      return zh ? '操作過於頻繁，請稍待後再試。' : 'Too many requests — please wait a moment.';
+    }
+    if (c === 'NO_API_KEY') {
+      return zh ? '目前服務暫時無法使用，請稍後再試。' : 'This service is temporarily unavailable. Please try again later.';
+    }
+    if (c === 'BAD_REQUEST') {
+      return zh
+        ? '目前紀錄較少或內容無法處理，請先新增更多照護紀錄後再試。'
+        : 'Not enough data or invalid request — add more care logs and try again.';
+    }
+    if (c === 'OPENAI_AUTH') {
+      return zh ? 'AI 服務認證異常，請稍後再試。' : 'AI authentication issue — please try again later.';
+    }
+    if (c === 'OPENAI') {
+      return zh ? 'AI 服務忙碌中，請稍後再試。' : 'The AI service is busy. Please try again later.';
+    }
+  }
+  return zh ? 'AI 服務忙碌中，請稍後再試。' : 'The AI service is busy. Please try again later.';
+}
+
 export type AssistantRequestMeta = {
   clientId: string;
   catId: string;
@@ -321,13 +383,20 @@ function parseQuotaSnapshot(d: Record<string, unknown>): AssistantQuotaSnapshot 
   return { dailyLimit, dailyUsed, dailyRemaining };
 }
 
-async function readAssistantApiError(res: Response): Promise<{ message: string; code?: string }> {
+async function readAssistantApiError(res: Response, route: string): Promise<{ message: string; code?: string }> {
   const t = await res.text();
   try {
     const j = JSON.parse(t) as { error?: string; code?: string; detail?: string };
     const errStr = typeof j?.error === 'string' ? j.error.trim() : '';
     const detStr = typeof j?.detail === 'string' ? j.detail.trim() : '';
     const code = typeof j?.code === 'string' ? j.code : undefined;
+    console.warn('[PetCare AI] API error', {
+      route,
+      status: res.status,
+      code,
+      error: errStr,
+      detail: detStr.slice(0, 300),
+    });
     let msg: string;
     if (detStr && errStr && detStr !== errStr) {
       msg = `${errStr}（${detStr}）`;
@@ -339,6 +408,11 @@ async function readAssistantApiError(res: Response): Promise<{ message: string; 
     if (!msg) msg = `HTTP ${res.status}`;
     return { message: msg, code };
   } catch {
+    console.warn('[PetCare AI] API non-JSON error body', {
+      route,
+      status: res.status,
+      preview: t.slice(0, 300),
+    });
     const fallback = t.trim() || res.statusText;
     return { message: fallback || `HTTP ${res.status}` };
   }
@@ -400,37 +474,36 @@ export function buildRecordContextForLlm(ctx: AssistantContext): string {
   lines.push(`${zh ? '異常照片數' : 'abnormalPhotosCount'}: ${photoCount(d, 'abnormalPhotos')}`);
   lines.push(`${zh ? '今日照片數' : 'dailyPhotosCount'}: ${photoCount(d, 'dailyPhotos')}`);
   lines.push('');
+  const structuredEvents = buildStructuredCareEventLines(recent, lang, petType);
+  if (structuredEvents.length > 0) {
+    lines.push('');
+    lines.push(
+      zh
+        ? `--- 結構化照護事件（共 ${structuredEvents.length} 則） ---`
+        : `--- Structured care events (${structuredEvents.length}) ---`
+    );
+    for (const e of structuredEvents) lines.push(e);
+  }
+  lines.push('');
   lines.push(
     zh
       ? `--- 最近 ${recent.length} 天紀錄（最多 14 天；新→舊） ---`
       : `--- Last ${recent.length} days (max 14; newest first) ---`
   );
   for (const day of recent) {
-    const x = day.data;
-    const bits = dailyIds
-      .map((id) => {
-        const label = labels[id] ?? id;
-        return `${label}=${x[id] === true ? 1 : 0}`;
-      })
-      .join(', ');
-    const an = strField(x, 'abnormalNote');
-    const dn = strField(x, 'dailyNote');
-    lines.push(
-      `${day.date}: ${bits} | ${zh ? '異常' : 'abnormal'}="${clip(an, 220)}" | ${zh ? '備註' : 'note'}="${clip(dn, 220)}" | ${zh ? '異常照' : 'abnPhotos'}=${photoCount(x, 'abnormalPhotos')}`
-    );
+    lines.push(formatDayCareChecklistLine(day.date, day.data, lang, petType));
   }
   lines.push('');
+  const weightNarrative = buildWeightNarrativeLines(wRows, lang);
   lines.push(
     zh
-      ? `--- 同期體重紀錄（新→舊，最多 ${wRows.length} 筆） ---`
-      : `--- Weight in same window (newest first, max ${wRows.length}) ---`
+      ? `--- 同期體重紀錄（新→舊，最多 ${weightNarrative.length} 筆） ---`
+      : `--- Weight in same window (newest first, max ${weightNarrative.length}) ---`
   );
-  if (!wRows.length) {
+  if (!weightNarrative.length) {
     lines.push(zh ? '（無）' : '(none)');
   } else {
-    for (const w of wRows) {
-      lines.push(`${w.date}: ${w.weight} kg | ${zh ? '備註' : 'note'}: ${clip(w.note, 200) || (zh ? '無' : 'none')}`);
-    }
+    for (const w of weightNarrative) lines.push(w);
   }
   lines.push('');
   lines.push(zh ? '--- 本月定期照顧（勾選） ---' : '--- Monthly checklist (current month) ---');
@@ -465,46 +538,71 @@ function appendDayRecordsBlock(
   lines.push('');
 }
 
-/** Today + up to 7 recent days — quick AI snapshot only. */
+/** Today + up to 14 recent days — quick AI snapshot only. */
 export function buildQuickAnalysisContextForLlm(ctx: AssistantContext): string {
-  const recent = ctx.last7Days.length ? ctx.last7Days : ctx.recentDaysForAi.slice(0, 7);
+  const recent = ctx.recentDaysForAi.length
+    ? ctx.recentDaysForAi.slice(0, 14)
+    : ctx.last7Days.length
+      ? ctx.last7Days
+      : [];
   const oldest = recent.length > 0 ? recent[recent.length - 1].date : ctx.today;
+  const petType = ctx.petType ?? ctx.cat.petType ?? 'cat';
   const wRows = ctx.weightRecords
     .filter((w) => w.date >= oldest && w.date <= ctx.today)
-    .slice(0, 4);
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 12);
 
   const lines: string[] = [];
   const zh = ctx.lang === 'zh';
   lines.push(
     zh
-      ? '--- 任務：快速照護摘要（今日＋最近幾天；非完整週報） ---'
-      : '--- Task: quick care snapshot (today + recent days — NOT a full weekly report) ---'
+      ? '--- 任務：快速照護摘要（今日＋最近 7～14 天；非完整週報） ---'
+      : '--- Task: quick care snapshot (today + last 7–14 days — NOT a full weekly report) ---'
   );
   lines.push(`Language for reply: ${zh ? 'Traditional Chinese (zh-TW)' : 'English'}`);
   lines.push(`Today (local date): ${ctx.today}`);
   lines.push(`Selected cat name: ${ctx.cat.name}`);
   lines.push(`Chronic / meds note: ${clip(ctx.cat.chronicNote ?? '', 300)}`);
   lines.push('');
-  lines.push('--- Today daily record ---');
-  const d = ctx.todayDaily;
-  for (const id of DAILY_CHECKBOX_IDS) {
-    lines.push(boolLine(d, id));
+
+  const todayEvents = buildStructuredCareEventLines([{ date: ctx.today, data: ctx.todayDaily }], ctx.lang, petType);
+  const recentEvents = buildStructuredCareEventLines(recent, ctx.lang, petType);
+  const allEvents = [...todayEvents, ...recentEvents.filter((e) => !todayEvents.includes(e))];
+  if (allEvents.length > 0) {
+    lines.push(
+      zh
+        ? `--- 結構化照護事件（共 ${allEvents.length} 則） ---`
+        : `--- Structured care events (${allEvents.length}) ---`
+    );
+    for (const e of allEvents) lines.push(e);
+    lines.push('');
   }
-  lines.push(`abnormalNote: ${clip(strField(d, 'abnormalNote'), 400)}`);
-  lines.push(`dailyNote: ${clip(strField(d, 'dailyNote'), 400)}`);
-  lines.push(`abnormalPhotosCount: ${photoCount(d, 'abnormalPhotos')}`);
+
+  lines.push(zh ? '--- 今日照護勾選 ---' : '--- Today daily record ---');
+  lines.push(formatDayCareChecklistLine(ctx.today, ctx.todayDaily, ctx.lang, petType));
   lines.push('');
-  appendDayRecordsBlock(
-    lines,
-    recent,
+  lines.push(
     zh
-      ? `--- Recent days (newest first, max ${recent.length}) ---`
-      : `--- Recent days (newest first, max ${recent.length}) ---`
+      ? `--- 最近 ${recent.length} 天（新→舊） ---`
+      : `--- Recent ${recent.length} days (newest first) ---`
   );
-  lines.push('--- Weight (recent, newest first) ---');
-  if (!wRows.length) lines.push('(none)');
-  else for (const w of wRows) lines.push(`${w.date}: ${w.weight} kg`);
-  return lines.join('\n');
+  for (const day of recent) {
+    lines.push(formatDayCareChecklistLine(day.date, day.data, ctx.lang, petType));
+  }
+  lines.push('');
+  const weightNarrative = buildWeightNarrativeLines(wRows, ctx.lang);
+  lines.push(zh ? '--- 近期體重 ---' : '--- Recent weight ---');
+  if (!weightNarrative.length) lines.push(zh ? '（無）' : '(none)');
+  else for (const w of weightNarrative) lines.push(w);
+
+  const text = lines.join('\n');
+  console.log('[AI care-bundle] request payload (recordContext)', {
+    chars: text.length,
+    structuredEventCount: allEvents.length,
+    recentDays: recent.length,
+    preview: text.slice(0, 2000),
+  });
+  return text;
 }
 
 function normalizeWeeklyReportPayload(data: Record<string, unknown>, lang: 'zh' | 'en'): AssistantWeeklyReportJson {
@@ -542,34 +640,70 @@ export function buildWeeklyReportContextForLlm(ctx: AssistantContext): string {
   lines.push(`Chronic / meds: ${clip(ctx.cat.chronicNote ?? '', 400)}`);
   lines.push(`Allergy: ${clip(ctx.cat.allergyNote ?? '', 300)}`);
   lines.push('');
-  appendDayRecordsBlock(
-    lines,
-    thisWeek,
-    zh ? '--- 本週（最近 7 天，新→舊）---' : '--- This week (last 7 days, newest first) ---'
-  );
-  appendDayRecordsBlock(
-    lines,
-    prevWeek,
-    zh ? '--- 上週（再往前 7 天，新→舊）---' : '--- Previous week (days 8–14 back, newest first) ---'
-  );
+  const petType = ctx.petType ?? ctx.cat.petType ?? 'cat';
+  const weekEvents = buildStructuredCareEventLines(deduped, ctx.lang, petType);
+  if (weekEvents.length > 0) {
+    lines.push(
+      zh
+        ? `--- 結構化照護事件（共 ${weekEvents.length} 則） ---`
+        : `--- Structured care events (${weekEvents.length}) ---`
+    );
+    for (const e of weekEvents) lines.push(e);
+    lines.push('');
+  }
+  lines.push(zh ? '--- 本週（最近 7 天，新→舊）---' : '--- This week (last 7 days, newest first) ---');
+  for (const day of thisWeek) {
+    lines.push(formatDayCareChecklistLine(day.date, day.data, ctx.lang, petType));
+  }
+  lines.push('');
+  lines.push(zh ? '--- 上週（再往前 7 天，新→舊）---' : '--- Previous week (days 8–14 back, newest first) ---');
+  for (const day of prevWeek) {
+    lines.push(formatDayCareChecklistLine(day.date, day.data, ctx.lang, petType));
+  }
+  lines.push('');
+  const weightNarrative = buildWeightNarrativeLines(wRows, ctx.lang);
   lines.push(zh ? '--- 體重紀錄（同期間，新→舊）---' : '--- Weight entries (same window, newest first) ---');
-  if (!wRows.length) lines.push('(none)');
-  else for (const w of wRows) lines.push(`${w.date}: ${w.weight} kg | note: ${clip(w.note, 200)}`);
+  if (!weightNarrative.length) lines.push('(none)');
+  else for (const w of weightNarrative) lines.push(w);
   return lines.join('\n');
 }
 
-/** Server reachable + quota snapshot. Returns null on network / parse failure. */
+let loggedNativeAssistantBaseHint = false;
+
+/** Server reachable + quota snapshot. */
 export async function fetchAssistantHealth(
   clientId: string,
   usageDate: string,
   signal?: AbortSignal,
   plan: 'free' | 'pro' = 'free'
-): Promise<AssistantHealthPayload | null> {
+): Promise<AssistantHealthFetchResult> {
+  const qs = new URLSearchParams({ clientId, usageDate, plan });
+  const url = assistantApiUrl(`${API_PREFIX}/health?${qs}`);
   try {
-    const qs = new URLSearchParams({ clientId, usageDate, plan });
-    const res = await fetch(`${API_PREFIX}/health?${qs}`, { signal });
-    if (!res.ok) return null;
-    const d = (await res.json()) as Record<string, unknown>;
+    const res = await fetch(url, { signal });
+    const text = await res.text();
+    if (!res.ok) {
+      console.warn('[PetCare AI] GET /api/assistant/health HTTP error', {
+        url,
+        status: res.status,
+        bodyPreview: text.slice(0, 400),
+      });
+      return {
+        ok: false,
+        failure: { reason: 'http', status: res.status, detail: text.slice(0, 200) },
+      };
+    }
+    let d: Record<string, unknown>;
+    try {
+      d = JSON.parse(text) as Record<string, unknown>;
+    } catch (e) {
+      console.warn('[PetCare AI] GET /api/assistant/health invalid JSON', {
+        url,
+        preview: text.slice(0, 300),
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return { ok: false, failure: { reason: 'parse', detail: 'invalid json' } };
+    }
     const serverUsed = typeof d?.dailyUsed === 'number' ? d.dailyUsed : Number(d?.dailyUsed) || 0;
     syncLocalAiUsageFromServer(clientId, usageDate, serverUsed);
     const raw: AssistantHealthPayload = {
@@ -580,9 +714,21 @@ export async function fetchAssistantHealth(
         typeof d?.dailyRemaining === 'number' ? d.dailyRemaining : Number(d?.dailyRemaining) || 0,
       planEffective: d?.planEffective === 'pro' ? 'pro' : 'free',
     };
-    return reconcileAssistantHealth(plan, clientId, usageDate, raw);
-  } catch {
-    return null;
+    return { ok: true, payload: reconcileAssistantHealth(plan, clientId, usageDate, raw) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[PetCare AI] GET /api/assistant/health failed', { url, message: msg });
+    if (
+      !loggedNativeAssistantBaseHint &&
+      Capacitor.isNativePlatform() &&
+      !getAssistantApiBase().trim()
+    ) {
+      loggedNativeAssistantBaseHint = true;
+      console.warn(
+        '[PetCare AI] Capacitor: set VITE_ASSISTANT_API_BASE_URL at build time to the HTTPS root of your deployment that serves /api/assistant/* (e.g. https://your-app.vercel.app). See .env.example.'
+      );
+    }
+    return { ok: false, failure: { reason: 'network', detail: msg } };
   }
 }
 
@@ -620,27 +766,48 @@ export async function generateAssistantCareBundleOpenAi(
   const fromCache = peekCareBundleCache(ctx, meta);
   if (fromCache) return { bundle: fromCache, quota: null };
 
-  const res = await fetch(`${API_PREFIX}/care-bundle`, {
+  const requestBody = {
+    lang: ctx.lang,
+    recordContext,
+    clientId: meta.clientId,
+    catId: meta.catId,
+    usageDate: meta.usageDate,
+    plan: meta.plan,
+  };
+
+  const res = await fetch(assistantApiUrl(`${API_PREFIX}/care-bundle`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      lang: ctx.lang,
-      recordContext,
-      clientId: meta.clientId,
-      catId: meta.catId,
-      usageDate: meta.usageDate,
-      plan: meta.plan,
-    }),
+    body: JSON.stringify(requestBody),
     signal,
   });
+  const rawText = await res.text();
+  console.log('[AI care-bundle] raw response', {
+    status: res.status,
+    preview: rawText.slice(0, 2500),
+  });
   if (!res.ok) {
-    const { message, code } = await readAssistantApiError(res);
+    let errData: Record<string, unknown> = {};
+    try {
+      errData = JSON.parse(rawText) as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+    const message =
+      typeof errData.error === 'string' ? errData.error : rawText.trim() || res.statusText;
+    const code = typeof errData.code === 'string' ? errData.code : undefined;
     throw new AssistantApiError(message, code, res.status);
   }
-  const data = (await res.json()) as Record<string, unknown>;
-  const quota = quotaAfterCountedAiSuccess(data, meta);
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(rawText) as Record<string, unknown>;
+  } catch (parseErr) {
+    console.error('[AI care bundle] invalid JSON response', parseErr);
+    throw new AssistantApiError('Invalid JSON response', 'OPENAI', res.status);
+  }
   const bundle = normalizeCareBundlePayload(data, ctx.lang);
   writeCareBundleCacheJson(ck, JSON.stringify(bundle));
+  const quota = quotaAfterCountedAiSuccess(data, meta);
   return { bundle, quota };
 }
 
@@ -651,7 +818,7 @@ export async function generateAssistantQaOpenAi(
   signal?: AbortSignal
 ): Promise<{ answer: string; quota: AssistantQuotaSnapshot | null }> {
   const recordContext = buildRecordContextForLlm(ctx);
-  const res = await fetch(`${API_PREFIX}/qa`, {
+  const res = await fetch(assistantApiUrl(`${API_PREFIX}/qa`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -666,7 +833,7 @@ export async function generateAssistantQaOpenAi(
     signal,
   });
   if (!res.ok) {
-    const { message, code } = await readAssistantApiError(res);
+    const { message, code } = await readAssistantApiError(res, 'POST /api/assistant/qa');
     throw new AssistantApiError(message, code, res.status);
   }
   const data = (await res.json()) as Record<string, unknown>;
@@ -683,7 +850,7 @@ export async function generateAssistantWeeklyReportOpenAi(
   signal?: AbortSignal
 ): Promise<{ report: AssistantWeeklyReportJson; quota: AssistantQuotaSnapshot | null }> {
   const recordContext = buildWeeklyReportContextForLlm(ctx);
-  const res = await fetch(`${API_PREFIX}/weekly-report`, {
+  const res = await fetch(assistantApiUrl(`${API_PREFIX}/weekly-report`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -697,7 +864,7 @@ export async function generateAssistantWeeklyReportOpenAi(
     signal,
   });
   if (!res.ok) {
-    const { message, code } = await readAssistantApiError(res);
+    const { message, code } = await readAssistantApiError(res, 'POST /api/assistant/weekly-report');
     throw new AssistantApiError(message, code, res.status);
   }
   let data: Record<string, unknown>;

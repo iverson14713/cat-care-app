@@ -1,3 +1,8 @@
+import {
+  DEFAULT_PET_NAME_ZH,
+  DEFAULT_PLACEHOLDER_PET_ID,
+  stripOfflinePlaceholdersWhenUserHasPets,
+} from './defaultPet';
 import { defaultEmojiForPetType, normalizePetType, type PetType } from './petTypes';
 import type { AppCat } from './supabaseCats';
 import { isCloudCatId } from './supabaseCats';
@@ -29,8 +34,8 @@ export type NormalizedCat = {
 
 const DEFAULT_CATS: NormalizedCat[] = [
   {
-    id: 'default-cat',
-    name: '我的寵物',
+    id: DEFAULT_PLACEHOLDER_PET_ID,
+    name: DEFAULT_PET_NAME_ZH,
     petType: 'cat',
     emoji: '🐱',
     isArchived: false,
@@ -89,7 +94,12 @@ export function normalizeCat(raw: unknown, fallbackOwnerId = ''): NormalizedCat 
   };
 }
 
-export function normalizeAllCats(rawList: unknown[], fallbackOwnerId = ''): NormalizedCat[] {
+export function normalizeAllCats(
+  rawList: unknown[],
+  fallbackOwnerId = '',
+  options?: { injectDefaultIfEmpty?: boolean }
+): NormalizedCat[] {
+  const injectDefault = options?.injectDefaultIfEmpty !== false;
   const seen = new Set<string>();
   const out: NormalizedCat[] = [];
   for (const raw of rawList) {
@@ -98,7 +108,7 @@ export function normalizeAllCats(rawList: unknown[], fallbackOwnerId = ''): Norm
     seen.add(cat.id);
     out.push(cat);
   }
-  if (out.length === 0) {
+  if (out.length === 0 && injectDefault) {
     return DEFAULT_CATS.map((d) => normalizeCat(d, fallbackOwnerId)!);
   }
   return out.sort((a, b) => {
@@ -116,12 +126,13 @@ export function mergeAndNormalizeCats(
   local: NormalizedCat[],
   fallbackOwnerId = ''
 ): NormalizedCat[] {
+  const localStripped = stripOfflinePlaceholdersWhenUserHasPets(local);
   const byId = new Map<string, NormalizedCat>();
   for (const app of cloud) {
     const n = appCatToNormalized(app, fallbackOwnerId);
     byId.set(n.id, n);
   }
-  for (const loc of local) {
+  for (const loc of localStripped) {
     if (!byId.has(loc.id)) {
       byId.set(loc.id, loc);
     } else {
@@ -135,7 +146,9 @@ export function mergeAndNormalizeCats(
       });
     }
   }
-  return normalizeAllCats(Array.from(byId.values()), fallbackOwnerId);
+  const merged = Array.from(byId.values());
+  const injectDefault = cloud.length === 0 && merged.length === 0;
+  return normalizeAllCats(merged, fallbackOwnerId, { injectDefaultIfEmpty: injectDefault });
 }
 
 export function loadRawCatsFromStorage(userId?: string): unknown[] {

@@ -13,7 +13,9 @@ import type { Reminder, ReminderKind } from '../reminders';
 import {
   buildPetCareNotificationCopy,
   getPetCareNotificationPermission,
+  invalidatePetCareNotificationPermissionCache,
   isPetCareNativeLocalNotificationsAvailable,
+  openPetCareNotificationSettings,
   requestPetCareNotificationPermission,
 } from './petCareLocalNotifications';
 
@@ -313,13 +315,30 @@ export function getNotificationSupport(): boolean {
   return notificationService.isLocalSupported();
 }
 
-export async function getNotificationPermissionAsync(): Promise<NotificationPermissionState> {
+function nativePermissionToAppState(
+  native: Awaited<ReturnType<typeof getPetCareNotificationPermission>>
+): NotificationPermissionState {
+  if (native === 'granted') return 'granted';
+  if (native === 'denied') return 'denied';
+  if (native === 'prompt') return 'default';
+  return 'unsupported';
+}
+
+export async function getNotificationPermissionAsync(
+  forceRefresh = false
+): Promise<NotificationPermissionState> {
   if (useNativeLocalChannel()) {
-    const native = await getPetCareNotificationPermission();
-    if (native === 'granted') return 'granted';
-    if (native === 'denied') return 'denied';
-    if (native === 'prompt') return 'default';
-    return 'unsupported';
+    const native = await getPetCareNotificationPermission(forceRefresh);
+    return nativePermissionToAppState(native);
+  }
+  return notificationService.getPermission();
+}
+
+/** Re-read permission from the OS (bypass cache). Use on reminders page + app resume. */
+export async function refreshNotificationPermission(): Promise<NotificationPermissionState> {
+  if (useNativeLocalChannel()) {
+    invalidatePetCareNotificationPermissionCache();
+    return nativePermissionToAppState(await getPetCareNotificationPermission(true));
   }
   return notificationService.getPermission();
 }
@@ -335,7 +354,7 @@ export function isNotificationGranted(): boolean {
 
 export async function isNotificationGrantedAsync(): Promise<boolean> {
   if (useNativeLocalChannel()) {
-    return (await getPetCareNotificationPermission()) === 'granted';
+    return (await getPetCareNotificationPermission(true)) === 'granted';
   }
   return notificationService.isGranted();
 }
@@ -354,6 +373,46 @@ export function markNotificationPermissionAsked(): void {
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
   return notificationService.requestPermission();
+}
+
+/**
+ * When the user creates a reminder, prompt for notification permission if not granted yet.
+ * On native: shows the system dialog; if already denied, offers to open Settings.
+ */
+export async function promptNotificationPermissionForReminder(
+  lang: 'zh' | 'en'
+): Promise<NotificationPermissionState> {
+  if (!getNotificationSupport()) return 'unsupported';
+
+  if (useNativeLocalChannel()) {
+    invalidatePetCareNotificationPermissionCache();
+    let native = await getPetCareNotificationPermission(true);
+    if (native === 'granted') return 'granted';
+    native = await requestPetCareNotificationPermission();
+    if (native === 'granted') return 'granted';
+    if (native === 'denied') {
+      const go = window.confirm(
+        lang === 'zh'
+          ? '建立提醒需要通知權限，時間到了才會收到推播。\n\n是否前往「設定」開啟通知？'
+          : 'Reminders need notification permission to alert you on time.\n\nOpen Settings to enable notifications?'
+      );
+      if (go) openPetCareNotificationSettings();
+      return 'denied';
+    }
+    return 'default';
+  }
+
+  const current = getNotificationPermission();
+  if (current === 'granted') return 'granted';
+  if (current === 'denied') {
+    window.alert(
+      lang === 'zh'
+        ? '請在瀏覽器或系統設定中允許此網站的通知，提醒才會準時顯示。'
+        : 'Allow notifications for this site in your browser or system settings so reminders can fire on time.'
+    );
+    return 'denied';
+  }
+  return requestNotificationPermission();
 }
 
 export function sendLocalNotification(payload: LocalNotificationPayload): boolean {

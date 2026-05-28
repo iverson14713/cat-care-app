@@ -38,6 +38,19 @@ export function isPetCareNativeLocalNotificationsAvailable(): boolean {
   return Capacitor.isNativePlatform();
 }
 
+/** Open the app’s page in iOS/Android system Settings (notification permission). */
+export function openPetCareNotificationSettings(): void {
+  if (!Capacitor.isNativePlatform()) return;
+  const platform = Capacitor.getPlatform();
+  if (platform === 'ios') {
+    window.location.href = 'app-settings:';
+    return;
+  }
+  if (platform === 'android') {
+    window.location.href = 'app-settings:';
+  }
+}
+
 export function petCareNotificationNumericId(reminderId: string): number {
   let hash = 0;
   const key = `pc:${reminderId}`;
@@ -138,6 +151,26 @@ export function invalidatePetCareNotificationPermissionCache(): void {
   cachedPermission = null;
 }
 
+type CapacitorPermState = 'granted' | 'denied' | 'prompt' | string | undefined;
+
+/** iOS uses `receive` for alert delivery; `display` alone can stay denied while alerts work. */
+export function normalizeCapacitorNotificationPermission(permission: {
+  display?: CapacitorPermState;
+  receive?: CapacitorPermState;
+}): PetCareNotificationPermission {
+  console.log('[notifications]', permission);
+  const { display, receive } = permission;
+
+  if (receive === 'granted') return 'granted';
+  if (display === 'granted' && receive !== 'denied') return 'granted';
+
+  if (receive === 'denied') return 'denied';
+  if (display === 'denied' && receive !== 'granted') return 'denied';
+
+  if (receive === 'prompt' || display === 'prompt') return 'prompt';
+  return 'prompt';
+}
+
 export async function getPetCareNotificationPermission(
   force = false
 ): Promise<PetCareNotificationPermission> {
@@ -150,9 +183,8 @@ export async function getPetCareNotificationPermission(
     return cachedPermission.value;
   }
   try {
-    const { display } = await LocalNotifications.checkPermissions();
-    const value =
-      display === 'granted' || display === 'denied' || display === 'prompt' ? display : 'prompt';
+    const permission = await LocalNotifications.checkPermissions();
+    const value = normalizeCapacitorNotificationPermission(permission);
     cachedPermission = { value, at: Date.now() };
     return value;
   } catch (e) {
@@ -164,9 +196,8 @@ export async function getPetCareNotificationPermission(
 export async function requestPetCareNotificationPermission(): Promise<PetCareNotificationPermission> {
   if (!isPetCareNativeLocalNotificationsAvailable()) return 'unsupported';
   try {
-    const { display } = await LocalNotifications.requestPermissions();
-    const value =
-      display === 'granted' || display === 'denied' || display === 'prompt' ? display : 'prompt';
+    const permission = await LocalNotifications.requestPermissions();
+    const value = normalizeCapacitorNotificationPermission(permission);
     cachedPermission = { value, at: Date.now() };
     safeSetItem('petcare_notification_permission_asked', '1');
     return value;

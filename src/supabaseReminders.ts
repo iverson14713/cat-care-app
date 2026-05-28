@@ -1,17 +1,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Reminder } from './reminders';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 
 export async function fetchUserReminders(
   supabase: SupabaseClient,
   userId: string
-): Promise<{ data: Reminder[]; error: Error | null }> {
+): Promise<{ data: Reminder[]; error: DbError | null }> {
   const { data, error } = await supabase
     .from('user_reminders')
     .select('reminders')
     .eq('user_id', userId)
     .maybeSingle();
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   const raw = data?.reminders;
   if (!Array.isArray(raw)) return { data: [], error: null };
   return { data: raw as Reminder[], error: null };
@@ -21,7 +22,7 @@ export async function upsertUserReminders(
   supabase: SupabaseClient,
   userId: string,
   reminders: Reminder[]
-): Promise<{ error: Error | null }> {
+): Promise<{ error: DbError | null }> {
   const { error } = await supabase.from('user_reminders').upsert(
     {
       user_id: userId,
@@ -30,7 +31,7 @@ export async function upsertUserReminders(
     },
     { onConflict: 'user_id' }
   );
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }
 

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { buildDefaultAppCat, logDefaultPetDecision } from './defaultPet';
 import { defaultEmojiForPetType, normalizePetType, type PetType } from './petTypes';
 
 export type CatRow = {
@@ -117,6 +118,60 @@ export function mergeCloudCatsWithLocal(cloud: AppCat[], local: AppCat[]): AppCa
     if (aArch !== bArch) return aArch - bArch;
     return a.name.localeCompare(b.name);
   });
+}
+
+/** Count pets visible to the logged-in user (RLS). */
+export async function countCatsForUser(supabase: SupabaseClient): Promise<number> {
+  const { data, error } = await fetchCatsForUser(supabase);
+  if (error) return 0;
+  return data.length;
+}
+
+/**
+ * Idempotent: insert the default pet only when the user has zero pets in cloud.
+ */
+export async function ensureDefaultPetForUser(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<{ created: boolean; data: AppCat | null; error: Error | null }> {
+  const { data: existing, error: fetchErr } = await fetchCatsForUser(supabase);
+  const cloudCount = existing.length;
+
+  console.log('[pets] ensureDefaultPetForUser', {
+    userId: userId.slice(0, 8),
+    cloudCount,
+  });
+
+  if (fetchErr) {
+    return { created: false, data: null, error: fetchErr };
+  }
+
+  if (cloudCount > 0) {
+    logDefaultPetDecision({
+      userId,
+      cloudCount,
+      localCount: 0,
+      action: 'skip_has_pets',
+      detail: `existing pets: ${existing.map((c) => c.name).join(', ')}`,
+    });
+    return { created: false, data: null, error: null };
+  }
+
+  const seed = buildDefaultAppCat(userId);
+  const { data, error } = await insertCatForOwner(supabase, userId, seed);
+  if (error) {
+    return { created: false, data: null, error };
+  }
+
+  logDefaultPetDecision({
+    userId,
+    cloudCount: 0,
+    localCount: 0,
+    action: 'create',
+    detail: data?.id,
+  });
+
+  return { created: true, data, error: null };
 }
 
 export async function fetchCatsForUser(

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPhotoList, mergePhotoArrays } from './supabasePhotos';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 
 export type DailyJson = Record<string, unknown>;
 
@@ -28,7 +29,7 @@ export async function fetchAllDailyRecordsForCat(
   supabase: SupabaseClient,
   catId: string,
   limit = 400
-): Promise<{ data: DailyRecordRow[]; error: Error | null }> {
+): Promise<{ data: DailyRecordRow[]; error: DbError | null }> {
   const { data, error } = await supabase
     .from('daily_records')
     .select('record_date, data, updated_at')
@@ -36,7 +37,7 @@ export async function fetchAllDailyRecordsForCat(
     .order('record_date', { ascending: false })
     .limit(limit);
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   const rows = (data ?? []) as { record_date: string; data: unknown; updated_at?: string }[];
   return {
     data: rows
@@ -63,7 +64,7 @@ export async function fetchDailyRecordRow(
     .eq('record_date', recordDate)
     .maybeSingle();
 
-  if (error) return { data: null, error: new Error(error.message) };
+  if (error) return { data: null, error: mapSupabaseErr(error) };
   const raw = data?.data;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     return { data: raw as DailyJson, error: null };
@@ -74,7 +75,7 @@ export async function fetchDailyRecordRow(
 export async function upsertDailyRecordCloud(
   supabase: SupabaseClient,
   params: { catId: string; recordDate: string; data: DailyJson; updatedBy: string }
-): Promise<{ error: Error | null }> {
+): Promise<{ error: DbError | null }> {
   const { error } = await supabase.from('daily_records').upsert(
     {
       cat_id: params.catId,
@@ -84,7 +85,7 @@ export async function upsertDailyRecordCloud(
     },
     { onConflict: 'cat_id,record_date' }
   );
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }
 
@@ -107,7 +108,7 @@ export async function insertCareEventRow(
     action: params.action,
     summary: params.summary,
   });
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }
 
@@ -123,7 +124,7 @@ export async function fetchCareEventsForCat(
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   return { data: (data ?? []) as CareEventRow[], error: null };
 }
 

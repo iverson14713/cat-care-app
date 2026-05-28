@@ -139,7 +139,7 @@ export function getOrCreateClientId(): string {
   }
 }
 
-/** Stored plan; backed by `petcare_subscription_status` (see `subscription/`). */
+/** Stored plan for the active signed-in user (free when logged out). */
 export function getAiPlan(): 'free' | 'pro' {
   return getSubscriptionStatus();
 }

@@ -70,6 +70,12 @@
 	</array>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>寵物日記會依你設定的時間，以本機通知提醒你餵食、飲水、清潔與看診等照護事項（不需連線伺服器）。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>寵物日記需要使用相機拍攝照片，用於記錄寵物日常與異常狀況。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>寵物日記需要存取相簿以選擇照片，用於記錄寵物日常與異常狀況。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>寵物日記需要將照片儲存到相簿（若你選擇儲存/分享），用於保留紀錄。</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 </dict>

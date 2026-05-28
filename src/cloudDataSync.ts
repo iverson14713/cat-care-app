@@ -15,7 +15,15 @@ import {
 } from './supabaseWeight';
 import { fetchUserReminders, mergeReminders, upsertUserReminders } from './supabaseReminders';
 import type { Reminder } from './reminders';
-import { insertCatForOwner, isCloudCatId, type AppCat } from './supabaseCats';
+import {
+  ensureDefaultPetForUser,
+  fetchCatsForUser,
+  insertCatForOwner,
+  isCloudCatId,
+  type AppCat,
+} from './supabaseCats';
+import { isOfflineAutoPlaceholderPet, logDefaultPetDecision, stripOfflinePlaceholdersWhenUserHasPets } from './defaultPet';
+import { dedupeDuplicateDefaultPetsOnCloud } from './petDedupe';
 import { clearWeightsPendingSync } from './services/offlineSync';
 import { safeGetItem, safeRemoveItem, safeSetItem } from './safeStorage';
 import {
@@ -49,6 +57,12 @@ import {
   loadSavedWeeklyReport,
   type SavedWeeklyReport,
 } from './weeklyReportStorage';
+import {
+  logSyncIssue,
+  makeSyncIssue,
+  type SyncIssue,
+} from './cloudSyncErrors';
+import type { DbError } from './supabaseError';
 
 export {
   dailyStorageKey,
@@ -62,9 +76,105 @@ function parseLocalDaily(catId: string, date: string): DailyJson {
   if (!raw) return {};
   try {
     const p = JSON.parse(raw) as DailyJson;
-    return p && typeof p === 'object' && !Array.isArray(p) ? p : {};
-  } catch {
+    if (p && typeof p === 'object' && !Array.isArray(p)) return p;
+    console.warn('[cloud-sync] invalid local daily JSON', {
+      table: 'localStorage',
+      action: 'select',
+      catId,
+      recordKey: date,
+    });
     return {};
+  } catch (e) {
+    console.warn('[cloud-sync] corrupt local daily JSON', {
+      table: 'localStorage',
+      action: 'select',
+      catId,
+      recordKey: date,
+      message: e instanceof Error ? e.message : String(e),
+    });
+    return {};
+  }
+}
+
+function appendDbError(
+  issues: SyncIssue[],
+  params: {
+    table: string;
+    action: SyncIssue['action'];
+    error: DbError | null;
+    catId?: string;
+    recordKey?: string;
+    source: SyncIssue['source'];
+  }
+): void {
+  if (!params.error) return;
+  const issue = makeSyncIssue({
+    table: params.table,
+    action: params.action,
+    error: params.error,
+    catId: params.catId,
+    recordKey: params.recordKey,
+    source: params.source,
+  });
+  logSyncIssue(issue);
+  issues.push(issue);
+}
+
+function parseLocalWeightRecords(catId: string): AppWeightRecord[] {
+  const raw = safeGetItem(weightStorageKey(catId));
+  if (!raw) return [];
+  try {
+    const p = JSON.parse(raw);
+    if (!Array.isArray(p)) {
+      console.warn('[cloud-sync] invalid local weight JSON (not array)', {
+        table: 'localStorage',
+        action: 'select',
+        catId,
+        storageKey: weightStorageKey(catId),
+      });
+      return [];
+    }
+    return p.filter(
+      (r): r is AppWeightRecord =>
+        r &&
+        typeof r === 'object' &&
+        typeof (r as AppWeightRecord).date === 'string' &&
+        Number.isFinite(Number((r as AppWeightRecord).weight))
+    );
+  } catch (e) {
+    console.warn('[cloud-sync] corrupt local weight JSON', {
+      table: 'localStorage',
+      action: 'select',
+      catId,
+      storageKey: weightStorageKey(catId),
+      message: e instanceof Error ? e.message : String(e),
+    });
+    return [];
+  }
+}
+
+function parseLocalReminders(userId: string): Reminder[] {
+  const raw = safeGetItem(remindersStorageKey(userId));
+  if (!raw) return [];
+  try {
+    const p = JSON.parse(raw);
+    if (!Array.isArray(p)) {
+      console.warn('[cloud-sync] invalid local reminders JSON', {
+        table: 'localStorage',
+        action: 'select',
+        recordKey: userId,
+      });
+      return [];
+    }
+    return p as Reminder[];
+  } catch (e) {
+    console.warn('[cloud-sync] corrupt local reminders JSON', {
+      table: 'localStorage',
+      action: 'select',
+      recordKey: userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
+    return [];
   }
 }
 
@@ -174,7 +284,8 @@ export function rewriteCatStorageKeys(oldId: string, newId: string): void {
 export async function migrateOfflineCatsToCloud(
   supabase: SupabaseClient,
   userId: string,
-  localCats: AppCat[]
+  localCats: AppCat[],
+  options?: { existingCloudCats?: AppCat[] }
 ): Promise<{ cats: AppCat[]; idMap: Record<string, string>; errors: string[] }> {
   const ownerCheck = assertStorageOwnerMatches(userId);
   if (!ownerCheck.ok) {
@@ -185,18 +296,45 @@ export async function migrateOfflineCatsToCloud(
     };
   }
 
+  let cloudList = options?.existingCloudCats;
+  if (!cloudList) {
+    const fetched = await fetchCatsForUser(supabase);
+    if (fetched.error) {
+      return { cats: localCats.filter((c) => isCloudCatId(c.id)), idMap: {}, errors: [fetched.error.message] };
+    }
+    cloudList = fetched.data;
+  }
+  const cloudCount = cloudList.length;
+
+  console.log('[pets] migrateOfflineCatsToCloud', {
+    userId: userId.slice(0, 8),
+    cloudCount,
+    localCount: localCats.length,
+    offlineCount: localCats.filter((c) => !isCloudCatId(c.id)).length,
+  });
+
   const idMap: Record<string, string> = {};
   const errors: string[] = [];
-  const cats: AppCat[] = [];
+  const cats: AppCat[] = [...cloudList];
 
   for (const cat of localCats) {
     if (isCloudCatId(cat.id)) {
-      cats.push(cat);
+      if (!cats.some((c) => c.id === cat.id)) cats.push(cat);
+      continue;
+    }
+    if (cloudCount > 0 && isOfflineAutoPlaceholderPet(cat)) {
+      logDefaultPetDecision({
+        userId,
+        cloudCount,
+        localCount: localCats.length,
+        action: 'skip_placeholder_migrate',
+        detail: `skipped placeholder ${cat.id} (${cat.name})`,
+      });
       continue;
     }
     const rawOwner =
-      (typeof (cat as { owner_id?: string }).owner_id === 'string' && (cat as { owner_id: string }).owner_id) ||
-      (typeof (cat as { ownerId?: string }).ownerId === 'string' && (cat as { ownerId: string }).ownerId) ||
+      (typeof cat.ownerId === 'string' && cat.ownerId) ||
+      (typeof (cat as { owner_id?: string }).owner_id === 'string' && (cat as { owner_id?: string }).owner_id) ||
       '';
     if (rawOwner && rawOwner !== userId) {
       errors.push(`skip migrate ${cat.name}: owned by another user`);
@@ -205,7 +343,6 @@ export async function migrateOfflineCatsToCloud(
     const { data, error } = await insertCatForOwner(supabase, userId, cat);
     if (error || !data) {
       errors.push(`migrate ${cat.name}: ${error?.message ?? 'unknown'}`);
-      cats.push(cat);
       continue;
     }
     rewriteCatStorageKeys(cat.id, data.id);
@@ -216,6 +353,83 @@ export async function migrateOfflineCatsToCloud(
   return { cats, idMap, errors };
 }
 
+export type ReconcileCloudPetsResult = {
+  cloudList: AppCat[];
+  idMap: Record<string, string>;
+  errors: string[];
+};
+
+/**
+ * Login / bootstrap pet pipeline: migrate real offline pets, ensure one default if empty, dedupe duplicates.
+ */
+export async function reconcileCloudPetsForUser(
+  supabase: SupabaseClient,
+  userId: string,
+  localCats: AppCat[],
+  preferredCatId?: string
+): Promise<ReconcileCloudPetsResult> {
+  const errors: string[] = [];
+  let idMap: Record<string, string> = {};
+
+  const strippedLocal = stripOfflinePlaceholdersWhenUserHasPets(
+    localCats.map((c) => ({ id: c.id, name: c.name, petType: c.petType, emoji: c.emoji }))
+  );
+  const localForMigrate = localCats.filter((c) =>
+    strippedLocal.some((s) => s.id === c.id)
+  );
+
+  let { data: cloudList, error: fetchErr } = await fetchCatsForUser(supabase);
+  if (fetchErr) {
+    return { cloudList: [], idMap: {}, errors: [fetchErr.message] };
+  }
+
+  console.log('[pets] reconcileCloudPetsForUser start', {
+    userId: userId.slice(0, 8),
+    cloudCount: cloudList.length,
+    localCount: localCats.length,
+  });
+
+  const mig = await migrateOfflineCatsToCloud(supabase, userId, localForMigrate, {
+    existingCloudCats: cloudList,
+  });
+  idMap = { ...idMap, ...mig.idMap };
+  errors.push(...mig.errors);
+
+  const refetch1 = await fetchCatsForUser(supabase);
+  if (refetch1.error) {
+    errors.push(refetch1.error.message);
+    return { cloudList, idMap, errors };
+  }
+  cloudList = refetch1.data;
+
+  if (cloudList.length === 0) {
+    const ensured = await ensureDefaultPetForUser(supabase, userId);
+    if (ensured.error) errors.push(ensured.error.message);
+    const refetch2 = await fetchCatsForUser(supabase);
+    if (!refetch2.error) cloudList = refetch2.data;
+  } else {
+    const dedupe = await dedupeDuplicateDefaultPetsOnCloud(
+      supabase,
+      userId,
+      cloudList,
+      preferredCatId && isCloudCatId(preferredCatId) ? preferredCatId : undefined
+    );
+    errors.push(...dedupe.errors);
+    if (dedupe.removedIds.length > 0 || dedupe.mergedIds.length > 0) {
+      const refetch3 = await fetchCatsForUser(supabase);
+      if (!refetch3.error) cloudList = refetch3.data;
+    }
+  }
+
+  console.log('[pets] reconcileCloudPetsForUser done', {
+    userId: userId.slice(0, 8),
+    cloudCount: cloudList.length,
+    migrated: Object.keys(idMap).length,
+  });
+
+  return { cloudList, idMap, errors };
+}
+
 export type SyncPullResult = {
   dailyDates: number;
   weights: number;
@@ -223,7 +437,7 @@ export type SyncPullResult = {
   reminders: number;
   photoDates: number;
   weeklyReports: number;
-  errors: string[];
+  issues: SyncIssue[];
 };
 
 /**
@@ -236,7 +450,7 @@ export async function pullCloudDataIntoLocal(
   cloudCatIds: string[],
   usageDate: string
 ): Promise<SyncPullResult> {
-  const errors: string[] = [];
+  const issues: SyncIssue[] = [];
   let dailyDates = 0;
   let weights = 0;
   let months = 0;
@@ -249,8 +463,14 @@ export async function pullCloudDataIntoLocal(
 
     const photoByDate = new Map<string, { abnormalPhotos: string[]; dailyPhotos: string[] }>();
     const { data: photoRows, error: photoErr } = await fetchAllDailyPhotosForCat(supabase, catId);
-    if (photoErr) errors.push(`photos ${catId}: ${photoErr.message}`);
-    else {
+    appendDbError(issues, {
+      table: 'daily_record_photos',
+      action: 'select',
+      error: photoErr,
+      catId,
+      source: 'pull',
+    });
+    if (!photoErr) {
       for (const row of photoRows) {
         photoByDate.set(row.record_date, {
           abnormalPhotos: row.abnormal_photos,
@@ -261,8 +481,14 @@ export async function pullCloudDataIntoLocal(
     }
 
     const { data: dailyRows, error: dailyErr } = await fetchAllDailyRecordsForCat(supabase, catId);
-    if (dailyErr) errors.push(`daily ${catId}: ${dailyErr.message}`);
-    else {
+    appendDbError(issues, {
+      table: 'daily_records',
+      action: 'select',
+      error: dailyErr,
+      catId,
+      source: 'pull',
+    });
+    if (!dailyErr) {
       const datesDone = new Set<string>();
       for (const row of dailyRows) {
         writeMergedDailyToLocal(catId, row.record_date, row.data, photoByDate.get(row.record_date));
@@ -277,26 +503,29 @@ export async function pullCloudDataIntoLocal(
     }
 
     const { data: weightRows, error: weightErr } = await fetchWeightRecordsForCat(supabase, catId);
-    if (weightErr) errors.push(`weight ${catId}: ${weightErr.message}`);
-    else {
-      let localWeights: AppWeightRecord[] = [];
-      const raw = safeGetItem(weightStorageKey(catId));
-      if (raw) {
-        try {
-          const p = JSON.parse(raw);
-          if (Array.isArray(p)) localWeights = p as AppWeightRecord[];
-        } catch {
-          /* ignore */
-        }
-      }
+    appendDbError(issues, {
+      table: 'weight_records',
+      action: 'select',
+      error: weightErr,
+      catId,
+      source: 'pull',
+    });
+    if (!weightErr) {
+      const localWeights = parseLocalWeightRecords(catId);
       const merged = mergeWeightRecords(weightRows, localWeights);
       safeSetItem(weightStorageKey(catId), JSON.stringify(merged));
       weights += merged.length;
     }
 
     const { data: monthRows, error: monthErr } = await fetchMonthlyRecordsForCat(supabase, catId);
-    if (monthErr) errors.push(`monthly ${catId}: ${monthErr.message}`);
-    else {
+    appendDbError(issues, {
+      table: 'monthly_records',
+      action: 'select',
+      error: monthErr,
+      catId,
+      source: 'pull',
+    });
+    if (!monthErr) {
       for (const row of monthRows) {
         safeSetItem(monthlyStorageKey(catId, row.monthKey), JSON.stringify(row.data));
         months += 1;
@@ -304,8 +533,14 @@ export async function pullCloudDataIntoLocal(
     }
 
     const { data: cloudWeeklies, error: weekErr } = await fetchWeeklyReportsForCat(supabase, catId);
-    if (weekErr) errors.push(`weekly ${catId}: ${weekErr.message}`);
-    else {
+    appendDbError(issues, {
+      table: 'weekly_reports',
+      action: 'select',
+      error: weekErr,
+      catId,
+      source: 'pull',
+    });
+    if (!weekErr) {
       for (const cloud of cloudWeeklies) {
         const local = loadSavedWeeklyReport(catId, cloud.weekEnd);
         const pick = mergeWeeklyBySavedAt(cloud, local);
@@ -317,18 +552,14 @@ export async function pullCloudDataIntoLocal(
   }
 
   const { data: cloudReminders, error: remErr } = await fetchUserReminders(supabase, userId);
-  if (remErr) errors.push(`reminders: ${remErr.message}`);
-  else {
-    const raw = safeGetItem(remindersStorageKey(userId));
-    let localReminders: Reminder[] = [];
-    if (raw) {
-      try {
-        const p = JSON.parse(raw);
-        if (Array.isArray(p)) localReminders = p as Reminder[];
-      } catch {
-        /* ignore */
-      }
-    }
+  appendDbError(issues, {
+    table: 'user_reminders',
+    action: 'select',
+    error: remErr,
+    source: 'pull',
+  });
+  if (!remErr) {
+    const localReminders = parseLocalReminders(userId);
     const merged = mergeReminders(cloudReminders, localReminders);
     safeSetItem(remindersStorageKey(userId), JSON.stringify(merged));
     reminders = merged.length;
@@ -337,21 +568,32 @@ export async function pullCloudDataIntoLocal(
   const clientId = getOrCreateClientId();
   const localDaily = readLocalAiUsageCount(clientId, usageDate);
   const { data: cloudUsage, error: usageErr } = await fetchUserAiUsage(supabase, userId, usageDate);
-  if (usageErr) errors.push(`ai usage: ${usageErr.message}`);
-  else {
+  appendDbError(issues, {
+    table: 'user_ai_usage',
+    action: 'select',
+    error: usageErr,
+    recordKey: usageDate,
+    source: 'pull',
+  });
+  if (!usageErr) {
     const mergedDaily = Math.max(cloudUsage?.daily_used ?? 0, localDaily);
     writeLocalAiUsageCount(clientId, usageDate, mergedDaily);
   }
 
   const localPlan = getAiPlan();
   const { plan: cloudPlan, error: planErr } = await fetchUserAiPlan(supabase, userId);
-  if (planErr) errors.push(`ai plan: ${planErr.message}`);
-  else {
+  appendDbError(issues, {
+    table: 'user_preferences',
+    action: 'select',
+    error: planErr,
+    source: 'pull',
+  });
+  if (!planErr) {
     const mergedPlan = mergeAiPlan(cloudPlan, localPlan);
     setAiPlan(mergedPlan);
   }
 
-  return { dailyDates, weights, months, reminders, photoDates, weeklyReports, errors };
+  return { dailyDates, weights, months, reminders, photoDates, weeklyReports, issues };
 }
 
 /**
@@ -364,8 +606,8 @@ export async function pushLocalDataToCloud(
   cloudCatIds: string[],
   localReminders: Reminder[],
   usageDate: string
-): Promise<string[]> {
-  const errors: string[] = [];
+): Promise<SyncIssue[]> {
+  const issues: SyncIssue[] = [];
 
   for (const catId of cloudCatIds) {
     if (!isCloudCatId(catId)) continue;
@@ -380,7 +622,14 @@ export async function pushLocalDataToCloud(
           data: strip,
           updatedBy: userId,
         });
-        if (error) errors.push(`daily upsert ${catId} ${date}: ${error.message}`);
+        appendDbError(issues, {
+          table: 'daily_records',
+          action: 'upsert',
+          error,
+          catId,
+          recordKey: date,
+          source: 'push',
+        });
       }
       if (hasDailyPhotos(localFull)) {
         const { error } = await upsertDailyPhotosCloud(supabase, {
@@ -390,27 +639,32 @@ export async function pushLocalDataToCloud(
           dailyPhotos: getPhotoList(localFull.dailyPhotos),
           updatedBy: userId,
         });
-        if (error) errors.push(`photos upsert ${catId} ${date}: ${error.message}`);
+        appendDbError(issues, {
+          table: 'daily_record_photos',
+          action: 'upsert',
+          error,
+          catId,
+          recordKey: date,
+          source: 'push',
+        });
       }
     }
 
-    const rawW = safeGetItem(weightStorageKey(catId));
-    if (rawW) {
-      try {
-        const parsed = JSON.parse(rawW) as AppWeightRecord[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const { error, records } = await upsertWeightRecordsForCat(supabase, catId, parsed, userId);
-          if (error) {
-            errors.push(`weight upsert ${catId}: ${error.message}`);
-          } else {
-            clearWeightsPendingSync(catId);
-            if (records.length > 0) {
-              safeSetItem(weightStorageKey(catId), JSON.stringify(records));
-            }
-          }
+    const parsed = parseLocalWeightRecords(catId);
+    if (parsed.length > 0) {
+      const { error, records } = await upsertWeightRecordsForCat(supabase, catId, parsed, userId);
+      appendDbError(issues, {
+        table: 'weight_records',
+        action: 'upsert',
+        error,
+        catId,
+        source: 'push',
+      });
+      if (!error) {
+        clearWeightsPendingSync(catId);
+        if (records.length > 0) {
+          safeSetItem(weightStorageKey(catId), JSON.stringify(records));
         }
-      } catch {
-        /* ignore */
       }
     }
 
@@ -426,9 +680,22 @@ export async function pushLocalDataToCloud(
           data,
           updatedBy: userId,
         });
-        if (error) errors.push(`monthly upsert ${catId} ${monthKey}: ${error.message}`);
-      } catch {
-        /* ignore */
+        appendDbError(issues, {
+          table: 'monthly_records',
+          action: 'upsert',
+          error,
+          catId,
+          recordKey: monthKey,
+          source: 'push',
+        });
+      } catch (e) {
+        console.warn('[cloud-sync] corrupt local monthly JSON', {
+          table: 'localStorage',
+          action: 'select',
+          catId,
+          recordKey: monthKey,
+          message: e instanceof Error ? e.message : String(e),
+        });
       }
     }
 
@@ -440,24 +707,47 @@ export async function pushLocalDataToCloud(
         savedAt: saved.savedAt,
         updatedBy: userId,
       });
-      if (error) errors.push(`weekly upsert ${catId} ${saved.weekEnd}: ${error.message}`);
+      appendDbError(issues, {
+        table: 'weekly_reports',
+        action: 'upsert',
+        error,
+        catId,
+        recordKey: saved.weekEnd,
+        source: 'push',
+      });
     }
 
   }
 
   const { error: remUpErr } = await upsertUserReminders(supabase, userId, localReminders);
-  if (remUpErr) errors.push(`reminders upsert: ${remUpErr.message}`);
+  appendDbError(issues, {
+    table: 'user_reminders',
+    action: 'upsert',
+    error: remUpErr,
+    source: 'push',
+  });
 
   const clientId = getOrCreateClientId();
   const dailyUsed = readLocalAiUsageCount(clientId, usageDate);
   const { error: usageUpErr } = await upsertUserAiUsage(supabase, userId, usageDate, dailyUsed, 0);
-  if (usageUpErr) errors.push(`ai usage upsert: ${usageUpErr.message}`);
+  appendDbError(issues, {
+    table: 'user_ai_usage',
+    action: 'upsert',
+    error: usageUpErr,
+    recordKey: usageDate,
+    source: 'push',
+  });
 
   const plan: AiPlan = getAiPlan();
   const { error: planUpErr } = await upsertUserAiPlan(supabase, userId, plan);
-  if (planUpErr) errors.push(`ai plan upsert: ${planUpErr.message}`);
+  appendDbError(issues, {
+    table: 'user_preferences',
+    action: 'upsert',
+    error: planUpErr,
+    source: 'push',
+  });
 
-  return errors;
+  return issues;
 }
 
 /** Push one weekly report after save. */

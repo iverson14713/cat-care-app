@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 
 export type UserAiUsageRow = {
   usage_date: string;
@@ -10,7 +11,7 @@ export async function fetchUserAiUsage(
   supabase: SupabaseClient,
   userId: string,
   usageDate: string
-): Promise<{ data: UserAiUsageRow | null; error: Error | null }> {
+): Promise<{ data: UserAiUsageRow | null; error: DbError | null }> {
   const { data, error } = await supabase
     .from('user_ai_usage')
     .select('usage_date, daily_used, vet_used')
@@ -18,7 +19,7 @@ export async function fetchUserAiUsage(
     .eq('usage_date', usageDate)
     .maybeSingle();
 
-  if (error) return { data: null, error: new Error(error.message) };
+  if (error) return { data: null, error: mapSupabaseErr(error) };
   if (!data) return { data: null, error: null };
   return {
     data: {
@@ -36,7 +37,7 @@ export async function upsertUserAiUsage(
   usageDate: string,
   dailyUsed: number,
   vetUsed: number
-): Promise<{ error: Error | null }> {
+): Promise<{ error: DbError | null }> {
   const { error } = await supabase.from('user_ai_usage').upsert(
     {
       user_id: userId,
@@ -47,7 +48,7 @@ export async function upsertUserAiUsage(
     },
     { onConflict: 'user_id,usage_date' }
   );
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }
 

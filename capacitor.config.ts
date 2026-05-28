@@ -2,9 +2,8 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
  * Native WebView origin: https://petcare.app
- * Supabase → Authentication → URL Configuration → Redirect URLs:
- *   https://petcare.app/auth/callback
- *   petcare://auth/callback
+ * Email / web sign-in callback: https://petcare.app/auth/callback
+ * iOS custom scheme: petcare://auth/callback
  */
 const config: CapacitorConfig = {
   appId: 'com.wayne.petcare',

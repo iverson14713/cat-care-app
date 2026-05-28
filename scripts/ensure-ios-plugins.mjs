@@ -1,5 +1,7 @@
 /**
- * cap sync only registers node_modules plugins — keep local Capacitor plugins in packageClassList.
+ * `npx cap sync ios` only lists node_modules plugins in `packageClassList`.
+ * Append local App-target plugins here. Prefer: `npm run cap:sync:ios` or `node scripts/cap-sync-ios.mjs`
+ * (runs this automatically after sync).
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';

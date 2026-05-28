@@ -1,5 +1,7 @@
+import { assistantApiUrl } from './lib/assistantApiBase';
 import type { LocalAiQuotaFields } from './aiClient';
-import type { VetReportAiSummary } from './vetReportData';
+import type { VetReportAiSummary, VetReportPayload } from './vetReportData';
+import { mergeVetReportSummary } from './vetReportAiEnhance';
 
 export class VetReportApiError extends Error {
   readonly code?: string;
@@ -75,22 +77,34 @@ export async function generateVetReportAiSummary(
   lang: 'zh' | 'en',
   recordContext: string,
   meta: { clientId: string; catId: string; usageDate: string; plan: 'free' | 'pro' },
-  signal?: AbortSignal
+  options?: { report?: VetReportPayload; petType?: 'cat' | 'dog'; signal?: AbortSignal }
 ): Promise<VetReportAiResult> {
-  const res = await fetch('/api/assistant/vet-report', {
+  const signal = options?.signal;
+  const requestBody = {
+    lang,
+    recordContext,
+    clientId: meta.clientId,
+    catId: meta.catId,
+    usageDate: meta.usageDate,
+    plan: meta.plan,
+  };
+  console.log('[AI vet-report] request payload', {
+    ...requestBody,
+    recordContextChars: recordContext.length,
+    recordContextPreview: recordContext.slice(0, 2500),
+  });
+
+  const res = await fetch(assistantApiUrl('/api/assistant/vet-report'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      lang,
-      recordContext,
-      clientId: meta.clientId,
-      catId: meta.catId,
-      usageDate: meta.usageDate,
-      plan: meta.plan,
-    }),
+    body: JSON.stringify(requestBody),
     signal,
   });
   const text = await res.text();
+  console.log('[AI vet-report] raw response', {
+    status: res.status,
+    preview: text.slice(0, 2500),
+  });
   let data: Record<string, unknown> = {};
   try {
     data = JSON.parse(text) as Record<string, unknown>;
@@ -113,7 +127,12 @@ export async function generateVetReportAiSummary(
     const msg = friendlyVetReportAiError(raw, lang, res.status);
     throw new VetReportApiError(msg, code, res.status);
   }
-  const summary = parseAiSummary(data);
-  if (!summary) throw new VetReportApiError('Invalid AI response', 'OPENAI', res.status);
+  const parsed = parseAiSummary(data);
+  if (!parsed) throw new VetReportApiError('Invalid AI response', 'OPENAI', res.status);
+  const summary =
+    options?.report != null
+      ? mergeVetReportSummary(parsed, options.report, lang, options.petType ?? 'cat')
+      : parsed;
+  console.log('[AI vet-report] merged summary', summary);
   return { summary, quota: parseQuotaFromResponse(data) };
 }

@@ -8,10 +8,13 @@ import {
   mergeAndNormalizeCats,
   normalizeAllCats,
   normalizeAndPersistCats,
-  normalizeCat,
   type NormalizedCat,
 } from './catNormalize';
-import { migrateOfflineCatsToCloud, pullCloudDataIntoLocal, pushLocalDataToCloud } from './cloudDataSync';
+import {
+  pullCloudDataIntoLocal,
+  pushLocalDataToCloud,
+  reconcileCloudPetsForUser,
+} from './cloudDataSync';
 import { loadReminders, saveReminders, type Reminder } from './reminders';
 import { safeGetItem, safeSetItem } from './safeStorage';
 import {
@@ -20,7 +23,7 @@ import {
   selectedCatStorageKey,
   setActiveStorageUser,
 } from './userStorageScope';
-import { fetchCatsForUser, isCloudCatId, type AppCat } from './supabaseCats';
+import { isCloudCatId, type AppCat } from './supabaseCats';
 import { fetchMyCatRolesMap, type CatAccessRole } from './supabaseSharedCare';
 import { getSupabaseClient } from './supabaseClient';
 
@@ -73,7 +76,7 @@ function buildLocalCore(uid: string) {
   const usageDate = todayKey();
   setActiveStorageUser(uid || null);
   const reminders = loadReminders();
-  const appPlan = getSubscriptionStatus();
+  const appPlan = uid ? getSubscriptionStatus(uid) : 'free';
   const cats = normalizeAndPersistCats(uid, uid || undefined);
   const selectedCatId = pickSelectedCatId(cats, uid || undefined);
   const assistantQuota = buildAssistantHealthFromLocal(appPlan, aiClientId, usageDate);
@@ -119,22 +122,23 @@ export async function runAppBootstrap(
       };
     }
 
-    let localCats = normalizeAllCats(loadRawCatsFromStorage(uid), uid);
-    const offline = localCats.filter((c) => !isCloudCatId(c.id));
-    if (offline.length > 0) {
-      const mig = await migrateOfflineCatsToCloud(sb, uid, localCats as unknown as AppCat[]);
-      if (mig.errors.length > 0) console.warn('[bootstrap offline cat migrate]', mig.errors.join('; '));
-      localCats = normalizeAllCats(
-        mig.cats.map((c) => normalizeCat(c, uid)).filter(Boolean) as NormalizedCat[],
-        uid
-      );
-      safeSetItem(catsStorageKey(uid), JSON.stringify(localCats));
-      const remapped = mig.idMap[selectedCatId];
-      if (remapped) selectedCatId = remapped;
+    let localCats = normalizeAllCats(loadRawCatsFromStorage(uid), uid, {
+      injectDefaultIfEmpty: false,
+    });
+    const reconcile = await reconcileCloudPetsForUser(
+      sb,
+      uid,
+      localCats as unknown as AppCat[],
+      selectedCatId
+    );
+    if (reconcile.errors.length > 0) {
+      console.warn('[bootstrap pets reconcile]', reconcile.errors.join('; '));
     }
+    const remapped = reconcile.idMap[selectedCatId];
+    if (remapped) selectedCatId = remapped;
 
-    const { data: cloudList, error } = await fetchCatsForUser(sb);
-    if (!error) {
+    const cloudList = reconcile.cloudList;
+    if (cloudList.length >= 0) {
       const cloudIdSet = new Set(cloudList.map((c) => c.id));
       const localFiltered = localCats.filter((c) => !isCloudCatId(c.id) || cloudIdSet.has(c.id));
       cats = mergeAndNormalizeCats(cloudList, localFiltered, uid);
@@ -152,8 +156,17 @@ export async function runAppBootstrap(
       const cloudIds = cats.filter((c) => isCloudCatId(c.id) && cloudIdSet.has(c.id)).map((c) => c.id);
       if (cloudIds.length > 0) {
         await pullCloudDataIntoLocal(sb, uid, cloudIds, usageDate);
-        const pushErrs = await pushLocalDataToCloud(sb, uid, cloudIds, reminders, usageDate);
-        if (pushErrs.length > 0) console.warn('[bootstrap cloud push]', pushErrs.join('; '));
+        const pushIssues = await pushLocalDataToCloud(sb, uid, cloudIds, reminders, usageDate);
+        if (pushIssues.length > 0) {
+          for (const issue of pushIssues) {
+            console.warn('[bootstrap cloud push]', {
+              table: issue.table,
+              action: issue.action,
+              code: issue.code ?? null,
+              message: issue.message,
+            });
+          }
+        }
       }
 
       reminders = loadReminders();

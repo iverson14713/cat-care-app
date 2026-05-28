@@ -1,8 +1,9 @@
 import { Crown, Lock } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { isPetCareDevMode } from '../lib/petCareDevMode';
 import { SUBSCRIPTION_PRICING } from '../subscription/constants';
-import { fetchStoreProductPrices, isNativeIapAvailable } from '../subscription/iapBridge';
+import { isNativeIapAvailable } from '../subscription/iapBridge';
+import { useStoreProductPrices } from '../subscription/useStoreProductPrices';
 import type { BillingPeriod, SubscriptionStatus } from '../subscription/types';
 
 type Lang = 'zh' | 'en';
@@ -25,7 +26,10 @@ const copy = {
     selectPlan: '選擇方案',
     monthlyLabel: '月訂閱',
     yearlyLabel: '年訂閱',
-    loadingPrices: '正在載入價格…',
+    loadingPrices: '方案載入中…',
+    pricesError: '暫時無法取得訂閱方案，請稍後再試',
+    guestPlanHint: '登入後可同步訂閱狀態',
+    signInToSubscribe: '請先登入後再訂閱 Pro',
   },
   en: {
     section: 'Subscription',
@@ -45,13 +49,18 @@ const copy = {
     selectPlan: 'Choose a plan',
     monthlyLabel: 'Monthly',
     yearlyLabel: 'Yearly',
-    loadingPrices: 'Loading prices…',
+    loadingPrices: 'Loading plans…',
+    pricesError: 'Could not load subscription plans. Please try again later.',
+    guestPlanHint: 'Sign in to sync your subscription',
+    signInToSubscribe: 'Please sign in to subscribe to Pro',
   },
 } as const;
 
 export type ProSubscriptionPanelProps = {
   lang: Lang;
   status: SubscriptionStatus;
+  /** When false, show Free + sign-in hint; upgrade UI stays available. */
+  isLoggedIn?: boolean;
   busy?: boolean;
   onUpgrade: (period: BillingPeriod) => void;
   onDowngrade: () => void;
@@ -62,6 +71,7 @@ export type ProSubscriptionPanelProps = {
 export function ProSubscriptionPanel({
   lang,
   status,
+  isLoggedIn = true,
   busy = false,
   onUpgrade,
   onDowngrade,
@@ -71,26 +81,22 @@ export function ProSubscriptionPanel({
   const t = copy[lang];
   const [period, setPeriod] = useState<BillingPeriod>('yearly');
   const nativeBilling = isNativeIapAvailable();
-  const [storePrices, setStorePrices] = useState<Partial<Record<BillingPeriod, string>>>({});
-  const [pricesLoading, setPricesLoading] = useState(nativeBilling);
+  const { status: pricesStatus, prices: storePrices } = useStoreProductPrices(lang);
 
-  useEffect(() => {
-    if (!nativeBilling) return;
-    let cancelled = false;
-    void fetchStoreProductPrices().then((prices) => {
-      if (!cancelled) {
-        setStorePrices(prices);
-        setPricesLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [nativeBilling]);
+  const priceForPeriod = (p: BillingPeriod): string => {
+    if (pricesStatus === 'loading') return t.loadingPrices;
+    if (pricesStatus === 'error') return t.pricesError;
+    if (pricesStatus === 'ready' && storePrices[p]) return storePrices[p]!;
+    return p === 'monthly' ? t.monthly : t.yearly;
+  };
 
-  const monthlyDisplay = storePrices.monthly ?? t.monthly;
-  const yearlyDisplay = storePrices.yearly ?? t.yearly;
+  const monthlyDisplay = priceForPeriod('monthly');
+  const yearlyDisplay = priceForPeriod('yearly');
+  const pricesReady = pricesStatus === 'ready' && Boolean(storePrices.monthly && storePrices.yearly);
+  const pricesBlocked = nativeBilling && (pricesStatus === 'loading' || pricesStatus === 'error');
   const showDevDowngrade = isPetCareDevMode() && !nativeBilling;
+  const displayStatus: SubscriptionStatus = isLoggedIn ? status : 'free';
+  const showUpgradeUi = displayStatus === 'free';
 
   return (
     <section
@@ -114,7 +120,7 @@ export function ProSubscriptionPanel({
         <p className="text-sm text-stone-700">
           {t.current}：
           <span className="font-bold text-orange-600">
-            {status === 'pro' ? (
+            {displayStatus === 'pro' ? (
               <span className="inline-flex items-center gap-1">
                 <Crown className="inline h-3.5 w-3.5 text-amber-500" aria-hidden />
                 {t.pro}
@@ -127,20 +133,26 @@ export function ProSubscriptionPanel({
             )}
           </span>
         </p>
+        {!isLoggedIn ? (
+          <p className="mt-2 text-[11px] leading-snug text-stone-500">{t.guestPlanHint}</p>
+        ) : null}
       </div>
 
-      {status === 'free' ? (
+      {showUpgradeUi ? (
         <>
           <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-stone-500">{t.selectPlan}</p>
-          {pricesLoading ? (
+          {pricesStatus === 'loading' ? (
             <p className="mt-2 text-center text-[11px] text-stone-500">{t.loadingPrices}</p>
+          ) : null}
+          {pricesStatus === 'error' ? (
+            <p className="mt-2 text-center text-[11px] font-medium text-amber-800">{t.pricesError}</p>
           ) : null}
           <div className="mt-2 grid grid-cols-2 gap-2">
             {(['monthly', 'yearly'] as const).map((p) => (
               <button
                 key={p}
                 type="button"
-                disabled={busy}
+                disabled={busy || pricesBlocked}
                 onClick={() => setPeriod(p)}
                 className={`rounded-2xl border px-3 py-3 text-left transition active:scale-[0.99] ${
                   period === p
@@ -165,11 +177,11 @@ export function ProSubscriptionPanel({
 
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || pricesBlocked || (nativeBilling && !pricesReady)}
             onClick={() => onUpgrade(period)}
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3.5 text-sm font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99] disabled:opacity-60"
           >
-            {t.upgrade}
+            {isLoggedIn ? t.upgrade : t.signInToSubscribe}
           </button>
         </>
       ) : showDevDowngrade ? (

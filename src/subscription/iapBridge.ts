@@ -90,16 +90,9 @@ export async function restoreViaStoreKit(): Promise<PurchaseResult> {
   }
 }
 
+/** @deprecated Use loadStoreProductPrices from ./storeProductPrices */
 export async function fetchStoreProductPrices(): Promise<Partial<Record<BillingPeriod, string>>> {
-  if (!isNativeIapAvailable()) return {};
-  try {
-    const { products } = await PetCareIAP.getProducts();
-    const map: Partial<Record<BillingPeriod, string>> = {};
-    for (const p of products) {
-      map[p.period] = p.displayPrice;
-    }
-    return map;
-  } catch {
-    return {};
-  }
+  const { loadStoreProductPrices } = await import('./storeProductPrices');
+  const r = await loadStoreProductPrices('zh');
+  return r.status === 'ready' ? r.prices : {};
 }

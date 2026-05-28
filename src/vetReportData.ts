@@ -1,7 +1,16 @@
 /** Build vet handoff report from localStorage only (no Supabase daily_records). */
 
+import {
+  buildStructuredCareEventLines,
+  buildWeightNarrativeLines,
+  describeWeightTrendForAi,
+  formatDayCareChecklistLine,
+} from './aiRecordNarrative';
+import type { DailyData, Lang } from './aiCareAssistant';
+import { loadReminders, type Reminder } from './reminders';
 import { safeLoadJson } from './safeStorage';
 import { dailyStorageKey, weightStorageKey } from './userStorageScope';
+import { normalizePetType } from './petTypes';
 
 export type VetReportCatProfile = {
   id: string;
@@ -65,7 +74,7 @@ function getPhotoList(value: unknown): string[] {
   return [];
 }
 
-function loadDailyRecord(catId: string, date: string): Record<string, unknown> {
+export function loadDailyRecord(catId: string, date: string): Record<string, unknown> {
   const key = dailyStorageKey(catId, date);
   const legacyKey = `cat-calendar-daily-${catId}-${date}`;
   let parsed = safeLoadJson<Record<string, unknown>>(key, {}, `vet daily ${date}`);
@@ -230,33 +239,149 @@ export function buildVetReport(
   };
 }
 
+function loadDailyDaysInRange(
+  catId: string,
+  startDate: string,
+  endDate: string
+): { date: string; data: Record<string, unknown> }[] {
+  return datesBetween(startDate, endDate).map((date) => ({
+    date,
+    data: loadDailyRecord(catId, date),
+  }));
+}
+
+function formatReminderForAi(r: Reminder, lang: Lang): string {
+  const zh = lang === 'zh';
+  const repeat =
+    r.repeatType === 'once'
+      ? zh
+        ? `單次 ${r.dueDate ?? ''}`
+        : `once ${r.dueDate ?? ''}`
+      : r.repeatType === 'weekly'
+        ? zh
+          ? `每週`
+          : 'weekly'
+        : r.repeatType === 'monthly'
+          ? zh
+            ? `每月`
+            : 'monthly'
+          : zh
+            ? `每日`
+            : 'daily';
+  return `${r.title} @ ${r.time} (${repeat})${r.enabled ? '' : zh ? ' [已關閉]' : ' [off]'}`;
+}
+
 export function buildVetReportContextText(
   payload: VetReportPayload,
   sections: VetReportSections,
-  lang: 'zh' | 'en'
+  lang: 'zh' | 'en',
+  options?: { petType?: 'cat' | 'dog' }
 ): string {
+  const zh = lang === 'zh';
+  const petType = normalizePetType(options?.petType ?? 'cat');
+  const dayRows = loadDailyDaysInRange(payload.cat.id, payload.startDate, payload.endDate);
+
+  const structuredEvents = buildStructuredCareEventLines(dayRows, lang, petType);
+  const weightLines =
+    sections.weight && payload.weights.length
+      ? buildWeightNarrativeLines(payload.weights, lang)
+      : [];
+
   const lines: string[] = [];
-  lines.push(`Cat: ${payload.cat.name}`);
-  lines.push(`Range: ${payload.startDate} — ${payload.endDate}`);
-  lines.push(`Chronic: ${payload.cat.chronicNote || '-'}`);
-  lines.push(`Allergy: ${payload.cat.allergyNote || '-'}`);
-  if (sections.abnormal) {
-    lines.push('--- Abnormal themes / notes ---');
+  lines.push(zh ? '--- 寵物與報告範圍 ---' : '--- Pet & report range ---');
+  lines.push(`${zh ? '名稱' : 'Name'}: ${payload.cat.name}`);
+  lines.push(`${zh ? '日期' : 'Range'}: ${payload.startDate} — ${payload.endDate}`);
+  lines.push(`${zh ? '慢性病' : 'Chronic'}: ${payload.cat.chronicNote || '—'}`);
+  lines.push(`${zh ? '過敏' : 'Allergy'}: ${payload.cat.allergyNote || '—'}`);
+
+  lines.push('');
+  if (structuredEvents.length > 0) {
+    lines.push(
+      zh
+        ? `--- 結構化照護事件（共 ${structuredEvents.length} 則；必須依此整理，不可回覆「無法整理」） ---`
+        : `--- Structured care events (${structuredEvents.length} total; must use these — do not say "could not summarize") ---`
+    );
+    for (const e of structuredEvents) lines.push(e);
+  } else {
+    lines.push(
+      zh
+        ? '--- 結構化照護事件（共 0 則；此區間無明確異常關鍵字） ---'
+        : '--- Structured care events (0 in range; no explicit abnormal keywords) ---'
+    );
+  }
+
+  if (sections.abnormal && payload.abnormalBullets.length) {
+    lines.push('');
+    lines.push(zh ? '--- 異常主題摘要 ---' : '--- Abnormal theme summary ---');
+    for (const b of payload.abnormalBullets) lines.push(`• ${b}`);
+  }
+
+  if (sections.abnormal && payload.timeline.length) {
+    lines.push('');
+    lines.push(zh ? '--- 異常／備註時間線 ---' : '--- Abnormal / notes timeline ---');
     for (const t of payload.timeline) {
-      lines.push(`${t.date}: ${t.lines.join('; ')}`);
+      lines.push(`${t.date}: ${t.lines.join('；')}`);
     }
   }
-  if (sections.weight && payload.weights.length) {
-    lines.push('--- Weight ---');
-    for (const w of payload.weights) {
-      lines.push(`${w.date}: ${w.weight} kg ${w.note ? `| ${w.note}` : ''}`);
+
+  lines.push('');
+  lines.push(
+    zh
+      ? `--- 每日照護勾選（${dayRows.length} 天；新→舊） ---`
+      : `--- Daily care checklist (${dayRows.length} days; newest first) ---`
+  );
+  for (const row of dayRows) {
+    lines.push(formatDayCareChecklistLine(row.date, row.data as DailyData, lang, petType));
+  }
+
+  if (weightLines.length) {
+    lines.push('');
+    lines.push(zh ? '--- 體重變化（新→舊） ---' : '--- Weight history (newest first) ---');
+    for (const w of weightLines) lines.push(w);
+    lines.push(zh ? '體重趨勢解讀：' : 'Weight trend interpretation: ');
+    lines.push(describeWeightTrendForAi(payload.weights, lang));
+  }
+
+  const blob = [...payload.abnormalBullets, ...payload.timeline.flatMap((t) => t.lines)].join(' ');
+  const signals = {
+    vomiting: /嘔吐|呕吐|vomit/i.test(blob),
+    diarrhea: /拉肚子|軟便|腹瀉|稀便|diarr|loose stool|soft stool/i.test(blob),
+    appetite: /食慾|不吃|吃得少|appetite|not eating|ate less/i.test(blob),
+    energy: /精神|無力|嗜睡|letharg|low energy|inactive/i.test(blob),
+  };
+  if (signals.vomiting || signals.diarrhea || signals.appetite || signals.energy) {
+    lines.push('');
+    lines.push(zh ? '--- 系統偵測重點（撰寫時必須涵蓋） ---' : '--- System-detected focus (must address) ---');
+    if (signals.vomiting) lines.push(zh ? '• 嘔吐相關紀錄' : '• Vomiting mentioned');
+    if (signals.diarrhea) lines.push(zh ? '• 軟便／腹瀉相關紀錄' : '• Diarrhea/soft stool mentioned');
+    if (signals.appetite) lines.push(zh ? '• 食慾變化' : '• Appetite change');
+    if (signals.energy) lines.push(zh ? '• 精神／活動變化' : '• Energy/activity change');
+  }
+
+  const reminders = loadReminders().filter((r) => r.catId === payload.cat.id && r.enabled);
+  if (reminders.length) {
+    lines.push('');
+    lines.push(zh ? '--- 已啟用提醒 ---' : '--- Enabled reminders ---');
+    for (const r of reminders.slice(0, 12)) {
+      lines.push(formatReminderForAi(r, lang));
     }
   }
+
   if (sections.notes && payload.noteDays.length) {
-    lines.push('--- Daily notes ---');
+    lines.push('');
+    lines.push(zh ? '--- 一般今日備註 ---' : '--- General daily notes ---');
     for (const n of payload.noteDays) {
       lines.push(`${n.date}: ${n.dailyNote}`);
     }
   }
-  return lines.join('\n');
+
+  const text = lines.join('\n');
+  if (import.meta.env.DEV) {
+    console.log('[AI vet-report] request payload (recordContext)', {
+      chars: text.length,
+      structuredEventCount: structuredEvents.length,
+      preview: text.slice(0, 2000),
+    });
+  }
+  return text;
 }

@@ -26,6 +26,14 @@ export const WEEKLY_REPORT_MAX_TOKENS = 2000;
 
 const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
+function missingOpenAiKeyResponse(routeLabel) {
+  console.error(`[PetCare AI] ${routeLabel} — server missing OPENAI_API_KEY`);
+  return {
+    status: 503,
+    json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
+  };
+}
+
 /** After incrementDailyUsed — attach to JSON so clients are not dependent on GET /health query parsing. */
 function dailyQuotaFields(clientId, usageDate, planHint) {
   const limit = getDailyLimit(clientId, planHint);
@@ -93,12 +101,22 @@ function careBundleFirstStringField(obj, keys) {
  * @param {unknown} parsed
  * @param {'zh' | 'en'} lang
  */
-function normalizeCareBundleFromParsed(parsed, lang) {
+function normalizeCareBundleFromParsed(parsed, lang, recordContext = '') {
   const zh = lang === 'zh';
-  const defaults = {
-    quickSummary: zh ? '目前無法產生快速摘要。' : 'Could not produce a quick summary.',
-    careReminders: zh ? '請持續記錄今日照護項目。' : 'Keep logging today’s care items.',
-  };
+  const hasSignals = recordContextHasStructuredEvents(recordContext);
+  const defaults = hasSignals
+    ? {
+        quickSummary: zh
+          ? '最近紀錄中有異常或體重變化，請依「結構化照護事件」留意精神、飲食與排泄。'
+          : 'Recent logs show abnormal or weight cues — see structured events for appetite and elimination.',
+        careReminders: zh
+          ? '• 持續記錄異常備註與體重\n• 留意是否再吐或軟便\n• 症狀加重請諮詢獸醫'
+          : '• Keep logging abnormal notes and weight\n• Watch for repeat vomiting or soft stool\n• Contact your vet if worsening',
+      }
+    : {
+        quickSummary: zh ? '目前無法產生快速摘要。' : 'Could not produce a quick summary.',
+        careReminders: zh ? '請持續記錄今日照護項目。' : 'Keep logging today’s care items.',
+      };
   let obj =
     parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? /** @type {Record<string, unknown>} */ (parsed)
@@ -255,6 +273,17 @@ async function runAssistantOpenAiCounted(opts) {
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    const code =
+      e && typeof e === 'object' && 'code' in e && typeof e.code === 'string'
+        ? e.code
+        : e?.code === 'NO_API_KEY'
+          ? 'NO_API_KEY'
+          : 'OPENAI';
+    if (code === 'NO_API_KEY') {
+      console.error('[PetCare AI] server missing OPENAI_API_KEY');
+    } else {
+      console.error('[PetCare AI] OpenAI call failed', { feature, code, message: msg.slice(0, 500) });
+    }
     logLine({
       userId: clientId,
       catId,
@@ -271,7 +300,7 @@ async function runAssistantOpenAiCounted(opts) {
       status: 502,
       json: {
         error: 'The AI service returned an error. Please try again later.',
-        code: 'OPENAI',
+        code,
         detail: msg.slice(0, 300),
       },
     };
@@ -279,6 +308,11 @@ async function runAssistantOpenAiCounted(opts) {
 }
 
 async function handleCareBundle(lang, recordContext) {
+  console.log('[AI care-bundle] request payload (recordContext)', {
+    chars: recordContext.length,
+    hasStructuredEvents: recordContextHasStructuredEvents(recordContext),
+    preview: recordContext.slice(0, 2500),
+  });
   const { content, usage } = await openAiChatCompletion({
     messages: [
       { role: 'system', content: systemBase(lang) },
@@ -288,11 +322,12 @@ async function handleCareBundle(lang, recordContext) {
     maxTokens: CARE_MAX_TOKENS,
     jsonMode: true,
   });
+  console.log('[AI care-bundle] raw response', { preview: content.slice(0, 2500) });
 
   let bundle;
   try {
     const parsed = tryParseJsonObject(content);
-    bundle = normalizeCareBundleFromParsed(parsed, lang);
+    bundle = normalizeCareBundleFromParsed(parsed, lang, recordContext);
   } catch {
     bundle = careBundleFromUnparsedContent(lang, content);
   }
@@ -374,6 +409,9 @@ export function assistHealthGET(searchParams) {
   const usageDate = (searchParams.get('usageDate') || '').trim();
   const planHint = planHintFromBody(searchParams.get('plan'));
   const openaiReady = Boolean(process.env.OPENAI_API_KEY?.trim());
+  if (!openaiReady) {
+    console.error('[PetCare AI] GET /api/assistant/health — server missing OPENAI_API_KEY');
+  }
   if (!isClientId(clientId) || !isYmd(usageDate)) {
     return {
       status: 200,
@@ -443,10 +481,7 @@ export async function assistCareBundlePOST(body) {
   }
 
   if (!process.env.OPENAI_API_KEY?.trim()) {
-    return {
-      status: 503,
-      json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
-    };
+    return missingOpenAiKeyResponse('POST /api/assistant/care-bundle');
   }
 
   return runAssistantOpenAiCounted({
@@ -509,10 +544,7 @@ export async function assistQaPOST(body) {
   }
 
   if (!process.env.OPENAI_API_KEY?.trim()) {
-    return {
-      status: 503,
-      json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
-    };
+    return missingOpenAiKeyResponse('POST /api/assistant/qa');
   }
 
   return runAssistantOpenAiCounted({
@@ -568,10 +600,7 @@ export async function assistWeeklyReportPOST(body) {
   }
 
   if (!process.env.OPENAI_API_KEY?.trim()) {
-    return {
-      status: 503,
-      json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
-    };
+    return missingOpenAiKeyResponse('POST /api/assistant/weekly-report');
   }
 
   return runAssistantOpenAiCounted({
@@ -587,33 +616,113 @@ export async function assistWeeklyReportPOST(body) {
   });
 }
 
-function normalizeVetReportFromParsed(parsed, lang) {
-  const defaults = {
-    watchItems: lang === 'zh' ? '目前無法整理需注意事項。' : 'Could not summarize watch items.',
-    observeDirections:
-      lang === 'zh' ? '目前無法整理觀察方向。' : 'Could not summarize observation directions.',
-    vetHandoff: lang === 'zh' ? '目前無法整理獸醫重點。' : 'Could not summarize vet handoff.',
+function recordContextHasStructuredEvents(recordContext) {
+  const m = String(recordContext).match(/結構化照護事件（共 (\d+) 則/);
+  if (m && Number(m[1]) > 0) return true;
+  const m2 = String(recordContext).match(/Structured care events \((\d+) total\)/i);
+  if (m2 && Number(m2[1]) > 0) return true;
+  return false;
+}
+
+function isWeakVetReportField(text, lang) {
+  const t = String(text || '').trim();
+  if (!t || t === '—' || t === '-') return true;
+  const weakZh = ['無法整理', '目前無法', '資料不足', '減少至', '增加至'];
+  const weakEn = ['could not summarize', 'unable to summarize', 'insufficient data'];
+  const patterns = lang === 'zh' ? weakZh : weakEn;
+  if (patterns.some((p) => t.includes(p))) return true;
+  if (/^\d{4}-\d{2}-\d{2}：/.test(t) && t.length < 48) return true;
+  if (/^\d{1,2}\/\d{1,2}：/.test(t) && t.length < 48) return true;
+  return false;
+}
+
+function recordContextHasCareConcerns(recordContext) {
+  const ctx = String(recordContext);
+  if (recordContextHasStructuredEvents(ctx)) return true;
+  return /嘔吐|呕吐|vomit|拉肚子|軟便|腹瀉|食慾|appetite|精神|letharg/i.test(ctx);
+}
+
+function vetReportFallbackSummary(lang, recordContext) {
+  const zh = lang === 'zh';
+  const ctx = String(recordContext);
+  const vomiting = /嘔吐|呕吐|vomit/i.test(ctx);
+  const diarrhea = /拉肚子|軟便|腹瀉|稀便|diarr|loose stool|soft stool/i.test(ctx);
+  const appetite = /食慾|不吃|吃得少|appetite|not eating/i.test(ctx);
+  const parts = [];
+  if (vomiting) parts.push(zh ? '嘔吐' : 'vomiting');
+  if (diarrhea) parts.push(zh ? '軟便／腹瀉' : 'soft stool/diarrhea');
+  if (appetite) parts.push(zh ? '食慾變化' : 'appetite changes');
+
+  const watchItems =
+    parts.length >= 2
+      ? zh
+        ? `近期紀錄出現${parts.slice(0, 2).join('與')}等狀況，建議持續觀察排便型態、食慾與活動力；若症狀持續超過 1～2 天，建議諮詢獸醫。`
+        : `Recent logs mention ${parts.slice(0, 2).join(' and ')}. Keep watching stool, appetite, and energy; contact your vet if symptoms last more than 1–2 days.`
+      : parts.length === 1
+        ? zh
+          ? `近期紀錄出現${parts[0]}相關描述，建議持續觀察精神、飲食與排泄；若加重請諮詢獸醫。`
+          : `Recent logs suggest ${parts[0]}. Monitor energy, eating, and elimination; see your vet if worsening.`
+        : zh
+          ? '此期間照護紀錄未見明顯異常關鍵字，建議維持日常記錄習慣。'
+          : 'No clear abnormal keywords in this period — keep logging daily.';
+
+  return {
+    watchItems,
+    observeDirections: zh
+      ? '可持續記錄每日進食量與排便情況。若再次出現嘔吐、腹瀉或精神不佳，建議進一步就醫評估。'
+      : 'Keep logging daily food intake and stool. Seek care for repeat vomiting, diarrhea, or low energy.',
+    vetHandoff: zh
+      ? '請依「異常／備註時間線」與體重趨勢解讀向獸醫說明最近照護紀錄。'
+      : 'Use the abnormal timeline and weight interpretation when speaking with your vet.',
   };
+}
+
+function normalizeVetReportFromParsed(parsed, lang, recordContext = '') {
+  const hasSignals = recordContextHasCareConcerns(recordContext);
+  const fallback = vetReportFallbackSummary(lang, recordContext);
+  const defaults = hasSignals
+    ? fallback
+    : {
+        watchItems: lang === 'zh' ? '此期間照護紀錄平穩，建議維持日常記錄。' : 'Records look routine — keep logging daily.',
+        observeDirections:
+          lang === 'zh'
+            ? '可持續記錄進食、喝水與排便，方便日後比較。'
+            : 'Keep logging food, water, and stool for future comparison.',
+        vetHandoff:
+          lang === 'zh'
+            ? '此期間無明顯異常摘要，可依需要補充飲食與生活習慣。'
+            : 'No major abnormal summary in this period; add diet and routine notes as needed.',
+      };
   const obj =
     parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? /** @type {Record<string, unknown>} */ (parsed)
       : {};
-  const watchItems =
-    typeof obj.watchItems === 'string' && obj.watchItems.trim()
-      ? obj.watchItems.trim()
-      : defaults.watchItems;
-  const observeDirections =
+  const rawWatch =
+    typeof obj.watchItems === 'string' && obj.watchItems.trim() ? obj.watchItems.trim() : '';
+  const rawObserve =
     typeof obj.observeDirections === 'string' && obj.observeDirections.trim()
       ? obj.observeDirections.trim()
-      : defaults.observeDirections;
-  const vetHandoff =
-    typeof obj.vetHandoff === 'string' && obj.vetHandoff.trim()
-      ? obj.vetHandoff.trim()
-      : defaults.vetHandoff;
+      : '';
+  const rawVet = typeof obj.vetHandoff === 'string' && obj.vetHandoff.trim() ? obj.vetHandoff.trim() : '';
+
+  const watchItems =
+    rawWatch && !(hasSignals && isWeakVetReportField(rawWatch, lang))
+      ? rawWatch
+      : isWeakVetReportField(rawWatch, lang)
+        ? defaults.watchItems
+        : rawWatch || defaults.watchItems;
+  const observeDirections =
+    rawObserve && !isWeakVetReportField(rawObserve, lang) ? rawObserve : defaults.observeDirections;
+  const vetHandoff = rawVet && !isWeakVetReportField(rawVet, lang) ? rawVet : defaults.vetHandoff;
   return { watchItems, observeDirections, vetHandoff };
 }
 
 async function handleVetReport(lang, recordContext) {
+  console.log('[AI vet-report] request payload (recordContext)', {
+    chars: recordContext.length,
+    hasStructuredEvents: recordContextHasStructuredEvents(recordContext),
+    preview: recordContext.slice(0, 2500),
+  });
   const { content, usage } = await openAiChatCompletion({
     messages: [
       { role: 'system', content: systemBase(lang) },
@@ -623,11 +732,12 @@ async function handleVetReport(lang, recordContext) {
     maxTokens: VET_REPORT_MAX_TOKENS,
     jsonMode: true,
   });
+  console.log('[AI vet-report] raw response', { preview: content.slice(0, 2500) });
   let summary;
   try {
-    summary = normalizeVetReportFromParsed(tryParseJsonObject(content), lang);
+    summary = normalizeVetReportFromParsed(tryParseJsonObject(content), lang, recordContext);
   } catch {
-    summary = normalizeVetReportFromParsed({}, lang);
+    summary = normalizeVetReportFromParsed({}, lang, recordContext);
     summary.watchItems = content.trim().slice(0, 1200) || summary.watchItems;
   }
   return { ...summary, usage };
@@ -670,10 +780,7 @@ export async function assistVetReportPOST(body) {
   }
 
   if (!process.env.OPENAI_API_KEY?.trim()) {
-    return {
-      status: 503,
-      json: { error: 'Server is not configured with OPENAI_API_KEY', code: 'NO_API_KEY' },
-    };
+    return missingOpenAiKeyResponse('POST /api/assistant/vet-report');
   }
 
   const planHint = planHintFromBody(b.plan);

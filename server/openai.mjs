@@ -44,7 +44,11 @@ export async function openAiChatCompletion(opts) {
         // ignore
       }
     }
-    throw new Error(`OpenAI HTTP ${res.status}: ${detail || res.statusText || 'unknown'}`);
+    const err = new Error(`OpenAI HTTP ${res.status}: ${detail || res.statusText || 'unknown'}`);
+    if (res.status === 401) err.code = 'OPENAI_AUTH';
+    else if (res.status === 429) err.code = 'OPENAI_RATE';
+    else err.code = 'OPENAI';
+    throw err;
   }
 
   const data = await res.json();

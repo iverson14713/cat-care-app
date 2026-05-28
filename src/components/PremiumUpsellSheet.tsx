@@ -1,8 +1,9 @@
 import { Crown } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { isPetCareDevMode } from '../lib/petCareDevMode';
 import { SUBSCRIPTION_PRICING } from '../subscription/constants';
-import { fetchStoreProductPrices, isNativeIapAvailable } from '../subscription/iapBridge';
+import { isNativeIapAvailable } from '../subscription/iapBridge';
+import { useStoreProductPrices } from '../subscription/useStoreProductPrices';
 import type { BillingPeriod } from '../subscription/types';
 
 type Lang = 'zh' | 'en';
@@ -51,6 +52,8 @@ export const premiumUpsellCopy: Record<Lang, LangCopy> = {
     restore: '恢復購買',
     restoring: '恢復中…',
     appStoreNote: '訂閱費用將透過 App Store 收取，可隨時在 iPhone 設定中管理或取消。',
+    loadingPrices: '方案載入中…',
+    pricesError: '暫時無法取得訂閱方案，請稍後再試',
     subtitle: {
       ai: '今日 AI 次數已用完，升級後可獲得更多照護建議。',
       reminders: '提醒數量已達免費版上限。',
@@ -81,6 +84,8 @@ export const premiumUpsellCopy: Record<Lang, LangCopy> = {
     restore: 'Restore purchases',
     restoring: 'Restoring…',
     appStoreNote: 'Billing is handled by the App Store. Manage or cancel anytime in iPhone Settings.',
+    loadingPrices: 'Loading plans…',
+    pricesError: 'Could not load subscription plans. Please try again later.',
     subtitle: {
       ai: "You've used today's AI quota on the free plan.",
       reminders: "You've reached the free reminder limit.",
@@ -116,18 +121,23 @@ export function PremiumUpsellSheet({
 }: PremiumUpsellSheetProps) {
   const [period, setPeriod] = useState<BillingPeriod>('yearly');
   const nativeBilling = isNativeIapAvailable();
-  const [storePrices, setStorePrices] = useState<Partial<Record<BillingPeriod, string>>>({});
-
-  useEffect(() => {
-    if (!open || !nativeBilling) return;
-    void fetchStoreProductPrices().then(setStorePrices);
-  }, [open, nativeBilling]);
+  const { status: pricesStatus, prices: storePrices } = useStoreProductPrices(lang, open);
 
   if (!open) return null;
   const t = premiumUpsellCopy[lang];
   const sub = t.subtitle[reason] ?? t.subtitle.general;
-  const monthlyDisplay = storePrices.monthly ?? t.priceMonthly;
-  const yearlyDisplay = storePrices.yearly ?? t.priceYearly;
+
+  const priceForPeriod = (p: BillingPeriod): string => {
+    if (pricesStatus === 'loading') return t.loadingPrices;
+    if (pricesStatus === 'error') return t.pricesError;
+    if (pricesStatus === 'ready' && storePrices[p]) return storePrices[p]!;
+    return p === 'monthly' ? t.priceMonthly : t.priceYearly;
+  };
+
+  const monthlyDisplay = priceForPeriod('monthly');
+  const yearlyDisplay = priceForPeriod('yearly');
+  const pricesReady = pricesStatus === 'ready' && Boolean(storePrices.monthly && storePrices.yearly);
+  const pricesBlocked = nativeBilling && (pricesStatus === 'loading' || pricesStatus === 'error');
 
   return (
     <div
@@ -166,12 +176,16 @@ export function PremiumUpsellSheet({
             ))}
           </ul>
 
+          {pricesStatus === 'error' ? (
+            <p className="mt-3 text-center text-[11px] font-medium text-amber-800">{t.pricesError}</p>
+          ) : null}
+
           <div className="mt-4 grid grid-cols-2 gap-2">
             {(['monthly', 'yearly'] as const).map((p) => (
               <button
                 key={p}
                 type="button"
-                disabled={busy}
+                disabled={busy || pricesBlocked}
                 onClick={() => setPeriod(p)}
                 className={`rounded-2xl border px-3 py-2.5 text-center transition active:scale-[0.99] ${
                   period === p
@@ -201,7 +215,7 @@ export function PremiumUpsellSheet({
           <div className="mt-5 flex flex-col gap-2">
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || pricesBlocked || (nativeBilling && !pricesReady)}
               onClick={() => onUpgrade(period)}
               className="w-full rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 py-3.5 text-[15px] font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99] disabled:opacity-60"
             >

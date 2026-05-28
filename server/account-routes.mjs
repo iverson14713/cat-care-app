@@ -1,0 +1,117 @@
+import { createClient } from '@supabase/supabase-js';
+
+function getEnv(name) {
+  const v = process.env[name];
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function bearerTokenFromAuthHeader(authorization) {
+  const raw = typeof authorization === 'string' ? authorization.trim() : '';
+  if (!raw) return '';
+  const m = raw.match(/^Bearer\s+(.+)$/i);
+  return (m?.[1] || '').trim();
+}
+
+function assertConfigured() {
+  const url = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
+  const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url) {
+    return { ok: false, status: 503, error: 'Missing SUPABASE_URL (or VITE_SUPABASE_URL)', code: 'NO_SUPABASE_URL' };
+  }
+  if (!serviceRoleKey) {
+    return { ok: false, status: 503, error: 'Missing SUPABASE_SERVICE_ROLE_KEY', code: 'NO_SERVICE_ROLE_KEY' };
+  }
+  return { ok: true, url, serviceRoleKey };
+}
+
+async function safeDeleteByCatIds(supabaseAdmin, table, catIds) {
+  if (!Array.isArray(catIds) || catIds.length === 0) return;
+  // best-effort; ignore errors so the auth delete still proceeds
+  try {
+    await supabaseAdmin.from(table).delete().in('cat_id', catIds);
+  } catch (e) {
+    console.warn('[account delete] cleanup failed', table, e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function safeDeleteByUserId(supabaseAdmin, table, userField, userId) {
+  try {
+    await supabaseAdmin.from(table).delete().eq(userField, userId);
+  } catch (e) {
+    console.warn('[account delete] cleanup failed', table, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Delete the currently authenticated user and related data.
+ * Requires Authorization: Bearer <access_token>.
+ */
+export async function deleteAccountPOST({ authorization }) {
+  const cfg = assertConfigured();
+  if (!cfg.ok) return { status: cfg.status, json: { error: cfg.error, code: cfg.code } };
+
+  const token = bearerTokenFromAuthHeader(authorization);
+  if (!token) return { status: 401, json: { error: 'Missing Authorization bearer token', code: 'UNAUTHENTICATED' } };
+
+  const supabaseAdmin = createClient(cfg.url, cfg.serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  const userId = userData?.user?.id;
+  if (userErr || !userId) {
+    return {
+      status: 401,
+      json: { error: userErr?.message || 'Invalid session', code: 'UNAUTHENTICATED' },
+    };
+  }
+
+  console.log('[account delete] start', { userId });
+
+  // 1) Remove user from any shared-care memberships (cats owned by others).
+  await safeDeleteByUserId(supabaseAdmin, 'cat_members', 'user_id', userId);
+
+  // 2) Delete owned cats + dependent rows (best-effort; schema may vary).
+  let ownedCatIds = [];
+  try {
+    const { data: owned, error: ownErr } = await supabaseAdmin.from('cats').select('id').eq('owner_id', userId);
+    if (!ownErr && Array.isArray(owned)) {
+      ownedCatIds = owned.map((r) => r?.id).filter((x) => typeof x === 'string' && x.length > 0);
+    }
+  } catch (e) {
+    console.warn('[account delete] could not list owned cats', e instanceof Error ? e.message : String(e));
+  }
+
+  await safeDeleteByCatIds(supabaseAdmin, 'cat_invite_codes', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'daily_record_photos', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'daily_records', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'monthly_records', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'weight_records', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'care_events', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'weekly_reports', ownedCatIds);
+  await safeDeleteByCatIds(supabaseAdmin, 'cat_members', ownedCatIds);
+  if (ownedCatIds.length > 0) {
+    try {
+      await supabaseAdmin.from('cats').delete().in('id', ownedCatIds);
+    } catch (e) {
+      console.warn('[account delete] cats delete failed', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // 3) Delete user-scoped tables.
+  await safeDeleteByUserId(supabaseAdmin, 'user_reminders', 'user_id', userId);
+  await safeDeleteByUserId(supabaseAdmin, 'user_preferences', 'user_id', userId);
+  await safeDeleteByUserId(supabaseAdmin, 'user_ai_usage', 'user_id', userId);
+  await safeDeleteByUserId(supabaseAdmin, 'profiles', 'id', userId);
+
+  // 4) Finally delete auth user.
+  const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
+  if (delErr) {
+    console.error('[account delete] auth delete failed', delErr.message);
+    return { status: 500, json: { error: delErr.message, code: 'DELETE_FAILED' } };
+  }
+
+  console.log('[account delete] done', { userId });
+  return { status: 200, json: { ok: true } };
+}
+

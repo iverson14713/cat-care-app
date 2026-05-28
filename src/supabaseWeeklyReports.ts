@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 import type { AssistantWeeklyReportJson } from './aiCareAssistant';
 import { normalizeWeeklyReport } from './weeklyReportModel';
 import type { SavedWeeklyReport } from './weeklyReportStorage';
@@ -7,7 +8,7 @@ export async function fetchWeeklyReportsForCat(
   supabase: SupabaseClient,
   catId: string,
   limit = 52
-): Promise<{ data: SavedWeeklyReport[]; error: Error | null }> {
+): Promise<{ data: SavedWeeklyReport[]; error: DbError | null }> {
   const { data, error } = await supabase
     .from('weekly_reports')
     .select('cat_id, week_end, report, saved_at')
@@ -15,7 +16,7 @@ export async function fetchWeeklyReportsForCat(
     .order('week_end', { ascending: false })
     .limit(limit);
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   const rows = (data ?? []) as {
     cat_id: string;
     week_end: string;
@@ -42,7 +43,7 @@ export async function upsertWeeklyReportCloud(
     savedAt: string;
     updatedBy: string;
   }
-): Promise<{ error: Error | null }> {
+): Promise<{ error: DbError | null }> {
   const { error } = await supabase.from('weekly_reports').upsert(
     {
       cat_id: params.catId,
@@ -53,6 +54,6 @@ export async function upsertWeeklyReportCloud(
     },
     { onConflict: 'cat_id,week_end' }
   );
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }

@@ -48,7 +48,7 @@ export async function restorePurchases(): Promise<PurchaseResult> {
   return result;
 }
 
-export function downgradeToFree(): SubscriptionStatus {
-  setSubscriptionStatus('free', { source: null, billingPeriod: null });
+export function downgradeToFree(userId?: string | null): SubscriptionStatus {
+  setSubscriptionStatus('free', { source: null, billingPeriod: null }, userId);
   return 'free';
 }

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 
 export type WeightRow = {
   id: string;
@@ -71,8 +72,8 @@ function prepareWeightUpsertPayload(
   }
 
   const appRecords = Array.from(byDate.values()).sort((a, b) => b.date.localeCompare(a.date));
+  /** Upsert by (cat_id, record_date) — avoids cross-cat id collisions on ON CONFLICT (id). */
   const payload = appRecords.map((r) => ({
-    id: r.id,
     cat_id: catId,
     record_date: r.date,
     weight_kg: r.weight,
@@ -86,14 +87,14 @@ function prepareWeightUpsertPayload(
 export async function fetchWeightRecordsForCat(
   supabase: SupabaseClient,
   catId: string
-): Promise<{ data: AppWeightRecord[]; error: Error | null }> {
+): Promise<{ data: AppWeightRecord[]; error: DbError | null }> {
   const { data, error } = await supabase
     .from('weight_records')
     .select('id, cat_id, record_date, weight_kg, note, updated_at')
     .eq('cat_id', catId)
     .order('record_date', { ascending: false });
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   const rows = (data ?? []) as WeightRow[];
   return {
     data: rows
@@ -111,15 +112,31 @@ export async function upsertWeightRecordsForCat(
   catId: string,
   records: AppWeightRecord[],
   updatedBy: string
-): Promise<{ records: AppWeightRecord[]; error: Error | null }> {
+): Promise<{ records: AppWeightRecord[]; error: DbError | null }> {
   const { payload, appRecords } = prepareWeightUpsertPayload(catId, records, updatedBy);
   if (payload.length === 0) return { records: [], error: null };
 
-  const { error } = await supabase.from('weight_records').upsert(payload, {
-    onConflict: 'id',
-  });
-  if (error) return { records: appRecords, error: new Error(error.message) };
-  return { records: appRecords, error: null };
+  const { data, error } = await supabase
+    .from('weight_records')
+    .upsert(payload, { onConflict: 'cat_id,record_date' })
+    .select('id, record_date, weight_kg, note');
+  if (error) {
+    console.warn('[weight_records upsert]', {
+      catId,
+      code: error.code,
+      message: error.message,
+      rows: payload.length,
+    });
+    return { records: appRecords, error: mapSupabaseErr(error) };
+  }
+  const rows = (data ?? []) as {
+    id: string;
+    record_date: string;
+    weight_kg: number;
+    note: string | null;
+  }[];
+  const synced = rows.length > 0 ? rows.map(rowToApp) : appRecords;
+  return { records: synced, error: null };
 }
 
 /** Merge cloud weights into local list: union by date, cloud wins on same date. */

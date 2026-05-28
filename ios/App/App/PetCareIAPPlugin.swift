@@ -24,6 +24,60 @@ public class PetCareIAPPlugin: CAPPlugin, CAPBridgedPlugin {
         productId == Self.yearlyId ? "yearly" : "monthly"
     }
 
+    private func subscriptionPeriodString(_ unit: Product.SubscriptionPeriod) -> String {
+        switch unit.unit {
+        case .day:
+            return "P\(unit.value)D"
+        case .week:
+            return "P\(unit.value)W"
+        case .month:
+            return "P\(unit.value)M"
+        case .year:
+            return "P\(unit.value)Y"
+        @unknown default:
+            return "P\(unit.value)U"
+        }
+    }
+
+    private func currencyCode(for product: Product) -> String {
+        if #available(iOS 16.0, *) {
+            return product.priceFormatStyle.currencyCode
+        }
+        // iOS 15: Locale.current.currency requires iOS 16+
+        if let code = (Locale.current as NSLocale).currencyCode, !code.isEmpty {
+            return code
+        }
+        return "unknown"
+    }
+
+    private func productDictionary(_ product: Product) -> [String: Any] {
+        let priceNumber = NSDecimalNumber(decimal: product.price).doubleValue
+        let currency = currencyCode(for: product)
+        var dict: [String: Any] = [
+            "productId": product.id,
+            "displayName": product.displayName,
+            "displayPrice": product.displayPrice,
+            "price": priceNumber,
+            "currencyCode": currency,
+            "period": period(for: product.id),
+            "storefrontLocale": Locale.current.identifier,
+        ]
+        if let sub = product.subscription {
+            dict["subscriptionPeriod"] = subscriptionPeriodString(sub.subscriptionPeriod)
+        }
+        NSLog(
+            "[PetCareIAP] product id=%@ name=%@ displayPrice=%@ price=%.4f currency=%@ period=%@ locale=%@",
+            product.id,
+            product.displayName,
+            product.displayPrice,
+            priceNumber,
+            currency,
+            period(for: product.id),
+            Locale.current.identifier
+        )
+        return dict
+    }
+
     private func entitlementPayload(from transaction: Transaction) -> [String: Any] {
         var payload: [String: Any] = [
             "productId": transaction.productID,
@@ -96,13 +150,14 @@ public class PetCareIAPPlugin: CAPPlugin, CAPBridgedPlugin {
         Task {
             do {
                 let products = try await self.loadProducts()
-                let list: [[String: Any]] = products.map { product in
-                    [
-                        "productId": product.id,
-                        "displayPrice": product.displayPrice,
-                        "period": self.period(for: product.id),
-                    ]
+                let foundIds = Set(products.map(\.id))
+                if !foundIds.contains(Self.monthlyId) {
+                    NSLog("[PetCareIAP] WARNING missing monthly product id=%@", Self.monthlyId)
                 }
+                if !foundIds.contains(Self.yearlyId) {
+                    NSLog("[PetCareIAP] WARNING missing yearly product id=%@", Self.yearlyId)
+                }
+                let list: [[String: Any]] = products.map { self.productDictionary($0) }
                 call.resolve(["products": list])
             } catch {
                 call.reject(error.localizedDescription, "PRODUCTS_FAILED", error)

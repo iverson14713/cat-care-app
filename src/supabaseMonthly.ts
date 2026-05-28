@@ -1,18 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 
 export type MonthlyJson = Record<string, unknown>;
 
 export async function fetchMonthlyRecordsForCat(
   supabase: SupabaseClient,
   catId: string
-): Promise<{ data: { monthKey: string; data: MonthlyJson }[]; error: Error | null }> {
+): Promise<{ data: { monthKey: string; data: MonthlyJson }[]; error: DbError | null }> {
   const { data, error } = await supabase
     .from('monthly_records')
     .select('month_key, data')
     .eq('cat_id', catId)
     .order('month_key', { ascending: false });
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   const rows = (data ?? []) as { month_key: string; data: unknown }[];
   return {
     data: rows
@@ -28,7 +29,7 @@ export async function fetchMonthlyRecordsForCat(
 export async function upsertMonthlyRecordCloud(
   supabase: SupabaseClient,
   params: { catId: string; monthKey: string; data: MonthlyJson; updatedBy: string }
-): Promise<{ error: Error | null }> {
+): Promise<{ error: DbError | null }> {
   const { error } = await supabase.from('monthly_records').upsert(
     {
       cat_id: params.catId,
@@ -38,6 +39,6 @@ export async function upsertMonthlyRecordCloud(
     },
     { onConflict: 'cat_id,month_key' }
   );
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }

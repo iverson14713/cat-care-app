@@ -15,26 +15,52 @@ function periodFromEntitlement(ent: PetCareIapEntitlement): BillingPeriod {
 }
 
 /**
- * On iOS launch, sync StoreKit entitlement → local Pro status.
- * Does not downgrade `test` unlocks; only clears Pro when source was App Store.
+ * Sync StoreKit entitlement → this user's local Pro status.
+ * Call only when a user is signed in.
  */
-export async function syncPetCareIapOnLaunch(): Promise<SubscriptionStatus | null> {
-  if (!isNativeIapAvailable()) return null;
+export async function syncPetCareIapForUser(userId: string): Promise<SubscriptionStatus> {
+  const uid = userId.trim();
+  console.log('[subscription] syncPetCareIapForUser start', { userId: uid.slice(0, 8) });
+
+  if (!isNativeIapAvailable()) {
+    const local = getSubscriptionStatus(uid);
+    console.log('[subscription] IAP unavailable — using stored plan', { plan: local });
+    return local;
+  }
 
   const ent = await getActiveIapEntitlement();
+  console.log('[subscription] getEntitlements', {
+    isActive: ent?.isActive ?? false,
+    productId: ent?.productId ?? null,
+    period: ent?.period ?? null,
+  });
+
   if (ent?.isActive && ent.productId) {
-    setSubscriptionStatus('pro', {
-      source: 'app_store',
-      billingPeriod: periodFromEntitlement(ent),
-    });
+    setSubscriptionStatus(
+      'pro',
+      {
+        source: 'app_store',
+        billingPeriod: periodFromEntitlement(ent),
+      },
+      uid
+    );
+    console.log('[subscription] UI plan after IAP sync: pro');
     return 'pro';
   }
 
-  const record = getSubscriptionRecord();
+  const record = getSubscriptionRecord(uid);
   if (record.source === 'app_store' && record.status === 'pro') {
-    setSubscriptionStatus('free', { source: null, billingPeriod: null });
+    setSubscriptionStatus('free', { source: null, billingPeriod: null }, uid);
+    console.log('[subscription] UI plan after IAP sync: free (no active entitlement)');
     return 'free';
   }
 
-  return getSubscriptionStatus();
+  const plan = getSubscriptionStatus(uid);
+  console.log('[subscription] UI plan after IAP sync:', plan, { source: record.source });
+  return plan;
+}
+
+/** @deprecated Use syncPetCareIapForUser(userId) when user is known. */
+export async function syncPetCareIapOnLaunch(): Promise<SubscriptionStatus | null> {
+  return null;
 }

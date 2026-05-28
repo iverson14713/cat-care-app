@@ -1,4 +1,14 @@
-export { SUBSCRIPTION_PRICING, IAP_PRODUCT_IDS, SUBSCRIPTION_STORAGE_KEY } from './constants';
+export {
+  SUBSCRIPTION_PRICING,
+  IAP_PRODUCT_IDS,
+  SUBSCRIPTION_STORAGE_KEY,
+  subscriptionStorageKey,
+} from './constants';
+export {
+  clearSubscriptionStateOnSignOut,
+  runSubscriptionStorageMigrationV2,
+} from './subscriptionStore';
+export { syncPetCareIapForUser, syncPetCareIapOnLaunch } from './petCareIapPlanService';
 export type {
   BillingPeriod,
   PurchaseErrorCode,

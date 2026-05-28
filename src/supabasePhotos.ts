@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { mapSupabaseErr, type DbError } from './supabaseError';
 
 export function getPhotoList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -28,7 +29,7 @@ export async function fetchAllDailyPhotosForCat(
   supabase: SupabaseClient,
   catId: string,
   limit = 400
-): Promise<{ data: DailyPhotosRow[]; error: Error | null }> {
+): Promise<{ data: DailyPhotosRow[]; error: DbError | null }> {
   const { data, error } = await supabase
     .from('daily_record_photos')
     .select('record_date, abnormal_photos, daily_photos')
@@ -36,7 +37,7 @@ export async function fetchAllDailyPhotosForCat(
     .order('record_date', { ascending: false })
     .limit(limit);
 
-  if (error) return { data: [], error: new Error(error.message) };
+  if (error) return { data: [], error: mapSupabaseErr(error) };
   const rows = (data ?? []) as {
     record_date: string;
     abnormal_photos: unknown;
@@ -63,7 +64,7 @@ export async function upsertDailyPhotosCloud(
     dailyPhotos: string[];
     updatedBy: string;
   }
-): Promise<{ error: Error | null }> {
+): Promise<{ error: DbError | null }> {
   const abnormal = getPhotoList(params.abnormalPhotos);
   const daily = getPhotoList(params.dailyPhotos);
   if (abnormal.length === 0 && daily.length === 0) return { error: null };
@@ -78,6 +79,6 @@ export async function upsertDailyPhotosCloud(
     },
     { onConflict: 'cat_id,record_date' }
   );
-  if (error) return { error: new Error(error.message) };
+  if (error) return { error: mapSupabaseErr(error) };
   return { error: null };
 }

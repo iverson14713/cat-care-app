@@ -4,7 +4,13 @@ import { IAP_PRODUCT_IDS } from '../subscription/constants';
 
 export type PetCareIapProduct = {
   productId: string;
+  displayName?: string;
   displayPrice: string;
+  /** Numeric price from StoreKit (storefront currency). */
+  price?: number;
+  currencyCode?: string;
+  subscriptionPeriod?: string;
+  storefrontLocale?: string;
   period: BillingPeriod;
 };
 
