@@ -18,13 +18,24 @@ export default async function handler(req, res) {
     try {
       body = JSON.parse(raw || '{}');
     } catch {
-      sendJsonRes(res, 400, { ok: false, error: 'Invalid JSON body', code: 'INVALID_JSON' });
+      sendJsonRes(res, 400, {
+        ok: false,
+        error: 'Invalid JSON body',
+        code: 'INVALID_REQUEST',
+        message: '請輸入有效的兌換碼',
+      });
       return;
     }
     const { status, json } = await redeemPromoPOST({ authorization, body });
     sendJsonRes(res, status, json);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    sendJsonRes(res, 500, { ok: false, error: msg, code: 'SERVER' });
+    console.error('[promo/redeem] failed', { step: 'handler', userId: null, code: null, error: msg });
+    sendJsonRes(res, 500, {
+      ok: false,
+      error: msg,
+      code: 'UNKNOWN_ERROR',
+      message: '兌換失敗，請稍後再試',
+    });
   }
 }

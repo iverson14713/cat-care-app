@@ -104,7 +104,7 @@ COMMENT ON COLUMN public.profiles.promo_pro_until IS 'Promo Pro access expiry (U
 -- Example admin inserts (run manually in Supabase SQL editor):
 -- INSERT INTO public.promo_codes (code, type, duration_days, bonus_ai_uses, max_redemptions, campaign_name, note)
 -- VALUES
---   ('PETEXPO30', 'pro_trial', 30, 0, 500, '2026 寵物展', '30-day Pro trial'),
+--   ('YOURCODE30', 'pro_trial', 30, 0, 500, 'Campaign name', '30-day Pro trial'),
 --   ('KOL90', 'pro_trial', 90, 0, 200, 'KOL 合作', '90-day Pro trial'),
 --   ('VIP365', 'pro_trial', 365, 0, 50, 'VIP 年度體驗', '365-day Pro trial'),
 --   ('AI10', 'ai_bonus', NULL, 10, 1000, 'AI 加贈活動', '+10 daily AI uses');

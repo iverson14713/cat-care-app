@@ -7,10 +7,11 @@ const copy = {
   zh: {
     title: '推廣碼 / 兌換碼',
     hint: '輸入活動、合作或寵物展提供的兌換碼，可開通 Pro 體驗或加贈 AI 次數。',
-    placeholder: '輸入兌換碼，例如 PETEXPO30',
+    hintPro: '可輸入活動碼加贈 AI 次數，或兌換合作體驗資格。',
+    placeholder: '請輸入兌換碼',
     redeem: '兌換',
     redeeming: '兌換中…',
-    signInHint: '請先登入帳號後再兌換推廣碼。',
+    signInHint: '請先登入後再兌換推廣碼。',
     activeUntil: '活動 Pro 到期日',
     aiBonus: '今日 AI 加贈',
     lastCode: '最近兌換',
@@ -18,7 +19,8 @@ const copy = {
   en: {
     title: 'Promo / redemption code',
     hint: 'Enter a campaign code to unlock Pro trial access or extra AI uses.',
-    placeholder: 'Enter code, e.g. PETEXPO30',
+    hintPro: 'Redeem AI bonus codes, or partner trial codes if eligible.',
+    placeholder: 'Enter promo code',
     redeem: 'Redeem',
     redeeming: 'Redeeming…',
     signInHint: 'Sign in to redeem a promo code.',
@@ -36,6 +38,8 @@ export type PromoRedeemHandlerResult = {
 export type PromoCodePanelProps = {
   lang: Lang;
   isLoggedIn: boolean;
+  /** Current effective plan — adjusts hint for Pro users. */
+  isPro?: boolean;
   busy?: boolean;
   promoProUntil?: string | null;
   promoAiBonus?: number;
@@ -52,6 +56,7 @@ function sanitizePromoCode(raw: string): string {
 export function PromoCodePanel({
   lang,
   isLoggedIn,
+  isPro = false,
   busy = false,
   promoProUntil = null,
   promoAiBonus = 0,
@@ -60,6 +65,7 @@ export function PromoCodePanel({
   onRedeem,
 }: PromoCodePanelProps) {
   const t = copy[lang];
+  const hintText = isPro ? t.hintPro : t.hint;
   const [promoCode, setPromoCode] = useState('');
   const [feedback, setFeedback] = useState<PromoRedeemHandlerResult | null>(null);
   const composingRef = useRef(false);
@@ -111,7 +117,7 @@ export function PromoCodePanel({
       {!embedded ? (
         <>
           <h2 className="text-base font-bold text-stone-900">{t.title}</h2>
-          <p className="mt-1 text-[12px] leading-snug text-stone-500">{t.hint}</p>
+          <p className="mt-1 text-[12px] leading-snug text-stone-500">{hintText}</p>
         </>
       ) : null}
 

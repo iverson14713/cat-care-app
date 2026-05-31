@@ -73,6 +73,7 @@ import {
   promoErrorMessage,
   promoSuccessMessage,
   redeemPromoCode,
+  resolvePromoRedeemMessage,
 } from './supabasePromo';
 import {
   AssistantApiError,
@@ -2203,26 +2204,28 @@ export default function App() {
     async (code: string): Promise<{ ok: boolean; message: string }> => {
       const trimmed = code.trim();
       if (trimmed.length < 3) {
-        const message = promoErrorMessage(lang, 'INVALID_CODE');
+        const message = promoErrorMessage(lang, 'INVALID_REQUEST');
         showToast(message, 'error', { position: 'top' });
         return { ok: false, message };
       }
       if (!supabaseAuth.user?.id) {
-        const message = promoErrorMessage(lang, 'UNAUTHENTICATED');
+        const message = promoErrorMessage(lang, 'NOT_AUTHENTICATED');
         showToast(message, 'error', { position: 'top' });
         return { ok: false, message };
       }
       const session = supabaseAuth.session;
       if (!session?.access_token) {
-        const message = promoErrorMessage(lang, 'UNAUTHENTICATED');
+        const message = promoErrorMessage(lang, 'NOT_AUTHENTICATED');
         showToast(message, 'error', { position: 'top' });
         return { ok: false, message };
       }
       setPromoBusy(true);
       try {
-        const result = await redeemPromoCode(session.access_token, trimmed);
+        const result = await redeemPromoCode(session.access_token, trimmed, {
+          currentPlan: getSubscriptionStatus(supabaseAuth.user.id),
+        });
         if (!result.ok) {
-          const message = promoErrorMessage(lang, result.code);
+          const message = resolvePromoRedeemMessage(lang, result);
           showToast(message, 'error', { position: 'top' });
           return { ok: false, message };
         }
@@ -2237,8 +2240,9 @@ export default function App() {
         const message = promoSuccessMessage(lang, result);
         showToast(message, 'success', { position: 'top' });
         return { ok: true, message };
-      } catch {
-        const message = promoErrorMessage(lang, 'SERVER');
+      } catch (e) {
+        console.error('[promo/redeem] client error', e);
+        const message = promoErrorMessage(lang, 'UNKNOWN_ERROR');
         showToast(message, 'error', { position: 'top' });
         return { ok: false, message };
       } finally {
@@ -6397,6 +6401,7 @@ export default function App() {
       <PromoCodePanel
         lang={lang}
         isLoggedIn={Boolean(supabaseAuth.user)}
+        isPro={effectiveAppPlan === 'pro'}
         busy={promoBusy}
         promoProUntil={promoEntitlementView.promoProUntil}
         promoAiBonus={promoEntitlementView.promoAiBonus}
