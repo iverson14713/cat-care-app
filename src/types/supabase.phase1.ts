@@ -12,6 +12,10 @@ export interface ProfileRow {
   id: string;
   display_name: string;
   avatar_url: string | null;
+  promo_pro_until: string | null;
+  promo_source: string | null;
+  redeemed_code: string | null;
+  promo_ai_bonus: number;
   created_at: string;
   updated_at: string;
 }

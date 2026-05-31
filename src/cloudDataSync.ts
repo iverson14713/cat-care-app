@@ -34,6 +34,8 @@ import {
 import { fetchWeeklyReportsForCat, upsertWeeklyReportCloud } from './supabaseWeeklyReports';
 import { fetchUserAiUsage, upsertUserAiUsage } from './supabaseAiUsage';
 import { fetchUserAiPlan, mergeAiPlan, upsertUserAiPlan, type AiPlan } from './supabaseUserPrefs';
+import { fetchPromoEntitlement } from './supabasePromo';
+import { applyPromoEntitlementToLocal } from './subscription';
 import {
   getOrCreateClientId,
   getAiPlan,
@@ -578,6 +580,18 @@ export async function pullCloudDataIntoLocal(
   if (!usageErr) {
     const mergedDaily = Math.max(cloudUsage?.daily_used ?? 0, localDaily);
     writeLocalAiUsageCount(clientId, usageDate, mergedDaily);
+  }
+
+  const { entitlement, error: promoErr } = await fetchPromoEntitlement(supabase, userId);
+  appendDbError(issues, {
+    table: 'profiles',
+    action: 'select',
+    error: promoErr,
+    source: 'pull',
+    recordKey: 'promo_entitlement',
+  });
+  if (!promoErr) {
+    applyPromoEntitlementToLocal(entitlement, userId);
   }
 
   const localPlan = getAiPlan();

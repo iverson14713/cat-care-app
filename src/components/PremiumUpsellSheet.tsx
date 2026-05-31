@@ -5,6 +5,7 @@ import { SUBSCRIPTION_PRICING } from '../subscription/constants';
 import { isNativeIapAvailable } from '../subscription/iapBridge';
 import { useStoreProductPrices } from '../subscription/useStoreProductPrices';
 import type { BillingPeriod } from '../subscription/types';
+import { PromoCodePanel } from './PromoCodePanel';
 
 type Lang = 'zh' | 'en';
 
@@ -105,6 +106,12 @@ export type PremiumUpsellSheetProps = {
   lang: Lang;
   reason: PremiumUpsellReason;
   busy?: boolean;
+  promoBusy?: boolean;
+  isLoggedIn?: boolean;
+  promoProUntil?: string | null;
+  promoAiBonus?: number;
+  redeemedCode?: string | null;
+  onRedeemPromo?: (code: string) => void | Promise<void>;
   onClose: () => void;
   onUpgrade: (period: BillingPeriod) => void;
   onRestore: () => void;
@@ -115,6 +122,12 @@ export function PremiumUpsellSheet({
   lang,
   reason,
   busy = false,
+  promoBusy = false,
+  isLoggedIn = false,
+  promoProUntil = null,
+  promoAiBonus = 0,
+  redeemedCode = null,
+  onRedeemPromo,
   onClose,
   onUpgrade,
   onRestore,
@@ -229,6 +242,19 @@ export function PremiumUpsellSheet({
             >
               {busy ? t.restoring : t.restore}
             </button>
+            {onRedeemPromo ? (
+              <div className="pt-1">
+                <PromoCodePanel
+                  lang={lang}
+                  isLoggedIn={isLoggedIn}
+                  busy={promoBusy}
+                  promoProUntil={promoProUntil}
+                  promoAiBonus={promoAiBonus}
+                  redeemedCode={redeemedCode}
+                  onRedeem={onRedeemPromo}
+                />
+              </div>
+            ) : null}
             <button
               type="button"
               disabled={busy}

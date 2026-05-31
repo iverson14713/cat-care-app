@@ -10,6 +10,7 @@ import {
   assistVetReportPOST,
   assistWeeklyReportPOST,
 } from './assistant-routes.mjs';
+import { redeemPromoPOST } from './promo-routes.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.join(__dirname, '..');
@@ -58,7 +59,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
     });
     res.end();
@@ -113,6 +114,13 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/assistant/weekly-report') {
       const { status, json } = await assistWeeklyReportPOST(body);
+      sendJson(res, status, json);
+      return;
+    }
+
+    if (url.pathname === '/api/promo/redeem') {
+      const authorization = req.headers.authorization || req.headers.Authorization || '';
+      const { status, json } = await redeemPromoPOST({ authorization, body });
       sendJson(res, status, json);
       return;
     }

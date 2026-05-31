@@ -1,4 +1,5 @@
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../safeStorage';
+import { isPromoProActive } from '../supabasePromo';
 import { getActiveStorageUserId } from '../userStorageScope';
 import {
   GLOBAL_SUBSCRIPTION_KEYS_TO_REMOVE,
@@ -15,6 +16,10 @@ function defaultRecord(status: SubscriptionStatus = 'free'): SubscriptionRecord 
     billingPeriod: null,
     updatedAt: new Date().toISOString(),
     source: null,
+    promoUntil: null,
+    promoSource: null,
+    redeemedCode: null,
+    promoAiBonus: 0,
   };
 }
 
@@ -28,6 +33,10 @@ function parseRecord(raw: string | null): SubscriptionRecord | null {
       billingPeriod: parsed.billingPeriod ?? null,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
       source: parsed.source ?? null,
+      promoUntil: parsed.promoUntil ?? null,
+      promoSource: parsed.promoSource ?? null,
+      redeemedCode: parsed.redeemedCode ?? null,
+      promoAiBonus: Math.max(0, parsed.promoAiBonus ?? 0),
     };
   } catch {
     return null;
@@ -94,13 +103,27 @@ export function getSubscriptionRecord(userId?: string | null): SubscriptionRecor
 }
 
 export function getSubscriptionStatus(userId?: string | null): SubscriptionStatus {
-  const status = getSubscriptionRecord(userId).status;
+  const record = getSubscriptionRecord(userId);
   const uid = resolveUserId(userId);
-  if (!uid && status === 'pro') {
+  if (!uid && record.status === 'pro') {
     console.warn('[subscription] ignored pro without user — treating as free');
     return 'free';
   }
-  return status;
+  if (record.status === 'pro' && record.source === 'promo' && !isPromoProActive(record.promoUntil)) {
+    setSubscriptionStatus(
+      'free',
+      {
+        source: null,
+        promoUntil: null,
+        promoSource: record.promoSource ?? null,
+        redeemedCode: record.redeemedCode ?? null,
+        promoAiBonus: record.promoAiBonus ?? 0,
+      },
+      uid ?? undefined
+    );
+    return 'free';
+  }
+  return record.status;
 }
 
 export function isProSubscriber(userId?: string | null): boolean {
@@ -118,7 +141,14 @@ export function writeSubscriptionRecord(record: SubscriptionRecord, userId?: str
 
 export function setSubscriptionStatus(
   status: SubscriptionStatus,
-  opts?: { source?: PurchaseSource | null; billingPeriod?: SubscriptionRecord['billingPeriod'] },
+  opts?: {
+    source?: PurchaseSource | null;
+    billingPeriod?: SubscriptionRecord['billingPeriod'];
+    promoUntil?: string | null;
+    promoSource?: string | null;
+    redeemedCode?: string | null;
+    promoAiBonus?: number;
+  },
   userId?: string | null
 ): SubscriptionRecord {
   const uid = resolveUserId(userId);
@@ -126,11 +156,17 @@ export function setSubscriptionStatus(
     console.warn('[subscription] skip setSubscriptionStatus — no userId', { status });
     return defaultRecord('free');
   }
+  const prev = getSubscriptionRecord(uid);
   const next: SubscriptionRecord = {
     status,
-    billingPeriod: opts?.billingPeriod ?? null,
+    billingPeriod: opts?.billingPeriod ?? prev.billingPeriod ?? null,
     updatedAt: new Date().toISOString(),
-    source: opts?.source ?? null,
+    source: opts?.source !== undefined ? opts.source : prev.source ?? null,
+    promoUntil: opts?.promoUntil !== undefined ? opts.promoUntil : prev.promoUntil ?? null,
+    promoSource: opts?.promoSource !== undefined ? opts.promoSource : prev.promoSource ?? null,
+    redeemedCode: opts?.redeemedCode !== undefined ? opts.redeemedCode : prev.redeemedCode ?? null,
+    promoAiBonus:
+      opts?.promoAiBonus !== undefined ? Math.max(0, opts.promoAiBonus) : Math.max(0, prev.promoAiBonus ?? 0),
   };
   writeSubscriptionRecord(next, uid);
   console.log('[subscription] setSubscriptionStatus', {

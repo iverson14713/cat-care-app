@@ -57,7 +57,10 @@ import { AiDailyQuotaCard } from './components/AiDailyQuotaCard';
 import { PremiumUpgradeCard } from './components/PremiumUpgradeCard';
 import { PremiumUpsellSheet, type PremiumUpsellReason } from './components/PremiumUpsellSheet';
 import { ProSubscriptionPanel } from './components/ProSubscriptionPanel';
+import { PromoCodePanel } from './components/PromoCodePanel';
 import {
+  applyPromoEntitlementToLocal,
+  getSubscriptionRecord,
   getSubscriptionStatus,
   purchasePro,
   restorePurchases,
@@ -65,6 +68,12 @@ import {
   downgradeToFree,
   type BillingPeriod,
 } from './subscription';
+import {
+  fetchPromoEntitlement,
+  promoErrorMessage,
+  promoSuccessMessage,
+  redeemPromoCode,
+} from './supabasePromo';
 import {
   AssistantApiError,
   type AssistantHealthPayload,
@@ -1712,7 +1721,20 @@ export default function App() {
    * so stale Pro state is not allowed to bleed across accounts.
    */
   const effectiveAppPlan: AppPlan = appPlan;
+  const promoEntitlementView = useMemo(() => {
+    const uid = supabaseAuth.user?.id;
+    if (!uid) {
+      return { promoProUntil: null as string | null, promoAiBonus: 0, redeemedCode: null as string | null };
+    }
+    const record = getSubscriptionRecord(uid);
+    return {
+      promoProUntil: record.promoUntil ?? null,
+      promoAiBonus: record.promoAiBonus ?? 0,
+      redeemedCode: record.redeemedCode ?? null,
+    };
+  }, [supabaseAuth.user?.id, appPlan]);
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
+  const [promoBusy, setPromoBusy] = useState(false);
   const maxDailyPhotos = useMemo(() => getMaxDailyPhotos(appPlan), [appPlan]);
   const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
   const [premiumSheetReason, setPremiumSheetReason] = useState<PremiumUpsellReason>('general');
@@ -2143,7 +2165,7 @@ export default function App() {
   );
   const persistAppPlan = (
     p: AppPlan,
-    meta?: { source?: 'test' | 'restore' | 'app_store' | null; billingPeriod?: BillingPeriod | null }
+    meta?: { source?: 'test' | 'restore' | 'app_store' | 'promo' | null; billingPeriod?: BillingPeriod | null }
   ) => {
     const uid = supabaseAuth.user?.id ?? GUEST_USER_ID;
     if (p === 'free') downgradeToFree(uid);
@@ -2176,6 +2198,47 @@ export default function App() {
       applyCatsState(boot);
     }
   };
+
+  const handleRedeemPromo = useCallback(
+    async (code: string) => {
+      const trimmed = code.trim();
+      if (trimmed.length < 3) {
+        showToast(promoErrorMessage(lang, 'INVALID_CODE'), 'error');
+        return;
+      }
+      if (!supabaseAuth.user?.id) {
+        showToast(promoErrorMessage(lang, 'UNAUTHENTICATED'), 'error');
+        return;
+      }
+      const session = supabaseAuth.session;
+      if (!session?.access_token) {
+        showToast(promoErrorMessage(lang, 'UNAUTHENTICATED'), 'error');
+        return;
+      }
+      setPromoBusy(true);
+      try {
+        const result = await redeemPromoCode(session.access_token, trimmed);
+        if (!result.ok) {
+          showToast(promoErrorMessage(lang, result.code), 'error');
+          return;
+        }
+        applyPromoEntitlementToLocal(result.entitlement, supabaseAuth.user.id);
+        const uid = supabaseAuth.user.id;
+        const plan = getSubscriptionStatus(uid);
+        setAppPlan(plan);
+        setAssistantQuota((prev) => applyLocalAssistantQuota(plan, aiClientId, today, prev));
+        if (plan === 'pro') {
+          void upsertUserAiPlan(supabaseAuth.supabase!, uid, 'pro');
+        }
+        showToast(promoSuccessMessage(lang, result), 'success');
+      } catch {
+        showToast(promoErrorMessage(lang, 'SERVER'), 'error');
+      } finally {
+        setPromoBusy(false);
+      }
+    },
+    [aiClientId, applyLocalAssistantQuota, lang, showToast, supabaseAuth.session, supabaseAuth.supabase, supabaseAuth.user?.id, today]
+  );
 
   const pushAiUsageIfCloud = useCallback(() => {
     const sb = supabaseAuth.supabase;
@@ -2839,16 +2902,38 @@ export default function App() {
   useEffect(() => {
     if (!supabaseAuth.authReady) return;
     const uid = supabaseAuth.user?.id ?? GUEST_USER_ID;
-    const localPlan = getSubscriptionStatus(uid);
-    console.log('[subscription] user session', { userId: uid.slice(0, 8), localPlan });
-    setAppPlan(localPlan);
-    setAssistantQuota((prev) => applyLocalAssistantQuota(localPlan, aiClientId, today, prev));
-    void syncPetCareIapForUser(uid).then((plan) => {
+    let cancelled = false;
+
+    void (async () => {
+      if (supabaseAuth.user && supabaseAuth.supabase) {
+        const { entitlement } = await fetchPromoEntitlement(supabaseAuth.supabase, supabaseAuth.user.id);
+        if (!cancelled) {
+          applyPromoEntitlementToLocal(entitlement, supabaseAuth.user.id);
+        }
+      }
+      if (cancelled) return;
+      const localPlan = getSubscriptionStatus(uid);
+      console.log('[subscription] user session', { userId: uid.slice(0, 8), localPlan });
+      setAppPlan(localPlan);
+      setAssistantQuota((prev) => applyLocalAssistantQuota(localPlan, aiClientId, today, prev));
+      const plan = await syncPetCareIapForUser(uid);
+      if (cancelled) return;
       console.log('[subscription] final UI plan', plan);
       setAppPlan(plan);
       setAssistantQuota((prev) => applyLocalAssistantQuota(plan, aiClientId, today, prev));
-    });
-  }, [supabaseAuth.authReady, supabaseAuth.user?.id, aiClientId, today, applyLocalAssistantQuota]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    supabaseAuth.authReady,
+    supabaseAuth.user?.id,
+    supabaseAuth.supabase,
+    aiClientId,
+    today,
+    applyLocalAssistantQuota,
+  ]);
 
   useEffect(() => {
     safeSetItem(LANG_KEY, lang);
@@ -6301,6 +6386,15 @@ export default function App() {
         onDowngrade={() => persistAppPlan('free')}
         onRestore={() => void handleRestorePurchases()}
       />
+      <PromoCodePanel
+        lang={lang}
+        isLoggedIn={Boolean(supabaseAuth.user)}
+        busy={promoBusy}
+        promoProUntil={promoEntitlementView.promoProUntil}
+        promoAiBonus={promoEntitlementView.promoAiBonus}
+        redeemedCode={promoEntitlementView.redeemedCode}
+        onRedeem={handleRedeemPromo}
+      />
       <p className="mb-4 px-0.5 text-[11px] leading-relaxed text-stone-500">{tr.settingsPlanServerHint}</p>
       {isPetCareDevMode() ? (
         <>
@@ -6995,6 +7089,12 @@ export default function App() {
         lang={lang}
         reason={premiumSheetReason}
         busy={subscriptionBusy}
+        promoBusy={promoBusy}
+        isLoggedIn={Boolean(supabaseAuth.user)}
+        promoProUntil={promoEntitlementView.promoProUntil}
+        promoAiBonus={promoEntitlementView.promoAiBonus}
+        redeemedCode={promoEntitlementView.redeemedCode}
+        onRedeemPromo={handleRedeemPromo}
         onClose={() => setPremiumSheetOpen(false)}
         onUpgrade={(period) => void handlePurchasePro(period)}
         onRestore={() => void handleRestorePurchases()}

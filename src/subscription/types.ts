@@ -3,7 +3,7 @@ export type SubscriptionStatus = 'free' | 'pro';
 
 export type BillingPeriod = 'monthly' | 'yearly';
 
-export type PurchaseSource = 'test' | 'restore' | 'app_store';
+export type PurchaseSource = 'test' | 'restore' | 'app_store' | 'promo';
 
 export type PurchaseResult =
   | { ok: true; status: SubscriptionStatus; source: PurchaseSource; period?: BillingPeriod }
@@ -22,6 +22,11 @@ export type SubscriptionRecord = {
   billingPeriod?: BillingPeriod | null;
   /** ISO date when status last changed locally. */
   updatedAt: string;
-  /** How Pro was activated (test unlock vs restore vs StoreKit). */
+  /** How Pro was activated (test unlock vs restore vs StoreKit vs promo). */
   source?: PurchaseSource | null;
+  /** Promo Pro expiry (ISO). */
+  promoUntil?: string | null;
+  promoSource?: string | null;
+  redeemedCode?: string | null;
+  promoAiBonus?: number;
 };

@@ -122,6 +122,7 @@ export async function deleteAccountPOST({ authorization }) {
   await deleteIfExistsByUserId(supabaseAdmin, 'user_preferences', 'user_id', userId, errors);
   await deleteIfExistsByUserId(supabaseAdmin, 'user_ai_usage', 'user_id', userId, errors);
   await deleteIfExistsByUserId(supabaseAdmin, 'ai_usage', 'user_id', userId, errors);
+  await deleteIfExistsByUserId(supabaseAdmin, 'promo_redemptions', 'user_id', userId, errors);
   await deleteIfExistsByUserId(supabaseAdmin, 'profiles', 'id', userId, errors);
 
   // 3b) Any user-owned cats that might not have been listed due to schema drift.

@@ -6,6 +6,7 @@ import {
   getSubscriptionStatus,
   setSubscriptionStatus,
 } from './subscriptionStore';
+import { clearExpiredPromoIfNeeded } from './promoPlan';
 import type { BillingPeriod, SubscriptionStatus } from './types';
 
 function periodFromEntitlement(ent: PetCareIapEntitlement): BillingPeriod {
@@ -54,6 +55,8 @@ export async function syncPetCareIapForUser(userId: string): Promise<Subscriptio
     console.log('[subscription] UI plan after IAP sync: free (no active entitlement)');
     return 'free';
   }
+
+  clearExpiredPromoIfNeeded(uid);
 
   const plan = getSubscriptionStatus(uid);
   console.log('[subscription] UI plan after IAP sync:', plan, { source: record.source });

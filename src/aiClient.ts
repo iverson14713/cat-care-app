@@ -1,5 +1,5 @@
-﻿import { getSubscriptionStatus, setSubscriptionStatus } from './subscription';
-import { aiUsageStorageKey as scopedAiUsageKey, careBundleCachePrefix } from './userStorageScope';
+﻿import { getPromoAiBonus, getSubscriptionStatus, setSubscriptionStatus } from './subscription';
+import { aiUsageStorageKey as scopedAiUsageKey, careBundleCachePrefix, getActiveStorageUserId } from './userStorageScope';
 
 const CLIENT_KEY = 'cat-ai-client-id';
 
@@ -7,8 +7,10 @@ const CLIENT_KEY = 'cat-ai-client-id';
 export const AI_USAGE_LIMIT_FREE = 3;
 export const AI_USAGE_LIMIT_PRO = 30;
 
-export function getDailyAiLimit(plan: 'free' | 'pro'): number {
-  return plan === 'pro' ? AI_USAGE_LIMIT_PRO : AI_USAGE_LIMIT_FREE;
+export function getDailyAiLimit(plan: 'free' | 'pro', userId?: string | null): number {
+  const base = plan === 'pro' ? AI_USAGE_LIMIT_PRO : AI_USAGE_LIMIT_FREE;
+  const uid = userId ?? getActiveStorageUserId();
+  return base + getPromoAiBonus(uid);
 }
 
 /** localStorage key: ai-usage-{userId}-YYYY-MM-DD (per device + user). */

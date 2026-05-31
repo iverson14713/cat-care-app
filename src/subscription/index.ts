@@ -6,9 +6,15 @@ export {
 } from './constants';
 export {
   clearSubscriptionStateOnSignOut,
+  getSubscriptionRecord,
   runSubscriptionStorageMigrationV2,
 } from './subscriptionStore';
 export { syncPetCareIapForUser, syncPetCareIapOnLaunch } from './petCareIapPlanService';
+export {
+  applyPromoEntitlementToLocal,
+  clearExpiredPromoIfNeeded,
+  getPromoAiBonus,
+} from './promoPlan';
 export type {
   BillingPeriod,
   PurchaseErrorCode,
