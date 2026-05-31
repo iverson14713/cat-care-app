@@ -148,7 +148,7 @@ import { upsertUserAiPlan } from './supabaseUserPrefs';
 import type { CloudSyncPhase } from './cloudSyncTypes';
 import { formatIssuesForUi, logSyncIssueBatch } from './cloudSyncErrors';
 import { upsertMonthlyRecordCloud } from './supabaseMonthly';
-import { upsertWeightRecordsForCat } from './supabaseWeight';
+import { fetchWeightRecordsForCat, upsertWeightRecordsForCat } from './supabaseWeight';
 import { upsertUserReminders } from './supabaseReminders';
 import {
   computeHistoryDateRange,
@@ -240,6 +240,8 @@ import {
   assertStorageOwnerMatches,
   catsStorageKey,
   clearAllLocalDataOnSignOut,
+  GUEST_USER_ID,
+  hardClearAllClientStorage,
   dailyStorageKey,
   listLocalDailyDatesForCat,
   monthlyStorageKey,
@@ -1466,16 +1468,6 @@ function getAllDailyHistory(catId: string) {
         records.push({ date, data });
       }
     }
-    // Legacy daily keys not yet migrated
-    const legacyPrefix = `cat-calendar-daily-${catId}-`;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith(legacyPrefix)) continue;
-      const date = key.slice(legacyPrefix.length);
-      if (records.some((r) => r.date === date)) continue;
-      const data = loadDailyRecord(catId, date);
-      if (data && Object.keys(data).length > 0) records.push({ date, data });
-    }
   } catch (err) {
     storageError('getAllDailyHistory', err);
   }
@@ -1715,8 +1707,11 @@ export default function App() {
   const [customReminderCatId, setCustomReminderCatId] = useState<string>(() => selectedCatId);
   const [aiClientId] = useState(() => bootstrap.aiClientId);
   const [appPlan, setAppPlan] = useState<AppPlan>(() => bootstrap.appPlan);
-  /** Never treat logged-out session as Pro (ignores stale in-memory plan). */
-  const effectiveAppPlan: AppPlan = supabaseAuth.user ? appPlan : 'free';
+  /**
+   * Guests can subscribe via IAP too. We hard-clear storage on sign-out / delete-account,
+   * so stale Pro state is not allowed to bleed across accounts.
+   */
+  const effectiveAppPlan: AppPlan = appPlan;
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const maxDailyPhotos = useMemo(() => getMaxDailyPhotos(appPlan), [appPlan]);
   const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
@@ -1740,13 +1735,6 @@ export default function App() {
 
   const handlePurchasePro = useCallback(
     async (period: BillingPeriod) => {
-      if (!supabaseAuth.user) {
-        showToast(
-          lang === 'zh' ? '請先登入後再訂閱 Pro' : 'Please sign in to subscribe to Pro.',
-          'error'
-        );
-        return;
-      }
       trackEvent('premium_upgrade_click', { source: period });
       setSubscriptionBusy(true);
       const result = await purchasePro(period);
@@ -1755,6 +1743,14 @@ export default function App() {
         persistAppPlan('pro', { source: result.source, billingPeriod: result.period ?? period });
         setPremiumSheetOpen(false);
         showToast(purchaseSuccessMessage(lang), 'success');
+        if (!supabaseAuth.user) {
+          showToast(
+            lang === 'zh'
+              ? '提示：登入後可同步訂閱與資料到其他裝置（可稍後再說）。'
+              : 'Tip: Sign in to sync your subscription and data across devices (optional).',
+            'info'
+          );
+        }
         return;
       }
       if (result.errorCode === 'USER_CANCELLED') return;
@@ -1764,13 +1760,6 @@ export default function App() {
   );
 
   const handleRestorePurchases = useCallback(async () => {
-    if (!supabaseAuth.user) {
-      showToast(
-        lang === 'zh' ? '請先登入後再恢復購買' : 'Please sign in to restore purchases.',
-        'error'
-      );
-      return;
-    }
     setSubscriptionBusy(true);
     const result = await restorePurchases();
     setSubscriptionBusy(false);
@@ -1778,6 +1767,14 @@ export default function App() {
       persistAppPlan('pro', { source: 'restore', billingPeriod: result.period ?? null });
       setPremiumSheetOpen(false);
       showToast(restoreSuccessMessage(lang), 'success');
+      if (!supabaseAuth.user) {
+        showToast(
+          lang === 'zh'
+            ? '提示：登入後可同步訂閱與資料到其他裝置（可稍後再說）。'
+            : 'Tip: Sign in to sync your subscription and data across devices (optional).',
+          'info'
+        );
+      }
       return;
     }
     if (result.errorCode === 'USER_CANCELLED') return;
@@ -2148,11 +2145,7 @@ export default function App() {
     p: AppPlan,
     meta?: { source?: 'test' | 'restore' | 'app_store' | null; billingPeriod?: BillingPeriod | null }
   ) => {
-    const uid = supabaseAuth.user?.id;
-    if (!uid) {
-      setAppPlan('free');
-      return;
-    }
+    const uid = supabaseAuth.user?.id ?? GUEST_USER_ID;
     if (p === 'free') downgradeToFree(uid);
     else
       setSubscriptionStatus(
@@ -2170,12 +2163,12 @@ export default function App() {
     }
     setAssistantQuota((prev) => applyLocalAssistantQuota(p, aiClientId, today, prev));
     const sb = supabaseAuth.supabase;
-    if (sb && uid) {
+    if (sb && supabaseAuth.user?.id) {
       void upsertUserAiPlan(sb, uid, p).then(({ error }) => {
         if (error) console.warn('[user_preferences upsert]', error.message);
       });
     }
-    if (sb && uid) {
+    if (sb && supabaseAuth.user?.id) {
       void reloadCatsFromCloud();
     } else {
       const uidLocal = '';
@@ -2559,7 +2552,77 @@ export default function App() {
     setMonthly(loadMonthlyRecord(catId, mk));
     setWeightRecords(loadWeightRecords(catId));
     setHistoryRefreshKey((k) => k + 1);
+
+    // After login (or cache clear), ensure weights are pulled from Supabase for this cat.
+    const sb = supabaseAuth.supabase;
+    const uid = supabaseAuth.user?.id;
+    if (sb && uid && isCloudCatId(catId)) {
+      void fetchWeightRecordsForCat(sb, catId).then(({ data, error }) => {
+        if (error) {
+          console.warn('[weight_records select]', error.message);
+          return;
+        }
+        safeSetItem(weightStorageKey(catId, uid), JSON.stringify(data));
+        setWeightRecords(data.map((r) => ({ id: r.id, date: r.date, weight: r.weight, note: r.note })));
+      });
+    }
   }, []);
+
+  const clearLocalUserData = useCallback(
+    async (userId: string | null | undefined) => {
+      // Clear persisted caches (must NOT delete Supabase cloud data).
+      clearSubscriptionStateOnSignOut(userId);
+      clearAllLocalDataOnSignOut(userId);
+      await hardClearAllClientStorage();
+
+      // Clear in-memory UI state immediately.
+      setStorageOwnerBlocked(false);
+      setCatsCloudBusy(false);
+      setCatsCloudErr(null);
+      setCloudSyncPhase('idle');
+      setCloudSyncError(null);
+      syncFailureToastShownRef.current = false;
+      cloudAutoRetryCountRef.current = 0;
+      cloudSyncSilentRef.current = false;
+      cloudDailyHydratedRef.current = false;
+
+      setSelectedPhoto(null);
+      setDaily({});
+      setMonthly({});
+      setWeightRecords([]);
+      setReminders([]);
+      setAiCareBundle(null);
+      setAiWeeklyReport(null);
+      setOpenAiErr(null);
+      setWeeklyErr(null);
+      setPremiumSheetOpen(false);
+      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
+
+      // Reset to local-only view (no pets shown).
+      setAppPlan('free');
+      applyCatsState(normalizeAndPersistCats(''));
+    },
+    [aiClientId, applyCatsState, applyLocalAssistantQuota, today]
+  );
+
+  const loadUserCloudData = useCallback(
+    async (userId: string) => {
+      const sb = supabaseAuth.supabase;
+      if (!sb) return;
+      const uid = userId.trim();
+      if (!uid) return;
+
+      // Pull all cloud data into local caches, then refresh state from local.
+      const cloudIds = cats.filter((c) => isCloudCatId(c.id)).map((c) => c.id);
+      const usageDate = todayKey();
+      await pullCloudDataIntoLocal(sb, uid, cloudIds, usageDate);
+      setReminders(loadReminders());
+
+      // Ensure current cat shows cloud weights/daily immediately.
+      reloadSelectedCatFromLocal(selectedCatId);
+    },
+    [cats, reloadSelectedCatFromLocal, selectedCatId, supabaseAuth.supabase]
+  );
 
   const runFullCloudSync = useCallback(
     async (
@@ -2775,13 +2838,7 @@ export default function App() {
 
   useEffect(() => {
     if (!supabaseAuth.authReady) return;
-    const uid = supabaseAuth.user?.id;
-    if (!uid) {
-      console.log('[subscription] no user — UI plan free');
-      setAppPlan('free');
-      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
-      return;
-    }
+    const uid = supabaseAuth.user?.id ?? GUEST_USER_ID;
     const localPlan = getSubscriptionStatus(uid);
     console.log('[subscription] user session', { userId: uid.slice(0, 8), localPlan });
     setAppPlan(localPlan);
@@ -2817,6 +2874,10 @@ export default function App() {
       setStorageOwnerBlocked(false);
       cloudDailyHydratedRef.current = false;
       setActiveStorageUser(null);
+      setSelectedPhoto(null);
+      setDaily({});
+      setMonthly({});
+      setWeightRecords([]);
       const localOnly = normalizeAndPersistCats('');
       applyCatsState(localOnly);
       setPetsBootReady(true);
@@ -2877,7 +2938,8 @@ export default function App() {
       setCatsCloudBusy(false);
       setPetsBootReady(true);
       if (!cancelled) {
-        await runFullCloudSync(merged, cloudList.map((c) => c.id), sb, uid);
+        // After login: pull everything from Supabase. Do NOT push local (local may be empty after clear).
+        await loadUserCloudData(uid);
         if (!cancelled) {
           reloadSelectedCatFromLocal(nextCatId);
         }
@@ -3240,27 +3302,11 @@ export default function App() {
     const { error } = await supabaseAuth.signOut();
     if (error) setAuthFormError(formatAuthErrorMessage(lang, error));
     else {
-      clearSubscriptionStateOnSignOut(signingOutUid);
-      clearAllLocalDataOnSignOut(signingOutUid);
-      setStorageOwnerBlocked(false);
-      setCloudSyncPhase('idle');
-      setCloudSyncError(null);
-      syncFailureToastShownRef.current = false;
-      cloudAutoRetryCountRef.current = 0;
-      cloudSyncSilentRef.current = false;
-      setReminders([]);
-      setAiCareBundle(null);
-      setAiWeeklyReport(null);
-      setOpenAiErr(null);
-      setWeeklyErr(null);
-      setAppPlan('free');
-      setPremiumSheetOpen(false);
-      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
-      console.log('[subscription] signOut complete — UI plan free');
-      applyCatsState(normalizeAndPersistCats(''));
+      await clearLocalUserData(signingOutUid);
+      console.log('[subscription] signOut complete — cleared local caches');
       setAuthMessage(text[lang].authSignedOutOk);
     }
-  }, [supabaseAuth, lang, applyCatsState, text, aiClientId, today, applyLocalAssistantQuota]);
+  }, [supabaseAuth, lang, text, clearLocalUserData]);
 
   const confirmDeleteAccount = useCallback(async () => {
     if (deleteAccountBusy) return;
@@ -3294,23 +3340,7 @@ export default function App() {
       }
 
       // Local cleanup even if signOut fails (user may already be deleted).
-      clearSubscriptionStateOnSignOut(uid);
-      clearAllLocalDataOnSignOut(uid);
-      setStorageOwnerBlocked(false);
-      setCloudSyncPhase('idle');
-      setCloudSyncError(null);
-      syncFailureToastShownRef.current = false;
-      cloudAutoRetryCountRef.current = 0;
-      cloudSyncSilentRef.current = false;
-      setReminders([]);
-      setAiCareBundle(null);
-      setAiWeeklyReport(null);
-      setOpenAiErr(null);
-      setWeeklyErr(null);
-      setAppPlan('free');
-      setPremiumSheetOpen(false);
-      setAssistantQuota((prev) => applyLocalAssistantQuota('free', aiClientId, today, prev));
-      applyCatsState(normalizeAndPersistCats(''));
+      await clearLocalUserData(uid);
 
       await supabaseAuth.signOut();
 

@@ -373,6 +373,81 @@ export function clearAllLocalDataOnSignOut(userId: string | null | undefined): v
   safeRemoveItem('cat-care-display-name');
 }
 
+async function deleteIndexedDbBestEffort(): Promise<void> {
+  try {
+    const idbAny = indexedDB as unknown as {
+      databases?: () => Promise<{ name?: string | null }[]>;
+      deleteDatabase: (name: string) => IDBOpenDBRequest;
+    };
+    const dbs = (await idbAny.databases?.()) ?? [];
+    const names = dbs
+      .map((d) => (typeof d?.name === 'string' ? d.name : ''))
+      .filter((n) => n && n !== '__proto__');
+    await Promise.all(
+      names.map(
+        (name) =>
+          new Promise<void>((resolve) => {
+            try {
+              const req = idbAny.deleteDatabase(name);
+              req.onsuccess = () => resolve();
+              req.onerror = () => resolve();
+              req.onblocked = () => resolve();
+            } catch {
+              resolve();
+            }
+          })
+      )
+    );
+  } catch {
+    // ignore
+  }
+}
+
+async function clearCacheStorageBestEffort(): Promise<void> {
+  try {
+    const c = (globalThis as unknown as { caches?: CacheStorage }).caches;
+    if (!c) return;
+    const keys = await c.keys();
+    await Promise.all(keys.map((k) => c.delete(k)));
+  } catch {
+    // ignore
+  }
+}
+
+async function unregisterServiceWorkersBestEffort(): Promise<void> {
+  try {
+    if (!('serviceWorker' in navigator)) return;
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Hard clear ALL browser storage for this app origin.
+ * Use on sign-out / account deletion to prevent cross-account leakage.
+ */
+export async function hardClearAllClientStorage(): Promise<void> {
+  try {
+    localStorage.clear();
+  } catch {
+    // ignore
+  }
+  try {
+    sessionStorage.clear();
+  } catch {
+    // ignore
+  }
+  await Promise.all([
+    deleteIndexedDbBestEffort(),
+    clearCacheStorageBestEffort(),
+    unregisterServiceWorkersBestEffort(),
+  ]);
+  // Ensure our in-memory active user is reset even if sessionStorage clearing failed.
+  setActiveStorageUser(null);
+}
+
 export function listLocalDailyDatesForCat(catId: string, userId?: string): string[] {
   const uid = normalizeStorageUserId(userId ?? getActiveStorageUserId());
   const prefix = `cat-calendar-daily-${uid}-${catId}-`;

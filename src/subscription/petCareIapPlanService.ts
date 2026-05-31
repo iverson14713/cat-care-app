@@ -16,7 +16,7 @@ function periodFromEntitlement(ent: PetCareIapEntitlement): BillingPeriod {
 
 /**
  * Sync StoreKit entitlement → this user's local Pro status.
- * Call only when a user is signed in.
+ * Works for guests too (userId may be "guest") so purchase is usable without sign-in.
  */
 export async function syncPetCareIapForUser(userId: string): Promise<SubscriptionStatus> {
   const uid = userId.trim();

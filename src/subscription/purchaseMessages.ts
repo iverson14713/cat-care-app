@@ -2,11 +2,15 @@ import type { Lang } from '../lib/lang';
 import type { PurchaseErrorCode } from './types';
 
 export function purchaseSuccessMessage(lang: Lang): string {
-  return lang === 'zh' ? '已開通 Pro 會員' : 'Pro membership is active';
+  return lang === 'zh'
+    ? '已開通 Pro。登入後可同步訂閱與資料到其他裝置（可稍後再說）。'
+    : 'Pro is active. Sign in to sync subscription and data across devices (optional).';
 }
 
 export function restoreSuccessMessage(lang: Lang): string {
-  return lang === 'zh' ? '已恢復 Pro 訂閱' : 'Pro subscription restored';
+  return lang === 'zh'
+    ? '已開通 Pro。登入後可同步訂閱與資料到其他裝置（可稍後再說）。'
+    : 'Pro is active. Sign in to sync subscription and data across devices (optional).';
 }
 
 export function purchaseErrorMessage(lang: Lang, code: PurchaseErrorCode): string {

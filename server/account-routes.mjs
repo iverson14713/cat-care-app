@@ -42,6 +42,22 @@ async function safeDeleteByUserId(supabaseAdmin, table, userField, userId) {
   }
 }
 
+async function deleteIfExistsByUserId(supabaseAdmin, table, userField, userId, errors) {
+  const { error } = await supabaseAdmin.from(table).delete().eq(userField, userId);
+  if (!error) return;
+  // Ignore missing table in case schema differs across envs.
+  if (error.code === '42P01') return;
+  errors.push({ table, message: error.message, code: error.code || null });
+}
+
+async function deleteIfExistsByCatIds(supabaseAdmin, table, catIds, errors) {
+  if (!Array.isArray(catIds) || catIds.length === 0) return;
+  const { error } = await supabaseAdmin.from(table).delete().in('cat_id', catIds);
+  if (!error) return;
+  if (error.code === '42P01') return;
+  errors.push({ table, message: error.message, code: error.code || null });
+}
+
 /**
  * Delete the currently authenticated user and related data.
  * Requires Authorization: Bearer <access_token>.
@@ -68,10 +84,12 @@ export async function deleteAccountPOST({ authorization }) {
 
   console.log('[account delete] start', { userId });
 
-  // 1) Remove user from any shared-care memberships (cats owned by others).
-  await safeDeleteByUserId(supabaseAdmin, 'cat_members', 'user_id', userId);
+  const errors = [];
 
-  // 2) Delete owned cats + dependent rows (best-effort; schema may vary).
+  // 1) Remove user from any shared-care memberships (cats owned by others).
+  await deleteIfExistsByUserId(supabaseAdmin, 'cat_members', 'user_id', userId, errors);
+
+  // 2) Delete owned cats (FK ON DELETE CASCADE removes daily/monthly/weight/photos/weekly/care_events/members).
   let ownedCatIds = [];
   try {
     const { data: owned, error: ownErr } = await supabaseAdmin.from('cats').select('id').eq('owner_id', userId);
@@ -82,27 +100,40 @@ export async function deleteAccountPOST({ authorization }) {
     console.warn('[account delete] could not list owned cats', e instanceof Error ? e.message : String(e));
   }
 
-  await safeDeleteByCatIds(supabaseAdmin, 'cat_invite_codes', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'daily_record_photos', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'daily_records', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'monthly_records', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'weight_records', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'care_events', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'weekly_reports', ownedCatIds);
-  await safeDeleteByCatIds(supabaseAdmin, 'cat_members', ownedCatIds);
+  // Best-effort cleanup for tables that may not cascade in older schemas.
+  await deleteIfExistsByCatIds(supabaseAdmin, 'cat_invite_codes', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'daily_record_photos', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'weekly_reports', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'care_events', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'care_records', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'daily_records', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'monthly_records', ownedCatIds, errors);
+  await deleteIfExistsByCatIds(supabaseAdmin, 'weight_records', ownedCatIds, errors);
+
   if (ownedCatIds.length > 0) {
-    try {
-      await supabaseAdmin.from('cats').delete().in('id', ownedCatIds);
-    } catch (e) {
-      console.warn('[account delete] cats delete failed', e instanceof Error ? e.message : String(e));
+    const { error: catDelErr } = await supabaseAdmin.from('cats').delete().in('id', ownedCatIds);
+    if (catDelErr && catDelErr.code !== '42P01') {
+      errors.push({ table: 'cats', message: catDelErr.message, code: catDelErr.code || null });
     }
   }
 
   // 3) Delete user-scoped tables.
-  await safeDeleteByUserId(supabaseAdmin, 'user_reminders', 'user_id', userId);
-  await safeDeleteByUserId(supabaseAdmin, 'user_preferences', 'user_id', userId);
-  await safeDeleteByUserId(supabaseAdmin, 'user_ai_usage', 'user_id', userId);
-  await safeDeleteByUserId(supabaseAdmin, 'profiles', 'id', userId);
+  await deleteIfExistsByUserId(supabaseAdmin, 'user_reminders', 'user_id', userId, errors);
+  await deleteIfExistsByUserId(supabaseAdmin, 'user_preferences', 'user_id', userId, errors);
+  await deleteIfExistsByUserId(supabaseAdmin, 'user_ai_usage', 'user_id', userId, errors);
+  await deleteIfExistsByUserId(supabaseAdmin, 'ai_usage', 'user_id', userId, errors);
+  await deleteIfExistsByUserId(supabaseAdmin, 'profiles', 'id', userId, errors);
+
+  // 3b) Any user-owned cats that might not have been listed due to schema drift.
+  await deleteIfExistsByUserId(supabaseAdmin, 'cats', 'owner_id', userId, errors);
+
+  if (errors.length > 0) {
+    console.error('[account delete] data cleanup errors', { userId, errors });
+    return {
+      status: 500,
+      json: { error: 'Failed to delete all user data', code: 'DATA_DELETE_FAILED', details: errors },
+    };
+  }
 
   // 4) Finally delete auth user.
   const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(userId);

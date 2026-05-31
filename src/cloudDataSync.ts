@@ -120,8 +120,8 @@ function appendDbError(
   issues.push(issue);
 }
 
-function parseLocalWeightRecords(catId: string): AppWeightRecord[] {
-  const raw = safeGetItem(weightStorageKey(catId));
+function parseLocalWeightRecords(catId: string, userId?: string): AppWeightRecord[] {
+  const raw = safeGetItem(weightStorageKey(catId, userId));
   if (!raw) return [];
   try {
     const p = JSON.parse(raw);
@@ -130,7 +130,7 @@ function parseLocalWeightRecords(catId: string): AppWeightRecord[] {
         table: 'localStorage',
         action: 'select',
         catId,
-        storageKey: weightStorageKey(catId),
+        storageKey: weightStorageKey(catId, userId),
       });
       return [];
     }
@@ -146,7 +146,7 @@ function parseLocalWeightRecords(catId: string): AppWeightRecord[] {
       table: 'localStorage',
       action: 'select',
       catId,
-      storageKey: weightStorageKey(catId),
+      storageKey: weightStorageKey(catId, userId),
       message: e instanceof Error ? e.message : String(e),
     });
     return [];
@@ -511,9 +511,9 @@ export async function pullCloudDataIntoLocal(
       source: 'pull',
     });
     if (!weightErr) {
-      const localWeights = parseLocalWeightRecords(catId);
+      const localWeights = parseLocalWeightRecords(catId, userId);
       const merged = mergeWeightRecords(weightRows, localWeights);
-      safeSetItem(weightStorageKey(catId), JSON.stringify(merged));
+      safeSetItem(weightStorageKey(catId, userId), JSON.stringify(merged));
       weights += merged.length;
     }
 
@@ -650,7 +650,7 @@ export async function pushLocalDataToCloud(
       }
     }
 
-    const parsed = parseLocalWeightRecords(catId);
+    const parsed = parseLocalWeightRecords(catId, userId);
     if (parsed.length > 0) {
       const { error, records } = await upsertWeightRecordsForCat(supabase, catId, parsed, userId);
       appendDbError(issues, {
@@ -663,7 +663,7 @@ export async function pushLocalDataToCloud(
       if (!error) {
         clearWeightsPendingSync(catId);
         if (records.length > 0) {
-          safeSetItem(weightStorageKey(catId), JSON.stringify(records));
+          safeSetItem(weightStorageKey(catId, userId), JSON.stringify(records));
         }
       }
     }

@@ -16,6 +16,7 @@ import { canExportVetPdf, maxVetReportDays } from './vetReportLimits';
 import { applySuccessfulAiUsage, buildLocalAiQuota, remainingAiUsage } from './aiClient';
 import { AiDailyQuotaCard } from './components/AiDailyQuotaCard';
 import { PremiumUpgradeCard } from './components/PremiumUpgradeCard';
+import { useToast } from './context/ToastContext';
 import { exportReportElementAsPdf, exportReportElementAsPng, shareReportText } from './vetReportExport';
 
 type Lang = 'zh' | 'en';
@@ -70,6 +71,13 @@ const copy = {
     share: '分享文字',
     sharedOk: '已複製／分享報告文字',
     shareFail: '無法分享',
+    exportPdfOk: 'PDF 已產生',
+    exportPdfFail: 'PDF 匯出失敗，請稍後再試',
+    exportPngOk: '圖片已產生',
+    exportPngFail: '圖片匯出失敗，請稍後再試',
+    exportBusyPdf: '產生 PDF…',
+    exportBusyPng: '產生圖片…',
+    exportBusyShare: '分享中…',
     exportProOnly: '匯出為 Pro 功能',
     profile: '貓咪基本資料',
     abnormalSummary: '最近異常摘要',
@@ -133,6 +141,13 @@ const copy = {
     share: 'Share text',
     sharedOk: 'Report text copied / shared',
     shareFail: 'Could not share',
+    exportPdfOk: 'PDF ready',
+    exportPdfFail: 'PDF export failed. Please try again.',
+    exportPngOk: 'Image ready',
+    exportPngFail: 'Image export failed. Please try again.',
+    exportBusyPdf: 'Creating PDF…',
+    exportBusyPng: 'Creating image…',
+    exportBusyShare: 'Sharing…',
     exportProOnly: 'Export is a Pro feature',
     profile: 'Profile',
     abnormalSummary: 'Recent concerns',
@@ -224,6 +239,7 @@ export function VetReportPage({
   catSwitcher,
 }: VetReportPageProps) {
   const t = copy[lang];
+  const { showToast } = useToast();
   const isPro = appPlan === 'pro';
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -242,6 +258,10 @@ export function VetReportPage({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiErr, setAiErr] = useState<string | null>(null);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [exportPdfBusy, setExportPdfBusy] = useState(false);
+  const [exportPngBusy, setExportPngBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const exportBusy = exportPdfBusy || exportPngBusy || shareBusy;
   const [rangeClamped, setRangeClamped] = useState(false);
 
   const selectedCat = cats.find((c) => c.id === selectedCatId) ?? cats[0];
@@ -717,50 +737,84 @@ export function VetReportPage({
           ) : null}
           {aiErr && !vetAiQuotaExhausted ? <p className="text-xs text-red-700">{aiErr}</p> : null}
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              disabled={exportBusy}
               onClick={async () => {
-                if (!reportRef.current) return;
+                if (!reportRef.current || exportBusy) return;
                 if (!canExportVetPdf(appPlan)) {
                   onRequestPro?.();
                   return;
                 }
-                await exportReportElementAsPdf(
-                  reportRef.current,
-                  `vet-report-${report.cat.name}-${report.endDate}.pdf`
-                );
+                setExportPdfBusy(true);
+                try {
+                  await exportReportElementAsPdf(
+                    reportRef.current,
+                    `vet-report-${report.cat.name}-${report.endDate}.pdf`
+                  );
+                  showToast(t.exportPdfOk, 'success');
+                } catch {
+                  showToast(t.exportPdfFail, 'error');
+                } finally {
+                  setExportPdfBusy(false);
+                }
               }}
-              className="rounded-xl bg-stone-900 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-stone-800 active:scale-[0.99]"
+              className="min-w-[96px] flex-1 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 py-2.5 text-xs font-bold text-white shadow-sm shadow-orange-200/40 transition hover:from-orange-600 hover:to-amber-600 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {t.exportPdf}
+              {exportPdfBusy ? t.exportBusyPdf : t.exportPdf}
             </button>
             <button
               type="button"
+              disabled={exportBusy}
               onClick={async () => {
-                if (!reportRef.current) return;
+                if (!reportRef.current || exportBusy) return;
                 if (!canExportVetPdf(appPlan)) {
                   onRequestPro?.();
                   return;
                 }
-                await exportReportElementAsPng(
-                  reportRef.current,
-                  `vet-report-${report.cat.name}-${report.endDate}.png`
-                );
+                setExportPngBusy(true);
+                try {
+                  await exportReportElementAsPng(
+                    reportRef.current,
+                    `vet-report-${report.cat.name}-${report.endDate}.png`
+                  );
+                  showToast(t.exportPngOk, 'success');
+                } catch {
+                  showToast(t.exportPngFail, 'error');
+                } finally {
+                  setExportPngBusy(false);
+                }
               }}
-              className="rounded-xl border border-stone-300 bg-white py-2.5 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-stone-50 active:scale-[0.99]"
+              className="min-w-[96px] flex-1 rounded-xl border border-orange-200 bg-white py-2.5 text-xs font-bold text-orange-700 shadow-sm transition hover:bg-orange-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {t.exportPng}
+              {exportPngBusy ? t.exportBusyPng : t.exportPng}
             </button>
             <button
               type="button"
+              disabled={exportBusy}
               onClick={async () => {
-                const ok = await shareReportText(`${t.title} — ${report.cat.name}`, reportPlainText);
-                setExportMsg(ok ? t.sharedOk : t.shareFail);
+                if (exportBusy) return;
+                setShareBusy(true);
+                try {
+                  const ok = await shareReportText(`${t.title} — ${report.cat.name}`, reportPlainText);
+                  if (ok) {
+                    showToast(t.sharedOk, 'success');
+                    setExportMsg(t.sharedOk);
+                  } else {
+                    showToast(t.shareFail, 'error');
+                    setExportMsg(t.shareFail);
+                  }
+                } catch {
+                  showToast(t.shareFail, 'error');
+                  setExportMsg(t.shareFail);
+                } finally {
+                  setShareBusy(false);
+                }
               }}
-              className="rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-xs font-bold text-orange-800"
+              className="min-w-[96px] flex-1 rounded-xl border border-orange-200 bg-white py-2.5 text-xs font-bold text-orange-700 shadow-sm transition hover:bg-orange-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {t.share}
+              {shareBusy ? t.exportBusyShare : t.share}
             </button>
           </div>
           {exportMsg ? <p className="text-center text-xs text-stone-500">{exportMsg}</p> : null}

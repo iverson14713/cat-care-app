@@ -28,8 +28,7 @@ const copy = {
     yearlyLabel: '年訂閱',
     loadingPrices: '方案載入中…',
     pricesError: '暫時無法取得訂閱方案，請稍後再試',
-    guestPlanHint: '登入後可同步訂閱狀態',
-    signInToSubscribe: '請先登入後再訂閱 Pro',
+    guestPlanHint: '可先訂閱 Pro；登入後可把訂閱與資料同步到其他裝置（選用）',
   },
   en: {
     section: 'Subscription',
@@ -51,8 +50,7 @@ const copy = {
     yearlyLabel: 'Yearly',
     loadingPrices: 'Loading plans…',
     pricesError: 'Could not load subscription plans. Please try again later.',
-    guestPlanHint: 'Sign in to sync your subscription',
-    signInToSubscribe: 'Please sign in to subscribe to Pro',
+    guestPlanHint: 'You can subscribe now. Sign in later to sync subscription and data across devices (optional).',
   },
 } as const;
 
@@ -95,8 +93,7 @@ export function ProSubscriptionPanel({
   const pricesReady = pricesStatus === 'ready' && Boolean(storePrices.monthly && storePrices.yearly);
   const pricesBlocked = nativeBilling && (pricesStatus === 'loading' || pricesStatus === 'error');
   const showDevDowngrade = isPetCareDevMode() && !nativeBilling;
-  const displayStatus: SubscriptionStatus = isLoggedIn ? status : 'free';
-  const showUpgradeUi = displayStatus === 'free';
+  const showUpgradeUi = status === 'free';
 
   return (
     <section
@@ -120,7 +117,7 @@ export function ProSubscriptionPanel({
         <p className="text-sm text-stone-700">
           {t.current}：
           <span className="font-bold text-orange-600">
-            {displayStatus === 'pro' ? (
+            {status === 'pro' ? (
               <span className="inline-flex items-center gap-1">
                 <Crown className="inline h-3.5 w-3.5 text-amber-500" aria-hidden />
                 {t.pro}
@@ -181,7 +178,7 @@ export function ProSubscriptionPanel({
             onClick={() => onUpgrade(period)}
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3.5 text-sm font-bold text-white shadow-md shadow-orange-300/40 transition active:scale-[0.99] disabled:opacity-60"
           >
-            {isLoggedIn ? t.upgrade : t.signInToSubscribe}
+            {t.upgrade}
           </button>
         </>
       ) : showDevDowngrade ? (
