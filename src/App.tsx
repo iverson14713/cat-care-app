@@ -2200,27 +2200,31 @@ export default function App() {
   };
 
   const handleRedeemPromo = useCallback(
-    async (code: string) => {
+    async (code: string): Promise<{ ok: boolean; message: string }> => {
       const trimmed = code.trim();
       if (trimmed.length < 3) {
-        showToast(promoErrorMessage(lang, 'INVALID_CODE'), 'error');
-        return;
+        const message = promoErrorMessage(lang, 'INVALID_CODE');
+        showToast(message, 'error', { position: 'top' });
+        return { ok: false, message };
       }
       if (!supabaseAuth.user?.id) {
-        showToast(promoErrorMessage(lang, 'UNAUTHENTICATED'), 'error');
-        return;
+        const message = promoErrorMessage(lang, 'UNAUTHENTICATED');
+        showToast(message, 'error', { position: 'top' });
+        return { ok: false, message };
       }
       const session = supabaseAuth.session;
       if (!session?.access_token) {
-        showToast(promoErrorMessage(lang, 'UNAUTHENTICATED'), 'error');
-        return;
+        const message = promoErrorMessage(lang, 'UNAUTHENTICATED');
+        showToast(message, 'error', { position: 'top' });
+        return { ok: false, message };
       }
       setPromoBusy(true);
       try {
         const result = await redeemPromoCode(session.access_token, trimmed);
         if (!result.ok) {
-          showToast(promoErrorMessage(lang, result.code), 'error');
-          return;
+          const message = promoErrorMessage(lang, result.code);
+          showToast(message, 'error', { position: 'top' });
+          return { ok: false, message };
         }
         applyPromoEntitlementToLocal(result.entitlement, supabaseAuth.user.id);
         const uid = supabaseAuth.user.id;
@@ -2230,9 +2234,13 @@ export default function App() {
         if (plan === 'pro') {
           void upsertUserAiPlan(supabaseAuth.supabase!, uid, 'pro');
         }
-        showToast(promoSuccessMessage(lang, result), 'success');
+        const message = promoSuccessMessage(lang, result);
+        showToast(message, 'success', { position: 'top' });
+        return { ok: true, message };
       } catch {
-        showToast(promoErrorMessage(lang, 'SERVER'), 'error');
+        const message = promoErrorMessage(lang, 'SERVER');
+        showToast(message, 'error', { position: 'top' });
+        return { ok: false, message };
       } finally {
         setPromoBusy(false);
       }

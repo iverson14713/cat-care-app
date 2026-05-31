@@ -248,6 +248,7 @@ export function PremiumUpsellSheet({
                   lang={lang}
                   isLoggedIn={isLoggedIn}
                   busy={promoBusy}
+                  embedded
                   promoProUntil={promoProUntil}
                   promoAiBonus={promoAiBonus}
                   redeemedCode={redeemedCode}
