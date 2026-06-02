@@ -132,7 +132,7 @@ import {
   getMonthlyItemsForPetType,
   type PetType,
 } from './petTypes';
-import { computeStreakStats, streakCopyZh } from './streak';
+import { computeStreakStats, getStreakAchievementUi } from './streak';
 import type { CareEventRow } from './supabaseDaily';
 import {
   careEventCreatedOnLocalDate,
@@ -2025,21 +2025,12 @@ export default function App() {
     });
   }, [history, selectedCat, today]);
 
-  const streakCopy = useMemo(() => {
+  const streakAchievement = useMemo(() => {
     const petName = selectedCat?.name ?? tr.defaultPetName;
-    return lang === 'zh'
-      ? streakCopyZh({ petName, stats: streakStats })
-      : {
-          title:
-            streakStats.currentStreak > 0
-              ? `Streak: ${streakStats.currentStreak} day${streakStats.currentStreak === 1 ? '' : 's'}`
-              : 'Start today',
-          subtitle:
-            streakStats.daysSinceLastRecord != null && streakStats.daysSinceLastRecord > 1
-              ? `${petName} misses your updates.`
-              : `Log today to keep ${petName}'s care on track.`,
-        };
+    return getStreakAchievementUi(lang, petName, streakStats);
   }, [lang, selectedCat?.name, streakStats, tr.defaultPetName]);
+
+  const todayCareComplete = dailyPercent >= 100;
 
   const historyMonthGroups = useMemo(() => {
     const groups: { monthKey: string; records: { date: string; data: DailyRecord }[] }[] = [];
@@ -3799,7 +3790,7 @@ export default function App() {
 
   const quickFillTodayAllNormal = useCallback(() => {
     if (!selectedCat) return;
-    if (dailyPercent >= 100) return;
+    if (todayCareComplete) return;
     if (!confirm(lang === 'zh' ? '是否將今日未填項目設為正常？' : 'Set all unfilled items to normal for today?')) {
       return;
     }
@@ -3819,7 +3810,7 @@ export default function App() {
       position: 'top',
       durationMs: 1800,
     });
-  }, [dailyItemsForPet, dailyPercent, lang, selectedCat, showToast]);
+  }, [dailyItemsForPet, lang, selectedCat, showToast, todayCareComplete]);
 
   const toggleMonthly = (id: string) => {
     setMonthly((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -4217,98 +4208,174 @@ export default function App() {
         ) : null}
       </section>
 
-      <div className="mb-4 rounded-2xl border border-orange-100/90 bg-white px-3.5 py-3 shadow-sm">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-xl">🐾</span>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[15px] font-bold leading-tight text-stone-900">{tr.appTitle}</h1>
-            <p className="truncate text-xs text-stone-600">{selectedCat?.name ?? tr.defaultPetName} · {today}</p>
-            <p className="text-[10px] font-medium tracking-wide text-stone-400">{tr.appSubtitle}</p>
+      <section className="mb-4 overflow-hidden rounded-2xl border border-orange-100/90 bg-white shadow-sm">
+        <div className="px-3.5 py-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-xl">🐾</span>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-[15px] font-bold leading-tight text-stone-900">{tr.appTitle}</h1>
+              <p className="truncate text-xs text-stone-600">{selectedCat?.name ?? tr.defaultPetName} · {today}</p>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="text-lg font-bold tabular-nums text-orange-600">{dailyPercent}%</p>
+              <p className="text-[10px] text-stone-400">
+                {lang === 'zh' ? '今日' : 'Today'} {dailyDone}/{dailyItemsForPet.length}
+              </p>
+            </div>
           </div>
-          <div className="shrink-0 text-right">
-            <p className="text-lg font-bold tabular-nums text-orange-600">{dailyPercent}%</p>
-            <p className="text-[10px] text-stone-400">{dailyDone}/{dailyItemsForPet.length}</p>
+          <div className="mt-2.5">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-stone-500">
+              <span>{tr.todayProgress}</span>
+              <span className="tabular-nums text-orange-600">{dailyPercent}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-orange-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300"
+                style={{ width: `${dailyPercent}%` }}
+              />
+            </div>
           </div>
         </div>
-        <div className="mt-2.5">
-          <div className="mb-1 text-[11px] font-medium text-stone-500">{tr.todayProgress}</div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-orange-100">
-            <div className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300" style={{ width: `${dailyPercent}%` }} />
-          </div>
-        </div>
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-[13px] font-bold text-stone-900">{streakCopy.title}</p>
-            <p className="truncate text-[11px] text-stone-500">{streakCopy.subtitle}</p>
-          </div>
-          <button
-            type="button"
-            onClick={quickFillTodayAllNormal}
-            disabled={dailyPercent >= 100}
-            className="shrink-0 rounded-full bg-stone-100 px-3 py-2 text-[12px] font-bold text-stone-700 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {dailyPercent >= 100 ? (lang === 'zh' ? '今日已完成' : 'Done') : (lang === 'zh' ? '今天一切正常' : 'All normal')}
-          </button>
-        </div>
-      </div>
 
-      <section className="mb-4 rounded-2xl border border-stone-100 bg-white px-3.5 py-3 shadow-sm">
+        <div className="border-t border-orange-50 bg-gradient-to-br from-orange-50/90 via-amber-50/40 to-white px-3.5 py-3">
+          {streakAchievement.badge ? (
+            <span className="mb-2 inline-flex rounded-full bg-orange-500/15 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-orange-800 ring-1 ring-orange-200/80">
+              {streakAchievement.badge}
+            </span>
+          ) : null}
+          {streakAchievement.mode === 'lapsed' ? (
+            <p className="text-[15px] font-bold text-stone-800">
+              {lang === 'zh' ? '📝 想你了' : '📝 We miss you'}
+            </p>
+          ) : streakAchievement.mode === 'empty' ? (
+            <p className="flex items-baseline gap-1.5">
+              <span className="text-xl" aria-hidden>
+                ✨
+              </span>
+              <span className="text-[15px] font-bold text-stone-800">
+                {lang === 'zh' ? '今天開始照顧囉' : 'Start your streak'}
+              </span>
+            </p>
+          ) : (
+            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="text-2xl leading-none" aria-hidden>
+                🔥
+              </span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-orange-700/90">
+                {lang === 'zh' ? '連續照顧' : 'Streak'}
+              </span>
+              <span className="text-3xl font-black tabular-nums leading-none text-orange-600">
+                {streakAchievement.displayDays}
+              </span>
+              <span className="text-lg font-bold text-orange-700">{lang === 'zh' ? '天' : 'days'}</span>
+            </p>
+          )}
+          <p className="mt-1.5 text-[12px] leading-snug text-stone-600">{streakAchievement.encouragement}</p>
+          {streakAchievement.bestStreak > 0 ? (
+            <p className="mt-1 text-[10px] font-medium text-stone-400">
+              {lang === 'zh'
+                ? `最長紀錄：${streakAchievement.bestStreak} 天`
+                : `Best streak: ${streakAchievement.bestStreak} days`}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="border-t border-orange-50 px-3.5 py-3">
+          {todayCareComplete ? (
+            <div
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 py-3 text-sm font-bold text-emerald-800"
+              role="status"
+            >
+              <span className="text-base" aria-hidden>
+                ✅
+              </span>
+              {lang === 'zh' ? '今日已完成' : 'Today complete'}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={quickFillTodayAllNormal}
+              className="flex w-full touch-manipulation items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 py-3.5 text-sm font-bold text-white shadow-md shadow-orange-300/35 transition active:scale-[0.99] active:from-orange-600 active:to-amber-600"
+            >
+              <span className="text-base" aria-hidden>
+                ✨
+              </span>
+              {lang === 'zh' ? '今天一切正常' : 'All normal today'}
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="mb-4 rounded-2xl border border-stone-100 bg-white px-3.5 py-2.5 shadow-sm">
         {(() => {
           const petName = selectedCat?.name ?? tr.defaultPetName;
           const missing = dailyItemsForPet.filter((item) => daily[item.id] !== true);
           const missingLabels = missing.slice(0, 3).map((m) => tr[m.labelKey as keyof typeof tr]);
           const hasAbnormal = abnormalNote.trim().length > 0;
-          const lapsed = (streakStats.daysSinceLastRecord ?? 0) > 1;
+          const lapsed = streakAchievement.mode === 'lapsed';
 
           let statusLabel = lang === 'zh' ? '待完成' : 'To do';
-          let title = lang === 'zh' ? '今日狀態' : 'Today status';
           let desc = '';
 
           if (lapsed) {
             statusLabel = lang === 'zh' ? '想你了' : 'Miss you';
-            desc = lang === 'zh' ? `${petName} 好像在等你回來記錄今天的狀況。` : `${petName} is waiting for your update.`;
-          } else if (!hasAbnormal && dailyPercent >= 100) {
+            desc = lang === 'zh' ? `${petName} 好像在等你回來記錄。` : `${petName} is waiting for your log.`;
+          } else if (!hasAbnormal && todayCareComplete) {
             statusLabel = lang === 'zh' ? '安心' : 'All good';
-            desc = lang === 'zh'
-              ? `今日照護完成，${petName} 狀態穩定。`
-              : `Care completed — ${petName} looks stable today.`;
+            desc =
+              lang === 'zh'
+                ? `${petName} 今天照顧完成，看起來很安心。`
+                : `${petName}'s care is done for today — looking good.`;
           } else if (hasAbnormal) {
             statusLabel = lang === 'zh' ? '需要觀察' : 'Observe';
-            desc = lang === 'zh'
-              ? `${petName} 今天有一項狀況，建議多觀察，必要時可諮詢獸醫。`
-              : `${petName} has something to watch today — observe and consult a vet if needed.`;
+            desc =
+              lang === 'zh'
+                ? `${petName} 今天有一項狀況，建議多觀察。`
+                : `Something to watch today for ${petName}.`;
           } else {
-            statusLabel = lang === 'zh' ? '待完成' : 'To do';
             desc = missingLabels.length
-              ? (lang === 'zh'
-                  ? `還有幾個照護項目等你記錄：${missingLabels.join('、')}`
-                  : `A few items still need logging: ${missingLabels.join(', ')}`)
-              : (lang === 'zh' ? '還有照護項目等你記錄。' : 'A few items still need logging.');
+              ? lang === 'zh'
+                ? `還差：${missingLabels.join('、')}`
+                : `Still need: ${missingLabels.join(', ')}`
+              : lang === 'zh'
+                ? '還有照護項目等你記錄。'
+                : 'A few care items still need logging.';
           }
 
+          const statusEmoji =
+            statusLabel === (lang === 'zh' ? '安心' : 'All good')
+              ? '😌'
+              : statusLabel === (lang === 'zh' ? '需要觀察' : 'Observe')
+                ? '👀'
+                : statusLabel === (lang === 'zh' ? '想你了' : 'Miss you')
+                  ? '📝'
+                  : '✅';
+
           return (
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-stone-50 text-xl">
-                {statusLabel === (lang === 'zh' ? '安心' : 'All good') ? '😌' : statusLabel === (lang === 'zh' ? '需要觀察' : 'Observe') ? '👀' : statusLabel === (lang === 'zh' ? '想你了' : 'Miss you') ? '📝' : '✅'}
-              </div>
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-50 text-lg">
+                {statusEmoji}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-[13px] font-bold text-stone-900">{title}</h2>
-                  <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-bold text-orange-700">
+                  <span className="text-[12px] font-bold text-stone-500">
+                    {lang === 'zh' ? '今日狀態' : 'Today'}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                      statusLabel === (lang === 'zh' ? '安心' : 'All good')
+                        ? 'bg-emerald-50 text-emerald-800'
+                        : statusLabel === (lang === 'zh' ? '需要觀察' : 'Observe')
+                          ? 'bg-amber-50 text-amber-900'
+                          : statusLabel === (lang === 'zh' ? '想你了' : 'Miss you')
+                            ? 'bg-stone-100 text-stone-700'
+                            : 'bg-orange-50 text-orange-800'
+                    }`}
+                  >
                     {statusLabel}
                   </span>
                 </div>
-                <p className="mt-1 text-[12px] leading-snug text-stone-600">{desc}</p>
-                <p className="mt-1 text-[11px] text-stone-400">
-                  {lang === 'zh'
-                    ? `今日完成：${dailyDone}/${dailyItemsForPet.length}（${dailyPercent}%）`
-                    : `Today: ${dailyDone}/${dailyItemsForPet.length} (${dailyPercent}%)`}
-                  {streakStats.bestStreak > 0
-                    ? lang === 'zh'
-                      ? ` · 最長連續：${streakStats.bestStreak} 天`
-                      : ` · Best: ${streakStats.bestStreak}d`
-                    : null}
-                </p>
+                <p className="mt-0.5 truncate text-[12px] leading-snug text-stone-600">{desc}</p>
               </div>
             </div>
           );

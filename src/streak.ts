@@ -93,3 +93,87 @@ export function streakCopyZh(params: {
   return { title: `已連續照顧 ${currentStreak} 天`, subtitle: `保持記錄，越來越好掌握 ${name} 的日常狀況。` };
 }
 
+/** UI-facing streak achievement (Widget-ready; keep logic out of components). */
+export type StreakAchievementUi = {
+  mode: 'lapsed' | 'empty' | 'active';
+  displayDays: number;
+  badge: string | null;
+  encouragement: string;
+  bestStreak: number;
+};
+
+export function getStreakAchievementUi(
+  lang: 'zh' | 'en',
+  petName: string,
+  stats: StreakStats
+): StreakAchievementUi {
+  const name = petName || (lang === 'zh' ? '毛孩' : 'your pet');
+  const { currentStreak, bestStreak, daysSinceLastRecord } = stats;
+
+  if (daysSinceLastRecord != null && daysSinceLastRecord > 1) {
+    return {
+      mode: 'lapsed',
+      displayDays: 0,
+      badge: null,
+      encouragement:
+        lang === 'zh'
+          ? `${name} 好像在等你回來記錄今天的狀況。`
+          : `${name} is waiting for you to log today.`,
+      bestStreak,
+    };
+  }
+
+  if (currentStreak <= 0) {
+    return {
+      mode: 'empty',
+      displayDays: 0,
+      badge: lang === 'zh' ? '開始紀錄' : 'Start logging',
+      encouragement:
+        lang === 'zh'
+          ? `記錄一下 ${name} 今天的照護，累積連續照顧天數。`
+          : `Log ${name}'s care today to start your streak.`,
+      bestStreak,
+    };
+  }
+
+  let badge: string | null = lang === 'zh' ? '連續照護中' : 'On a streak';
+  let encouragement: string;
+
+  if (currentStreak >= 14) {
+    badge = lang === 'zh' ? '穩定照護' : 'Steady care';
+    encouragement =
+      lang === 'zh'
+        ? `太棒了！${name} 已習慣你穩定的照護節奏，很安心。`
+        : `Amazing — ${name} can count on your steady care routine.`;
+  } else if (currentStreak >= 7) {
+    badge = lang === 'zh' ? '已達成' : 'Milestone';
+    encouragement =
+      lang === 'zh'
+        ? `${name} 很安心，你的照護很穩定。`
+        : `${name} feels secure — you're on a great rhythm.`;
+  } else if (currentStreak >= 3) {
+    encouragement =
+      lang === 'zh'
+        ? `照顧越來越穩定，${name} 會更安心。`
+        : `Care is getting steadier — ${name} appreciates it.`;
+  } else if (currentStreak === 1) {
+    encouragement =
+      lang === 'zh'
+        ? `很棒！今天開始一起把 ${name} 的照護記錄維持下去。`
+        : `Great start — keep logging for ${name} today.`;
+  } else {
+    encouragement =
+      lang === 'zh'
+        ? `保持記錄，越來越好掌握 ${name} 的日常狀況。`
+        : `Keep logging to stay in tune with ${name}'s daily needs.`;
+  }
+
+  return {
+    mode: 'active',
+    displayDays: currentStreak,
+    badge,
+    encouragement,
+    bestStreak,
+  };
+}
+
