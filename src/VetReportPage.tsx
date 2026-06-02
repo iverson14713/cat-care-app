@@ -4,6 +4,7 @@ import {
   buildVetReportContextText,
   clampRangeForFree,
   computeVetReportDateRange,
+  loadDailyRecord,
   type VetReportAiSummary,
   type VetReportCatProfile,
   type VetReportDatePreset,
@@ -60,8 +61,8 @@ const copy = {
     secPhotos: '照片',
     secNotes: '備註',
     secAi: 'AI 摘要',
-    generate: '產生報告',
-    aiBtn: 'AI 幫我整理重點',
+    generate: '產生獸醫報告',
+    aiBtn: 'AI 整理獸醫重點',
     aiBusy: 'AI 整理中…',
     aiLimit: '今日 AI 次數已用完（與照護助理、週報共用額度）。可明日再試或升級 Pro。',
     aiQuotaProExhausted: 'Pro 方案今日 30 次 AI 已用完，請明日再試。',
@@ -86,12 +87,18 @@ const copy = {
     noWeight: '此期間無體重紀錄',
     timeline: '時間線',
     noTimeline: '此期間無相關紀錄',
+    emptyReport: '目前沒有足夠紀錄可產生獸醫報告，請先建立每日照護、體重或異常紀錄後再試。',
+    dataRangeHint: '本報告根據可用照護資料產生',
+    daysUnit: '天',
+    shortRangeDisclaimer: '因資料期間尚短，趨勢判斷僅供初步參考，建議持續記錄以提升分析準確度。',
     photos: '照片',
     noPhotos: '此期間無照片',
     aiSection: 'AI 整理重點',
     watchItems: '最近需注意',
+    trend: '趨勢觀察',
     observe: '建議觀察方向',
     vetHandoff: '帶給獸醫的重點',
+    questions: '建議詢問獸醫的問題',
     disclaimer:
       '本報告僅供照護紀錄整理與就診溝通參考，不構成診斷或醫療建議。若症狀持續或惡化，請諮詢獸醫。',
     previewLocked: '升級 Pro 可查看完整報告並匯出',
@@ -130,8 +137,8 @@ const copy = {
     secPhotos: 'Photos',
     secNotes: 'Notes',
     secAi: 'AI summary',
-    generate: 'Generate report',
-    aiBtn: 'AI summarize highlights',
+    generate: 'Generate vet report',
+    aiBtn: 'AI vet highlights',
     aiBusy: 'Summarizing…',
     aiLimit: 'Daily AI uses are used up (shared with the assistant and weekly report). Try tomorrow or upgrade to Pro.',
     aiQuotaProExhausted: 'All 30 Pro AI uses are used for today. Try again tomorrow.',
@@ -156,12 +163,19 @@ const copy = {
     noWeight: 'No weight entries in this period',
     timeline: 'Timeline',
     noTimeline: 'No entries in this period',
+    emptyReport: 'Not enough records to generate a vet report. Log daily care, weight, or abnormal notes first.',
+    dataRangeHint: 'Based on available records',
+    daysUnit: 'days',
+    shortRangeDisclaimer:
+      'With a short data window, trend interpretation is preliminary — keep logging for better accuracy.',
     photos: 'Photos',
     noPhotos: 'No photos in this period',
     aiSection: 'AI highlights',
     watchItems: 'Watch for',
+    trend: 'Trends',
     observe: 'Observation ideas',
     vetHandoff: 'For your vet',
+    questions: 'Questions for your vet',
     disclaimer:
       'This report organizes care logs for visit communication only — not diagnosis or treatment advice.',
     previewLocked: 'Upgrade to Pro for the full report and exports',
@@ -243,7 +257,7 @@ export function VetReportPage({
   const isPro = appPlan === 'pro';
   const reportRef = useRef<HTMLDivElement>(null);
 
-  const [preset, setPreset] = useState<VetReportDatePreset>('7d');
+  const [preset, setPreset] = useState<VetReportDatePreset>('30d');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [sections, setSections] = useState<VetReportSections>({
@@ -297,13 +311,52 @@ export function VetReportPage({
     end = clamped.end;
     setRangeClamped(clamped.clamped);
     const payload = buildVetReport(toProfile(selectedCat), start, end, sections, lang);
-    setReport(payload);
+
+    // Determine the actual available data window based on any saved daily record OR weight entries.
+    const availableDates = new Set<string>();
+    for (const w of payload.weights) availableDates.add(w.date);
+    for (const row of payload.timeline) availableDates.add(row.date);
+    for (const row of payload.noteDays) availableDates.add(row.date);
+    for (const g of payload.photos) availableDates.add(g.date);
+
+    // Also count days where any daily record exists (checkboxes/notes/photos/etc.) even if no timeline.
+    const cur = new Date(`${start}T12:00:00`);
+    const last = new Date(`${end}T12:00:00`);
+    while (cur <= last) {
+      const y = cur.getFullYear();
+      const m = String(cur.getMonth() + 1).padStart(2, '0');
+      const d = String(cur.getDate()).padStart(2, '0');
+      const ymd = `${y}-${m}-${d}`;
+      const obj = loadDailyRecord(payload.cat.id, ymd);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj) && Object.keys(obj).length > 0) {
+        availableDates.add(ymd);
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    if (availableDates.size === 0) {
+      setReport(null);
+      setAiSummary(null);
+      setAiErr(null);
+      showToast(t.emptyReport, 'info', { position: 'top', durationMs: 2600 });
+      return;
+    }
+
+    const sorted = Array.from(availableDates).sort((a, b) => a.localeCompare(b));
+    const actualStart = sorted[0]!;
+    const actualEnd = sorted[sorted.length - 1]!;
+    setReport({ ...payload, startDate: actualStart, endDate: actualEnd });
     setAiSummary(null);
     setAiErr(null);
-  }, [selectedCat, preset, today, customStart, customEnd, isPro, sections, lang, toProfile]);
+  }, [selectedCat, preset, today, customStart, customEnd, isPro, sections, lang, toProfile, showToast, t.emptyReport]);
 
   const runAiSummary = useCallback(async () => {
     if (!report || !selectedCat) return;
+    if (!isPro) {
+      onRequestPro?.();
+      setAiErr(lang === 'zh' ? '升級 Pro 解鎖 AI 獸醫重點。' : 'Upgrade to Pro to unlock AI vet highlights.');
+      return;
+    }
     if (remainingAiUsage(appPlan, clientId, today) <= 0) {
       if (appPlan === 'free') onRequestPro?.();
       setAiErr(t.aiLimit);
@@ -381,6 +434,36 @@ export function VetReportPage({
   const weightSpark = report?.weights.map((w) => ({ date: w.date, weight: w.weight })) ?? [];
   const latestW = report?.weights[0];
   const weightChangeLabel = formatWeightChangeLabel(weightSpark, lang);
+
+  const reportDataDays = useMemo(() => {
+    if (!report) return 0;
+    const start = new Date(`${report.startDate}T12:00:00`);
+    const end = new Date(`${report.endDate}T12:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+    const diff = Math.floor((end.getTime() - start.getTime()) / 86400000);
+    return Math.max(1, diff + 1);
+  }, [report]);
+
+  const vetAiTrendText = useMemo(() => {
+    if (!report) return '';
+    const zh = lang === 'zh';
+    if (!sections.weight || report.weights.length === 0) {
+      return zh ? '體重資料不足，建議持續紀錄以便觀察趨勢。' : 'Not enough weight data — keep logging to observe trends.';
+    }
+    if (!weightChangeLabel || weightChangeLabel === '—') {
+      return zh ? '體重資料不足，建議持續紀錄以便觀察趨勢。' : 'Not enough weight data — keep logging to observe trends.';
+    }
+    return zh
+      ? `本期體重變化：${weightChangeLabel}。若非刻意調整飲食或體重，建議持續觀察食慾、活動力與排泄狀況，必要時可諮詢獸醫。`
+      : `Weight change this period: ${weightChangeLabel}. If unintentional, observe appetite, energy, and elimination; consult your vet if needed.`;
+  }, [lang, report, sections.weight, weightChangeLabel]);
+
+  const vetAiQuestionsText = useMemo(() => {
+    const zh = lang === 'zh';
+    return zh
+      ? '1) 最近異常紀錄是否需要進一步檢查？\n2) 體重變化是否在合理範圍？是否需要調整飲食？\n3) 若異常再次出現，建議優先觀察哪些指標（食慾、喝水、排便、精神）？'
+      : '1) Do any recent concerns warrant further tests?\n2) Is the weight change within a normal range? Any diet adjustments?\n3) If symptoms recur, what should we track first (appetite, water, stool, energy)?';
+  }, [lang]);
 
   const showFreeLock = false;
 
@@ -524,6 +607,10 @@ export function VetReportPage({
               <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
                 {report.startDate} — {report.endDate}
               </p>
+              <p className="mt-1 text-[11px] text-stone-500">
+                {t.dataRangeHint} · {reportDataDays} {t.daysUnit}
+                {reportDataDays < 10 ? ` · ${t.shortRangeDisclaimer}` : ''}
+              </p>
               <h2 className="mt-1 flex items-center gap-2 text-lg font-bold text-stone-900">
                 <span>{report.cat.emoji}</span>
                 {report.cat.name}
@@ -665,12 +752,20 @@ export function VetReportPage({
                     <p className="whitespace-pre-wrap">{aiSummary.watchItems}</p>
                   </div>
                   <div>
+                    <p className="text-[10px] font-bold uppercase text-violet-600">{t.trend}</p>
+                    <p className="whitespace-pre-wrap">{vetAiTrendText}</p>
+                  </div>
+                  <div>
                     <p className="text-[10px] font-bold uppercase text-violet-600">{t.observe}</p>
                     <p className="whitespace-pre-wrap">{aiSummary.observeDirections}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold uppercase text-violet-600">{t.vetHandoff}</p>
                     <p className="whitespace-pre-wrap">{aiSummary.vetHandoff}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-violet-600">{t.questions}</p>
+                    <p className="whitespace-pre-wrap">{vetAiQuestionsText}</p>
                   </div>
                 </div>
               </section>
@@ -701,11 +796,24 @@ export function VetReportPage({
           {sections.ai ? (
             <button
               type="button"
-              disabled={aiLoading || remainingAiUsage(appPlan, clientId, today) <= 0}
-              onClick={() => void runAiSummary()}
+              disabled={aiLoading || (!isPro && exportBusy)}
+              onClick={() => {
+                if (!isPro) {
+                  onRequestPro?.();
+                  return;
+                }
+                void runAiSummary();
+              }}
               className="w-full rounded-2xl border border-violet-200 bg-violet-50 py-3 text-sm font-bold text-violet-800 disabled:opacity-50"
             >
-              {aiLoading ? t.aiBusy : t.aiBtn}
+              <span className="inline-flex items-center gap-2">
+                {aiLoading ? t.aiBusy : t.aiBtn}
+                {!isPro ? (
+                  <span className="rounded bg-violet-200 px-1.5 py-0.5 text-[10px] font-black uppercase text-violet-800">
+                    Pro
+                  </span>
+                ) : null}
+              </span>
             </button>
           ) : null}
           {sections.ai ? (
