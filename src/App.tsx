@@ -1832,6 +1832,8 @@ export default function App() {
   const [sharedCareDisplayNameInput, setSharedCareDisplayNameInput] = useState('');
   const inviteUrlHandledRef = useRef(false);
   const [todayCareFeedOpen, setTodayCareFeedOpen] = useState(false);
+  const [abnormalExpanded, setAbnormalExpanded] = useState(false);
+  const [dailyPhotosExpanded, setDailyPhotosExpanded] = useState(false);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Cat | null>(null);
   const [permanentDeleteBusy, setPermanentDeleteBusy] = useState(false);
   const sharedCareCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4205,9 +4207,181 @@ export default function App() {
     const todayActivityCount = todayCloudFeed.length;
     const hasRealTodayFeed = todayActivityCount > 0;
 
+    const heroPetPhoto = selectedCat?.profilePhoto ?? null;
+
     return (
     <>
-      {renderCatSwitcher()}
+      <section className="mb-4 overflow-hidden rounded-[26px] border border-orange-100/90 bg-white shadow-[0_10px_36px_-14px_rgba(234,88,12,0.28)]">
+        <div className="flex min-w-0">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="px-3.5 pb-2 pt-3.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                    {tr.currentCat}
+                  </p>
+                  <h2 className="truncate text-lg font-bold leading-tight text-stone-900">
+                    {selectedCat?.name ?? tr.defaultPetName}
+                  </h2>
+                </div>
+                <div className="flex shrink-0 flex-row items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={toggleLanguage}
+                    className="touch-manipulation whitespace-nowrap rounded-full bg-stone-100 px-3 py-1.5 text-[12px] font-bold text-stone-700"
+                  >
+                    {tr.langButton}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage('cats')}
+                    className="touch-manipulation whitespace-nowrap rounded-full bg-orange-100 px-3 py-1.5 text-[12px] font-bold text-orange-700"
+                  >
+                    {tr.managePets}
+                  </button>
+                </div>
+              </div>
+              <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
+                {activeCats.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => selectCat(cat.id)}
+                    className={`shrink-0 rounded-full px-3 py-1.5 text-[13px] font-bold transition ${
+                      selectedCat?.id === cat.id ? 'bg-orange-400 text-white' : 'bg-stone-100 text-stone-600'
+                    }`}
+                  >
+                    {cat.emoji} {cat.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-orange-50/90" />
+
+            <div className="px-3.5 py-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-600/90">
+                    {lang === 'zh' ? '今日照護總覽' : 'Today at a glance'}
+                  </p>
+                  <h1 className="mt-0.5 truncate text-[14px] font-bold leading-tight text-stone-900">{tr.appTitle}</h1>
+                  <p className="truncate text-[11px] text-stone-500">
+                    {selectedCat?.name ?? tr.defaultPetName} · {today}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-xl font-bold tabular-nums leading-none text-orange-600">{dailyPercent}%</p>
+                  <p className="mt-0.5 text-[10px] font-medium text-stone-400">
+                    {lang === 'zh' ? '今日' : 'Today'} {dailyDone}/{dailyItemsForPet.length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <div className="h-1.5 overflow-hidden rounded-full bg-orange-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300"
+                    style={{ width: `${dailyPercent}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-start gap-2">
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${todayStatusDisplay.badgeClass}`}
+                >
+                  {todayStatusDisplay.statusLabel}
+                </span>
+                <p className="min-w-0 flex-1 text-[12px] leading-snug text-stone-600">{todayStatusDisplay.desc}</p>
+              </div>
+
+              <div className="mt-2.5 flex items-end justify-between gap-2 border-t border-orange-50/80 pt-2.5">
+                <div className="min-w-0 flex-1">
+                  {streakAchievement.mode === 'active' ? (
+                    <p className="flex flex-wrap items-baseline gap-x-1 gap-y-0 leading-tight">
+                      <span className="text-sm" aria-hidden>
+                        🔥
+                      </span>
+                      <span className="text-[12px] font-bold text-stone-800">
+                        {lang === 'zh' ? '連續' : 'Streak'}
+                      </span>
+                      <span className="text-xl font-black tabular-nums text-orange-600">
+                        {streakAchievement.displayDays}
+                      </span>
+                      <span className="text-[12px] font-bold text-orange-700">{lang === 'zh' ? '天' : 'd'}</span>
+                    </p>
+                  ) : streakAchievement.mode === 'lapsed' ? (
+                    <p className="text-[12px] font-bold text-stone-800">
+                      {lang === 'zh' ? '📝 想你了' : '📝 Miss you'}
+                    </p>
+                  ) : (
+                    <p className="text-[12px] font-bold text-stone-800">
+                      {lang === 'zh' ? '✨ 今天開始照顧' : '✨ Start today'}
+                    </p>
+                  )}
+                  <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-stone-500">
+                    {streakAchievement.encouragement}
+                  </p>
+                  {streakAchievement.bestStreak > 0 ? (
+                    <p className="mt-0.5 text-[10px] text-stone-400">
+                      {lang === 'zh'
+                        ? `最長：${streakAchievement.bestStreak} 天`
+                        : `Best: ${streakAchievement.bestStreak}d`}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="shrink-0 self-end">
+                  {todayCareComplete ? (
+                    <span
+                      className="inline-flex h-8 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-bold text-emerald-800"
+                      role="status"
+                    >
+                      <span aria-hidden>✅</span>
+                      {lang === 'zh' ? '今日已完成' : 'Done'}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={quickFillTodayAllNormal}
+                      className="inline-flex h-10 touch-manipulation items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 text-[13px] font-bold text-white shadow-sm shadow-orange-200/50 transition active:scale-[0.99]"
+                    >
+                      <span className="text-sm" aria-hidden>
+                        ✨
+                      </span>
+                      <span className="whitespace-nowrap">{lang === 'zh' ? '今天一切正常' : 'All normal'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative w-[clamp(118px,32%,168px)] shrink-0 self-stretch border-l border-orange-50/80">
+            {heroPetPhoto ? (
+              <button
+                type="button"
+                onClick={() => setSelectedPhoto(heroPetPhoto)}
+                className="relative block h-full min-h-[188px] w-full overflow-hidden rounded-r-[26px] bg-orange-50"
+              >
+                <img
+                  src={heroPetPhoto}
+                  alt={selectedCat?.name ?? tr.defaultPetName}
+                  className="h-full w-full object-cover"
+                />
+                <div
+                  className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-white via-white/70 to-transparent"
+                  aria-hidden
+                />
+              </button>
+            ) : (
+              <div className="flex h-full min-h-[188px] w-full items-center justify-center rounded-r-[26px] bg-gradient-to-br from-orange-50 via-amber-50/80 to-white text-6xl">
+                <span aria-hidden>{selectedCat?.emoji ?? '🐱'}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       {photoUploadBusy ? (
         <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-orange-100 bg-white/95 px-3 py-2.5 text-[12px] font-medium text-stone-600 shadow-sm backdrop-blur-sm animate-fade-in">
@@ -4216,32 +4390,39 @@ export default function App() {
         </div>
       ) : null}
 
-      <section className="mb-5 overflow-hidden rounded-3xl border border-amber-100 bg-amber-50/60 shadow-sm">
+      <section className="mb-4 overflow-hidden rounded-2xl border border-amber-100 bg-amber-50/50 shadow-sm">
         <button
           type="button"
           onClick={() => setTodayCareFeedOpen((open) => !open)}
-          className="flex w-full items-center gap-3 p-4 text-left transition active:bg-amber-100/50"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left transition active:bg-amber-100/40"
           aria-expanded={todayCareFeedOpen}
         >
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-bold text-stone-900">{tr.sharedCareTodayFeedTitle}</h2>
-            <p className="mt-0.5 text-xs text-stone-500">
-              {todayCareFeedOpen
-                ? tr.sharedCareTodayFeedCollapse
-                : hasRealTodayFeed
-                  ? `${todayActivityCount} ${tr.sharedCareTodayFeedCount} · ${tr.sharedCareTodayFeedTap}`
-                  : tr.sharedCareTodayFeedTap}
+            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0 leading-tight">
+              <span className="text-[13px] font-bold text-stone-900">{tr.sharedCareTodayFeedTitle}</span>
+              {todayCareFeedOpen ? (
+                <span className="text-[11px] text-stone-400">{tr.sharedCareTodayFeedCollapse}</span>
+              ) : (
+                <>
+                  {hasRealTodayFeed ? (
+                    <span className="text-[11px] font-semibold text-orange-700">
+                      {todayActivityCount} {tr.sharedCareTodayFeedCount}
+                    </span>
+                  ) : null}
+                  <span className="text-[11px] text-stone-400">{tr.sharedCareTodayFeedTap}</span>
+                </>
+              )}
             </p>
           </div>
           <span
-            className={`shrink-0 text-stone-400 transition-transform duration-200 ${todayCareFeedOpen ? 'rotate-180' : ''}`}
+            className={`shrink-0 text-[10px] text-stone-400 transition-transform duration-200 ${todayCareFeedOpen ? 'rotate-180' : ''}`}
             aria-hidden
           >
             ▼
           </span>
         </button>
         {todayCareFeedOpen ? (
-          <div className="border-t border-amber-100/80 px-4 pb-4 pt-1">
+          <div className="border-t border-amber-100/80 px-3 pb-3 pt-1">
             {!hasRealTodayFeed ? (
               <p className="text-sm text-stone-500">{tr.sharedCareTodayFeedEmpty}</p>
             ) : (
@@ -4257,102 +4438,6 @@ export default function App() {
             )}
           </div>
         ) : null}
-      </section>
-
-      <section className="mb-4 rounded-2xl border border-orange-100/90 bg-white px-3.5 py-3 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-600/90">
-              {lang === 'zh' ? '今日照護總覽' : 'Today at a glance'}
-            </p>
-            <h1 className="mt-0.5 truncate text-[15px] font-bold leading-tight text-stone-900">{tr.appTitle}</h1>
-            <p className="truncate text-xs text-stone-500">
-              {selectedCat?.name ?? tr.defaultPetName} · {today}
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-xl font-bold tabular-nums leading-none text-orange-600">{dailyPercent}%</p>
-            <p className="mt-0.5 text-[10px] font-medium text-stone-400">
-              {lang === 'zh' ? '今日' : 'Today'} {dailyDone}/{dailyItemsForPet.length}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-2">
-          <div className="h-1.5 overflow-hidden rounded-full bg-orange-100">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300"
-              style={{ width: `${dailyPercent}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="mt-2 flex items-start gap-2">
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${todayStatusDisplay.badgeClass}`}
-          >
-            {todayStatusDisplay.statusLabel}
-          </span>
-          <p className="min-w-0 flex-1 text-[12px] leading-snug text-stone-600">{todayStatusDisplay.desc}</p>
-        </div>
-
-        <div className="mt-2.5 flex items-end justify-between gap-3 border-t border-orange-50/80 pt-2.5">
-          <div className="min-w-0 flex-1">
-            {streakAchievement.mode === 'active' ? (
-              <p className="flex flex-wrap items-baseline gap-x-1 gap-y-0 leading-tight">
-                <span className="text-sm" aria-hidden>
-                  🔥
-                </span>
-                <span className="text-[12px] font-bold text-stone-800">
-                  {lang === 'zh' ? '連續' : 'Streak'}
-                </span>
-                <span className="text-xl font-black tabular-nums text-orange-600">
-                  {streakAchievement.displayDays}
-                </span>
-                <span className="text-[12px] font-bold text-orange-700">{lang === 'zh' ? '天' : 'd'}</span>
-              </p>
-            ) : streakAchievement.mode === 'lapsed' ? (
-              <p className="text-[12px] font-bold text-stone-800">{lang === 'zh' ? '📝 想你了' : '📝 Miss you'}</p>
-            ) : (
-              <p className="text-[12px] font-bold text-stone-800">
-                {lang === 'zh' ? '✨ 今天開始照顧' : '✨ Start today'}
-              </p>
-            )}
-            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-stone-500">
-              {streakAchievement.encouragement}
-            </p>
-            {streakAchievement.bestStreak > 0 ? (
-              <p className="mt-0.5 text-[10px] text-stone-400">
-                {lang === 'zh'
-                  ? `最長：${streakAchievement.bestStreak} 天`
-                  : `Best: ${streakAchievement.bestStreak}d`}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="shrink-0 self-end">
-            {todayCareComplete ? (
-              <span
-                className="inline-flex h-8 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-bold text-emerald-800"
-                role="status"
-              >
-                <span aria-hidden>✅</span>
-                {lang === 'zh' ? '今日已完成' : 'Done'}
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={quickFillTodayAllNormal}
-                className="inline-flex h-10 touch-manipulation items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 text-[13px] font-bold text-white shadow-sm shadow-orange-200/50 transition active:scale-[0.99]"
-              >
-                <span className="text-sm" aria-hidden>
-                  ✨
-                </span>
-                <span className="whitespace-nowrap">{lang === 'zh' ? '今天一切正常' : 'All normal'}</span>
-              </button>
-            )}
-          </div>
-        </div>
       </section>
 
       <section className="mb-4">
@@ -4380,39 +4465,84 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold">{tr.abnormalRecord}</h2>
-            <p className="text-sm text-stone-500">{tr.abnormalDesc}</p>
+      <section className="mb-5 rounded-3xl bg-white p-4 shadow-sm">
+        {!abnormalExpanded ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-bold text-stone-900">{tr.abnormalRecord}</h2>
+              <p className="mt-0.5 text-[13px] text-stone-600">
+                {abnormalNote.trim()
+                  ? lang === 'zh'
+                    ? `已有異常紀錄：${abnormalNote.trim().slice(0, 36)}${abnormalNote.trim().length > 36 ? '…' : ''}`
+                    : `Logged: ${abnormalNote.trim().slice(0, 36)}${abnormalNote.trim().length > 36 ? '…' : ''}`
+                  : lang === 'zh'
+                    ? '今天沒有異常 👍'
+                    : 'No concerns today 👍'}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage('assistant')}
+                className="flex touch-manipulation items-center gap-1 rounded-lg bg-violet-50 px-2 py-1.5 text-[11px] font-bold text-violet-800 ring-1 ring-violet-100"
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} aria-hidden />
+                <span className="whitespace-nowrap">{tr.moreAssistant}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAbnormalExpanded(true)}
+                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700"
+              >
+                {lang === 'zh' ? '新增異常' : 'Add note'}
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setPage('assistant')}
-            className="flex shrink-0 touch-manipulation items-center gap-1.5 rounded-xl bg-violet-50 px-3 py-2 text-[12px] font-bold text-violet-800 ring-1 ring-violet-100 transition active:scale-[0.98] active:bg-violet-100"
-          >
-            <Sparkles className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
-            <span className="whitespace-nowrap">{tr.moreAssistant}</span>
-          </button>
-        </div>
-
-        <textarea
-          value={abnormalNote}
-          onChange={(e) => updateDailyText('abnormalNote', e.target.value)}
-          placeholder={tr.abnormalPlaceholder}
-          className="min-h-28 w-full resize-none rounded-2xl border border-red-100 bg-red-50 p-4 text-sm outline-none focus:border-red-300"
-        />
-
-        {abnormalNote.trim() ? (
-          <p className="mt-2 text-sm font-medium text-red-600">{tr.abnormalSaved}</p>
         ) : (
-          <p className="mt-2 text-sm text-stone-400">{tr.noAbnormal}</p>
-        )}
+          <>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-bold">{tr.abnormalRecord}</h2>
+                <p className="text-sm text-stone-500">{tr.abnormalDesc}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage('assistant')}
+                  className="flex touch-manipulation items-center gap-1.5 rounded-xl bg-violet-50 px-3 py-2 text-[12px] font-bold text-violet-800 ring-1 ring-violet-100 transition active:scale-[0.98] active:bg-violet-100"
+                >
+                  <Sparkles className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                  <span className="whitespace-nowrap">{tr.moreAssistant}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAbnormalExpanded(false)}
+                  className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-[11px] font-bold text-stone-600"
+                >
+                  {lang === 'zh' ? '收合' : 'Collapse'}
+                </button>
+              </div>
+            </div>
 
-        {renderPhotoSection(tr.abnormalPhotos, tr.abnormalPhotosDesc, abnormalPhotos, 'abnormalPhotos', 'red')}
+            <textarea
+              value={abnormalNote}
+              onChange={(e) => updateDailyText('abnormalNote', e.target.value)}
+              placeholder={tr.abnormalPlaceholder}
+              className="min-h-28 w-full resize-none rounded-2xl border border-red-100 bg-red-50 p-4 text-sm outline-none focus:border-red-300"
+            />
+
+            {abnormalNote.trim() ? (
+              <p className="mt-2 text-sm font-medium text-red-600">{tr.abnormalSaved}</p>
+            ) : (
+              <p className="mt-2 text-sm text-stone-400">{tr.noAbnormal}</p>
+            )}
+
+            {renderPhotoSection(tr.abnormalPhotos, tr.abnormalPhotosDesc, abnormalPhotos, 'abnormalPhotos', 'red')}
+          </>
+        )}
       </section>
 
-      <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
+      <section className="mb-5 rounded-3xl bg-white p-4 shadow-sm">
         <div className="mb-3">
           <h2 className="text-lg font-bold">{tr.dailyNote}</h2>
           <p className="text-sm text-stone-500">{tr.dailyNoteDesc}</p>
@@ -4425,7 +4555,63 @@ export default function App() {
           className="min-h-24 w-full resize-none rounded-2xl border border-stone-100 bg-stone-50 p-4 text-sm outline-none focus:border-orange-300"
         />
 
-        {renderPhotoSection(tr.dailyPhotos, tr.dailyPhotosDesc, dailyPhotos, 'dailyPhotos', 'orange')}
+        {!dailyPhotosExpanded ? (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-orange-50/50 px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-bold text-stone-800">{tr.dailyPhotos}</p>
+              {dailyPhotos.length > 0 ? (
+                <div className="mt-2 flex gap-1.5 overflow-x-auto">
+                  {dailyPhotos.slice(0, 4).map((photo, index) => (
+                    <button
+                      key={`daily-thumb-${index}`}
+                      type="button"
+                      onClick={() => setSelectedPhoto(photo)}
+                      className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-orange-100"
+                    >
+                      <img src={photo} alt="" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                  {dailyPhotos.length > 4 ? (
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white text-[11px] font-bold text-stone-500">
+                      +{dailyPhotos.length - 4}
+                    </span>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-0.5 text-[12px] text-stone-500">
+                  {lang === 'zh' ? '記錄今日可愛瞬間' : 'Capture a moment from today'}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setDailyPhotosExpanded(true)}
+              className="shrink-0 rounded-xl border border-orange-200 bg-white px-3 py-2 text-[12px] font-bold text-orange-700"
+            >
+              {dailyPhotos.length > 0
+                ? lang === 'zh'
+                  ? '管理照片'
+                  : 'Manage'
+                : lang === 'zh'
+                  ? '新增'
+                  : 'Add'}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[13px] font-bold text-stone-800">{tr.dailyPhotos}</p>
+              <button
+                type="button"
+                onClick={() => setDailyPhotosExpanded(false)}
+                className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-bold text-stone-600"
+              >
+                {lang === 'zh' ? '收合' : 'Collapse'}
+              </button>
+            </div>
+            {renderPhotoSection(tr.dailyPhotos, tr.dailyPhotosDesc, dailyPhotos, 'dailyPhotos', 'orange')}
+          </div>
+        )}
       </section>
 
       <section className="mb-5 rounded-3xl bg-white p-5 shadow-sm">
@@ -7006,14 +7192,14 @@ export default function App() {
           </div>
         ) : null}
         <nav
-          className="mb-4 select-none rounded-3xl border border-orange-100/90 bg-white p-2.5 shadow-[0_14px_44px_-16px_rgba(234,88,12,0.45)]"
+          className="mb-3 select-none rounded-3xl border border-orange-100/90 bg-white p-2 shadow-[0_12px_38px_-16px_rgba(234,88,12,0.42)]"
           aria-label={lang === 'zh' ? '主要功能' : 'Main'}
         >
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2">
             {MAIN_TAB_ROWS.map((row, rowIndex) => (
               <div
                 key={rowIndex}
-                className={`grid grid-cols-3 gap-2 ${rowIndex > 0 ? 'border-t border-orange-100/90 pt-2.5' : ''}`}
+                className={`grid grid-cols-3 gap-1.5 ${rowIndex > 0 ? 'border-t border-orange-100/90 pt-2' : ''}`}
               >
               {row.map((tab) => {
                 const moreActive = tab.id === 'more' && MORE_SUB_PAGES.includes(page);
@@ -7027,29 +7213,29 @@ export default function App() {
                     onClick={() => setPage(tab.id)}
                     aria-current={active ? 'page' : undefined}
                     aria-label={label}
-                    className={`relative flex min-h-[5rem] touch-manipulation flex-col items-center justify-center gap-1.5 rounded-2xl px-1 pb-3 pt-2.5 transition-all duration-200 ease-out active:scale-[0.97] ${
+                    className={`relative flex min-h-[4.25rem] touch-manipulation flex-col items-center justify-center gap-1 rounded-xl px-1 pb-2.5 pt-2 transition-all duration-200 ease-out active:scale-[0.97] ${
                       active
-                        ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/40 ring-2 ring-orange-300/70'
+                        ? 'bg-orange-500 text-white shadow-md shadow-orange-500/35 ring-2 ring-orange-300/70'
                         : 'border border-stone-200/90 bg-stone-50 text-stone-800 shadow-sm hover:border-orange-200 hover:bg-orange-50/80'
                     }`}
                   >
                     <span
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors ${
                         active ? 'bg-white/20 text-white' : 'bg-white text-orange-600 shadow-sm ring-1 ring-orange-100/80'
                       }`}
                       aria-hidden
                     >
-                      <TabIcon className="h-6 w-6" strokeWidth={active ? 2.5 : 2.15} />
+                      <TabIcon className="h-5 w-5" strokeWidth={active ? 2.5 : 2.15} />
                     </span>
                     <span
-                      className={`max-w-full px-0.5 text-center text-[15px] leading-tight tracking-wide ${
+                      className={`max-w-full px-0.5 text-center text-[13px] leading-tight tracking-wide ${
                         active ? 'font-extrabold text-white' : 'font-bold text-stone-800'
                       }`}
                     >
                       {label}
                     </span>
                     <span
-                      className={`absolute inset-x-4 bottom-1.5 h-1 rounded-full transition-all duration-200 ${
+                      className={`absolute inset-x-3 bottom-1 h-0.5 rounded-full transition-all duration-200 ${
                         active ? 'bg-white/95 shadow-sm' : 'h-0 opacity-0'
                       }`}
                       aria-hidden
@@ -7062,28 +7248,31 @@ export default function App() {
           </div>
         </nav>
 
-        {appPlan === 'pro' ? (
-          <div className="mb-3 flex justify-center">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 px-3.5 py-1.5 text-[11px] font-bold tracking-wide text-white shadow-md shadow-orange-300/40">
-              <Crown className="h-3.5 w-3.5 shrink-0 text-amber-100" strokeWidth={2.5} aria-hidden />
-              {tr.navProBadge}
-            </span>
-          </div>
-        ) : null}
-
         {supabaseAuth.configured && supabaseAuth.authReady && supabaseAuth.user ? (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2.5 text-[12px] text-stone-700 shadow-sm">
-            <span>
-              <span className="font-bold text-stone-500">{tr.authLoggedInStrip}</span>{' '}
-              <span className="font-semibold text-orange-800">{authDisplayLabel}</span>
-            </span>
+          <div className="mb-2.5 flex items-center justify-between gap-2 rounded-2xl border border-orange-100/90 bg-white px-2.5 py-1.5 text-[12px] shadow-sm">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="truncate font-semibold text-stone-800">{authDisplayLabel}</span>
+              {appPlan === 'pro' ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white shadow-sm shadow-orange-200/50">
+                  <Crown className="h-3 w-3 shrink-0 text-amber-100" strokeWidth={2.5} aria-hidden />
+                  {tr.navProBadge}
+                </span>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => void handleAuthSignOut()}
-              className="shrink-0 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-bold text-stone-600"
+              className="shrink-0 rounded-lg border border-orange-100 bg-orange-50/80 px-2 py-1 text-[11px] font-bold text-orange-800"
             >
               {tr.authSignOut}
             </button>
+          </div>
+        ) : appPlan === 'pro' ? (
+          <div className="mb-2.5 flex justify-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 px-3 py-1 text-[10px] font-bold tracking-wide text-white shadow-sm shadow-orange-200/50">
+              <Crown className="h-3 w-3 shrink-0 text-amber-100" strokeWidth={2.5} aria-hidden />
+              {tr.navProBadge}
+            </span>
           </div>
         ) : null}
 
